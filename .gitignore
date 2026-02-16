@@ -42,3 +42,4 @@ node_modules
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+OI_APP_Assets.xlsx
