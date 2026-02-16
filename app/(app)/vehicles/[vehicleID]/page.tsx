@@ -1,18 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 /* =========================
    Supabase client
 ========================= */
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createSupabaseBrowser();
 
 /* =========================
    Types
@@ -44,8 +41,10 @@ type VehiclePMRecord = {
 
 type MaintenanceRequestPreviewRow = {
   id: string;
+  vehicle_id: string;
   created_at: string;
   status: string | null;
+  urgency: string | null;
   system_affected: string | null;
   description: string | null;
 };
@@ -225,6 +224,7 @@ export default function VehicleDetailPage() {
   const assetParam = (searchParams.get("asset") || "").trim();
   const plateParam = (searchParams.get("plate") || "").trim();
   const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
+  const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(true);
@@ -376,16 +376,20 @@ export default function VehicleDetailPage() {
     let alive = true;
 
     (async () => {
+      setRequestPreviewError(null);
       const { data, error } = await supabase
         .from("maintenance_requests")
-        .select("id,created_at,status,system_affected,description")
+        .select("id, created_at, status, urgency, system_affected, description, vehicle_id")
         .eq("vehicle_id", params.vehicleID)
         .order("created_at", { ascending: false })
         .limit(4);
 
       if (!alive) return;
       if (error || !data) {
-        if (error) console.error("Vehicle preview requests load error:", error);
+        if (error) {
+          console.error("Vehicle preview requests load error:", error);
+          setRequestPreviewError(error.message);
+        }
         setRequestPreviewRows([]);
         return;
       }
@@ -582,7 +586,11 @@ export default function VehicleDetailPage() {
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {historyPreview.length === 0 ? (
+          {requestPreviewError ? (
+            <div style={{ opacity: 0.9, color: "#ff9d9d" }}>
+              Failed to load maintenance requests preview.
+            </div>
+          ) : historyPreview.length === 0 ? (
             <div style={{ opacity: 0.75 }}>
               No maintenance requests yet.
             </div>
