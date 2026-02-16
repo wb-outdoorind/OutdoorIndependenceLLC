@@ -51,35 +51,63 @@ export default function ScanPage() {
       console.log("[scan] lastSegment:", lastSegment);
     }
 
-    // 1) vehicles exact on asset
-    const vehicleExact = await supabase
+    // 1) vehicles exact on id
+    const vehicleById = await supabase
+      .from("vehicles")
+      .select("id")
+      .eq("id", qrTrimmed)
+      .limit(1)
+      .maybeSingle();
+    console.log("[scan] vehicles eq(id, qrTrimmed) found:", Boolean(vehicleById.data?.id));
+    console.log("[scan] vehicles eq(id, qrTrimmed) error:", vehicleById.error);
+    if (vehicleById.data?.id) {
+      console.log("[scan] matched vehicle by id", { id: vehicleById.data.id });
+      return { kind: "vehicle" as const, id: vehicleById.data.id };
+    }
+
+    // 2) equipment exact on id
+    const equipmentById = await supabase
+      .from("equipment")
+      .select("id")
+      .eq("id", qrTrimmed)
+      .limit(1)
+      .maybeSingle();
+    console.log("[scan] equipment eq(id, qrTrimmed) found:", Boolean(equipmentById.data?.id));
+    console.log("[scan] equipment eq(id, qrTrimmed) error:", equipmentById.error);
+    if (equipmentById.data?.id) {
+      console.log("[scan] matched equipment by id", { id: equipmentById.data.id });
+      return { kind: "equipment" as const, id: equipmentById.data.id };
+    }
+
+    // 3) vehicles exact on asset (fallback)
+    const vehicleAssetExact = await supabase
       .from("vehicles")
       .select("id")
       .eq("asset", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    console.log("[scan] vehicles eq(asset, qrTrimmed) found:", Boolean(vehicleExact.data?.id));
-    console.log("[scan] vehicles eq(asset, qrTrimmed) error:", vehicleExact.error);
-    if (vehicleExact.data?.id) {
-      console.log("[scan] matched vehicle exact", { id: vehicleExact.data.id });
-      return { kind: "vehicle" as const, id: vehicleExact.data.id };
+    console.log("[scan] vehicles eq(asset, qrTrimmed) found:", Boolean(vehicleAssetExact.data?.id));
+    console.log("[scan] vehicles eq(asset, qrTrimmed) error:", vehicleAssetExact.error);
+    if (vehicleAssetExact.data?.id) {
+      console.log("[scan] matched vehicle by asset exact", { id: vehicleAssetExact.data.id });
+      return { kind: "vehicle" as const, id: vehicleAssetExact.data.id };
     }
 
-    // 2) vehicles ilike on asset
-    const vehicleIlike = await supabase
+    // 4) vehicles ilike on asset (fallback)
+    const vehicleAssetIlike = await supabase
       .from("vehicles")
       .select("id")
       .ilike("asset", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    console.log("[scan] vehicles ilike(asset, qrTrimmed) found:", Boolean(vehicleIlike.data?.id));
-    console.log("[scan] vehicles ilike(asset, qrTrimmed) error:", vehicleIlike.error);
-    if (vehicleIlike.data?.id) {
-      console.log("[scan] matched vehicle ilike", { id: vehicleIlike.data.id });
-      return { kind: "vehicle" as const, id: vehicleIlike.data.id };
+    console.log("[scan] vehicles ilike(asset, qrTrimmed) found:", Boolean(vehicleAssetIlike.data?.id));
+    console.log("[scan] vehicles ilike(asset, qrTrimmed) error:", vehicleAssetIlike.error);
+    if (vehicleAssetIlike.data?.id) {
+      console.log("[scan] matched vehicle by asset ilike", { id: vehicleAssetIlike.data.id });
+      return { kind: "vehicle" as const, id: vehicleAssetIlike.data.id };
     }
 
-    // 3) vehicles ilike on lastSegment when QR is URL
+    // 5) vehicles ilike on lastSegment when QR is URL
     if (lastSegment) {
       const vehicleLastSegment = await supabase
         .from("vehicles")
@@ -95,7 +123,7 @@ export default function ScanPage() {
       }
     }
 
-    // 4) equipment exact on asset_qr
+    // 6) equipment exact on asset_qr
     const equipmentExact = await supabase
       .from("equipment")
       .select("id")
@@ -109,7 +137,7 @@ export default function ScanPage() {
       return { kind: "equipment" as const, id: equipmentExact.data.id };
     }
 
-    // 5) equipment ilike on asset_qr
+    // 7) equipment ilike on asset_qr
     const equipmentIlike = await supabase
       .from("equipment")
       .select("id")
@@ -123,7 +151,7 @@ export default function ScanPage() {
       return { kind: "equipment" as const, id: equipmentIlike.data.id };
     }
 
-    // 6) equipment ilike on lastSegment when QR is URL
+    // 8) equipment ilike on lastSegment when QR is URL
     if (lastSegment) {
       const equipmentLastSegment = await supabase
         .from("equipment")
