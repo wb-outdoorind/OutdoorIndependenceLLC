@@ -212,7 +212,8 @@ function computeOilLifePercent(
 export default function VehicleDetailPage() {
   // folder: /vehicles/[vehicleID]
   const params = useParams<{ vehicleID: string }>();
-  const vehicleIdFromRoute = decodeURIComponent(params.vehicleID);
+  const routeVehicleId = params.vehicleID;
+  const vehicleIdFromRoute = decodeURIComponent(routeVehicleId);
 
   const searchParams = useSearchParams();
   const assetParam = (searchParams.get("asset") || "").trim();
@@ -240,6 +241,12 @@ export default function VehicleDetailPage() {
       const { data: authData, error: authErr } = await supabase.auth.getUser();
       console.log("[vehicle-detail] user present:", Boolean(authData.user));
       if (authErr) console.error("[vehicle-detail] auth check error:", authErr);
+      if (!authData.user) {
+        setVehicle(null);
+        setVehicleErr("Not authenticated. Please sign in again.");
+        setVehicleLoading(false);
+        return;
+      }
 
       const hydrateLocal = (row: VehicleRow) => {
         if (typeof window === "undefined") return;
@@ -281,6 +288,11 @@ export default function VehicleDetailPage() {
         setVehicleLoading(false);
         return;
       }
+      console.log("[vehicle-detail] no vehicle row by id", {
+        triedId: vehicleIdFromRoute,
+        routeParam: routeVehicleId,
+        userId: authData.user.id,
+      });
 
       // 2) Fallback by asset
       if (assetParam) {
@@ -348,7 +360,7 @@ export default function VehicleDetailPage() {
     return () => {
       alive = false;
     };
-  }, [vehicleIdFromRoute, assetParam, plateParam]);
+  }, [vehicleIdFromRoute, routeVehicleId, assetParam, plateParam]);
 
   const { localMileage, pmRecords } = useMemo(() => {
     if (!hasMounted || typeof window === "undefined") {
