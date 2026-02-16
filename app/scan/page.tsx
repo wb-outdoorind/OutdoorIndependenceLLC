@@ -4,6 +4,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
+type DetectedBarcode = { rawValue?: string };
+type BarcodeDetectorLike = {
+  detect(source: HTMLVideoElement): Promise<DetectedBarcode[]>;
+};
+type BarcodeDetectorCtor = new (options: { formats: string[] }) => BarcodeDetectorLike;
+type BrowserWithBarcodeDetector = Window & { BarcodeDetector?: BarcodeDetectorCtor };
 
 export default function ScanPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -25,7 +31,7 @@ export default function ScanPage() {
 
   useEffect(() => {
     let rafId = 0;
-    let detector: any = null;
+    let detector: BarcodeDetectorLike | null = null;
 
     async function start() {
       // BarcodeDetector support check
@@ -40,8 +46,13 @@ export default function ScanPage() {
       }
 
       try {
-        // @ts-ignore
-        detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+        const detectorCtor = (window as BrowserWithBarcodeDetector).BarcodeDetector;
+        if (!detectorCtor) {
+          setSupported(false);
+          setStatus("QR scanning not supported in this browser.");
+          return;
+        }
+        detector = new detectorCtor({ formats: ["qr_code"] });
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
@@ -62,7 +73,6 @@ export default function ScanPage() {
           try {
             const barcodes = await detector.detect(videoRef.current);
             if (barcodes?.length) {
-              const raw = barcodes[0].rawValue ?? "";
               const rawValue = (barcodes[0].rawValue ?? "").trim();
 
                 // Accept either:
@@ -98,9 +108,10 @@ export default function ScanPage() {
         };
 
         rafId = requestAnimationFrame(tick);
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const errorName = e instanceof Error ? e.name : "";
         setStatus(
-          e?.name === "NotAllowedError"
+          errorName === "NotAllowedError"
             ? "Camera permission denied. Allow camera access and refresh."
             : "Could not start camera."
         );

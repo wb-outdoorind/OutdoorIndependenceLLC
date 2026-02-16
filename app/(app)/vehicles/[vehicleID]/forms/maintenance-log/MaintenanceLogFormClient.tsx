@@ -199,51 +199,55 @@ export default function MaintenanceLogPage() {
     if (!vehicleId) return;
     if (typeof window === "undefined") return;
 
-    // vehicle mileage
-    const saved = localStorage.getItem(vehicleMileageKey(vehicleId));
-    const m = saved ? Number(saved) : NaN;
-    if (Number.isFinite(m) && m > 0) {
-      setCurrentVehicleMileage(m);
-      // If user hasn’t typed yet, prefill:
-      setMileage((prev) => (prev.trim() ? prev : String(m)));
-    }
+    const timer = window.setTimeout(() => {
+      // vehicle mileage
+      const saved = localStorage.getItem(vehicleMileageKey(vehicleId));
+      const m = saved ? Number(saved) : NaN;
+      if (Number.isFinite(m) && m > 0) {
+        setCurrentVehicleMileage(m);
+        // If user hasn’t typed yet, prefill:
+        setMileage((prev) => (prev.trim() ? prev : String(m)));
+      }
 
-    // request linking
-    if (!requestId) return;
+      // request linking
+      if (!requestId) return;
 
-    const requests = safeJSON<MaintenanceRequestRecord[]>(
-      localStorage.getItem(maintenanceRequestKey(vehicleId)),
-      []
-    );
+      const requests = safeJSON<MaintenanceRequestRecord[]>(
+        localStorage.getItem(maintenanceRequestKey(vehicleId)),
+        []
+      );
 
-    const req = requests.find((r) => r.id === requestId) ?? null;
-    setLinkedRequest(req);
+      const req = requests.find((r) => r.id === requestId) ?? null;
+      setLinkedRequest(req);
 
-    if (!req) return;
+      if (!req) return;
 
-    // Enforce 1 request → 1 log
-    if (req.maintenanceLogId) {
-      alert("This request already has a maintenance log. Opening the vehicle instead.");
-      router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
-      return;
-    }
+      // Enforce 1 request → 1 log
+      if (req.maintenanceLogId) {
+        alert("This request already has a maintenance log. Opening the vehicle instead.");
+        router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+        return;
+      }
 
-    // Autofill log form from request (only if user hasn’t typed yet)
-    setTitle((prev) => (prev.trim() ? prev : req.title));
-    setNotes((prev) =>
-      prev.trim()
-        ? prev
-        : [
-            `From Request (${req.id})`,
-            `Employee: ${req.employee}`,
-            `Urgency: ${req.urgency}`,
-            `System: ${req.systemAffected}`,
-            `Drivability: ${req.drivabilityStatus}`,
-            "",
-            "Issue Description:",
-            req.description,
-          ].join("\n")
-    );
+      // Autofill log form from request (only if user hasn’t typed yet)
+      setTitle((prev) => (prev.trim() ? prev : req.title));
+      setNotes((prev) =>
+        prev.trim()
+          ? prev
+          : [
+              `From Request (${req.id})`,
+              `Employee: ${req.employee}`,
+              `Urgency: ${req.urgency}`,
+              `System: ${req.systemAffected}`,
+              `Drivability: ${req.drivabilityStatus}`,
+              "",
+              "Issue Description:",
+              req.description,
+            ].join("\n")
+      );
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [vehicleId, requestId, router]);
 
   const totalCost = useMemo(() => {
@@ -674,4 +678,3 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   opacity: 0.9,
 };
-

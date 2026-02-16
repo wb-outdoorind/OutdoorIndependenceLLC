@@ -220,10 +220,6 @@ export default function VehicleDetailPage() {
   const [vehicleLoading, setVehicleLoading] = useState(true);
   const [vehicleErr, setVehicleErr] = useState<string | null>(null);
 
-  const [localMileage, setLocalMileage] = useState<number | undefined>(undefined);
-  const [pmRecords, setPmRecords] = useState<VehiclePMRecord[]>([]);
-  const [logRecords, setLogRecords] = useState<MaintenanceLogRecord[]>([]);
-
   useEffect(() => {
     let alive = true;
 
@@ -337,27 +333,32 @@ export default function VehicleDetailPage() {
     };
   }, [vehicleIdFromRoute, assetParam, plateParam]);
 
-  // Load localStorage values (PM/logs + local mileage)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const { localMileage, pmRecords, logRecords } = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        localMileage: undefined as number | undefined,
+        pmRecords: [] as VehiclePMRecord[],
+        logRecords: [] as MaintenanceLogRecord[],
+      };
+    }
 
     const storageId = vehicle?.id ?? vehicleIdFromRoute;
 
     const rawMileage = localStorage.getItem(vehicleMileageKey(storageId));
     const n = rawMileage ? Number(rawMileage) : NaN;
-    setLocalMileage(Number.isFinite(n) ? n : undefined);
+    const parsedLocalMileage = Number.isFinite(n) ? n : undefined;
 
-    const pms = safeParse<VehiclePMRecord[]>(
-      localStorage.getItem(vehiclePmKey(storageId)),
-      []
-    );
-    const logs = safeParse<MaintenanceLogRecord[]>(
-      localStorage.getItem(maintenanceLogKey(storageId)),
-      []
-    );
-
-    setPmRecords(pms);
-    setLogRecords(logs);
+    return {
+      localMileage: parsedLocalMileage,
+      pmRecords: safeParse<VehiclePMRecord[]>(
+        localStorage.getItem(vehiclePmKey(storageId)),
+        []
+      ),
+      logRecords: safeParse<MaintenanceLogRecord[]>(
+        localStorage.getItem(maintenanceLogKey(storageId)),
+        []
+      ),
+    };
   }, [vehicleIdFromRoute, vehicle?.id]);
 
   // Display fields

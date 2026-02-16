@@ -35,7 +35,8 @@ export async function POST(req: Request) {
     if (inviteErr) return NextResponse.json({ error: inviteErr.message }, { status: 400 });
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Resend invite failed" }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "Resend invite failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

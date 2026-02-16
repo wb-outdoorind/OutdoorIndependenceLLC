@@ -4,7 +4,7 @@ export async function writeAudit(params: {
   action: string;
   table_name: string;
   record_id?: string;
-  meta?: any;
+  meta?: unknown;
 }) {
   const supabase = createSupabaseBrowser();
 

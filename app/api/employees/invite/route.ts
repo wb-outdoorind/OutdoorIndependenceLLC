@@ -80,12 +80,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, userId });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Invite route crashed:", err);
+    const message = err instanceof Error ? err.message : "Invite route crashed (unknown error)";
     return NextResponse.json(
-      { error: err?.message || "Invite route crashed (unknown error)" },
+      { error: message },
       { status: 500 }
     );
   }
 }
-

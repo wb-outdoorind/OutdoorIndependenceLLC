@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type ApiResponse = { error?: string };
 
 export default function NewEmployeeClient() {
   const router = useRouter();
@@ -43,7 +44,7 @@ export default function NewEmployeeClient() {
 
       // ✅ SAFELY parse response (JSON or text)
       const contentType = res.headers.get("content-type") || "";
-      let data: any = null;
+      let data: ApiResponse | null = null;
 
       if (contentType.includes("application/json")) {
         data = await res.json();
@@ -60,8 +61,8 @@ export default function NewEmployeeClient() {
 
       setMsg("Invite sent! Employee will receive an email link to join.");
       router.push("/employees");
-    } catch (err: any) {
-      setMsg(err?.message || "Failed to invite employee.");
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : "Failed to invite employee.");
     } finally {
       setSaving(false);
     }

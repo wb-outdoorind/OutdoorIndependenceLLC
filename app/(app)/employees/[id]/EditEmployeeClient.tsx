@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { writeAudit } from "@/lib/audit";
 
 type Employee = {
   id: string;

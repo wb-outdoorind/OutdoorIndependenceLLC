@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 /* =========================
    Types
@@ -234,10 +234,11 @@ function failSummaryFromSections(sections?: TripInspectionRecord["sections"]) {
 export default function VehicleHistoryPage({ params }: { params: { vehicleId: string } }) {
   const vehicleId = params.vehicleId;
 
-  const [items, setItems] = useState<TimelineItem[]>([]);
   const [filter, setFilter] = useState<FilterValue>("All");
 
-  useEffect(() => {
+  const items = useMemo(() => {
+    if (typeof window === "undefined") return [] as TimelineItem[];
+
     const preTrips = safeParse<TripInspectionRecord[]>(localStorage.getItem(preTripKey(vehicleId)), []).map(
       (x): TimelineItem => {
         const defects = Boolean(x.defectsFound);
@@ -342,7 +343,7 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    setItems(merged);
+    return merged;
   }, [vehicleId]);
 
   const filtered = useMemo(() => {

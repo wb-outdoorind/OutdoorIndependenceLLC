@@ -268,13 +268,6 @@ export default function InspectionForm({
     return m;
   });
 
-  // If exitingItems changes (rare), sync defaults
-  useEffect(() => {
-    const m: Record<string, Choice> = {};
-    (exitingItems ?? []).forEach((it) => (m[it.key] = "pass"));
-    setExiting(m);
-  }, [exitingItems]);
-
   const [inspectionStatus, setInspectionStatus] = useState<
     "Pass" | "Fail - Maintenance Required" | "Out of Service"
   >("Pass");
