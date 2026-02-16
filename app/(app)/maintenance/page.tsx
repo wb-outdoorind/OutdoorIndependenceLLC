@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 /* =========================
    Shared types (subset)
@@ -47,27 +48,16 @@ type VehicleMeta = {
   type?: string;
 };
 
-const REQUESTS_INDEX_KEY = "maintenance:requests:index";
-
-/* =========================
-   LocalStorage helpers
-========================= */
-
-function safeJSON<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function getRequestsIndex(): MaintenanceRequestIndexItem[] {
-  if (typeof window === "undefined") return [];
-  return safeJSON<MaintenanceRequestIndexItem[]>(
-    localStorage.getItem(REQUESTS_INDEX_KEY),
-    []
-  );
-}
+type MaintenanceRequestRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  status: string | null;
+  urgency: string | null;
+  system_affected: string | null;
+  drivability: string | null;
+  description: string | null;
+};
 
 function urgencyRank(u: Urgency): number {
   // smaller = higher priority in sort
@@ -113,30 +103,78 @@ export default function MaintenanceCenterPage() {
   const [rows, setRows] = useState<MaintenanceRequestIndexItem[]>([]);
   const [metaMap, setMetaMap] = useState<Record<string, VehicleMeta>>({});
 
-  // load + refresh
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    let alive = true;
 
-    const load = () => {
-      const idx = getRequestsIndex();
-      setRows(idx);
+    async function loadRequests() {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select(
+          "id,vehicle_id,created_at,status,urgency,system_affected,drivability,description"
+        )
+        .order("created_at", { ascending: false });
 
-      // read vehicle name/type for any vehicle IDs present
+      if (!alive) return;
+      if (error || !data) {
+        setRows([]);
+        setMetaMap({});
+        return;
+      }
+
+      const mapped: MaintenanceRequestIndexItem[] = (data as MaintenanceRequestRow[]).map(
+        (r) => ({
+          id: r.id,
+          vehicleId: r.vehicle_id,
+          createdAt: r.created_at,
+          requestDate: r.created_at.slice(0, 10),
+          status:
+            r.status === "Open" || r.status === "In Progress" || r.status === "Closed"
+              ? r.status
+              : "Open",
+          urgency:
+            r.urgency === "Low" ||
+            r.urgency === "Medium" ||
+            r.urgency === "High" ||
+            r.urgency === "Urgent"
+              ? r.urgency
+              : "Medium",
+          systemAffected:
+            r.system_affected === "Engine" ||
+            r.system_affected === "Electrical" ||
+            r.system_affected === "Hydraulics" ||
+            r.system_affected === "Tires / Wheels" ||
+            r.system_affected === "Brakes" ||
+            r.system_affected === "Steering" ||
+            r.system_affected === "Body / Frame" ||
+            r.system_affected === "Attachment / Implement" ||
+            r.system_affected === "Other"
+              ? r.system_affected
+              : "Other",
+          drivabilityStatus:
+            r.drivability === "Yes – Drivable" ||
+            r.drivability === "Limited – Operate with caution" ||
+            r.drivability === "No – Out of Service"
+              ? r.drivability
+              : "Yes – Drivable",
+          title: extractTitleFromDescription(r.description, r.system_affected),
+        })
+      );
+
+      setRows(mapped);
+
       const mm: Record<string, VehicleMeta> = {};
-      for (const r of idx) {
+      for (const r of mapped) {
         if (!mm[r.vehicleId]) mm[r.vehicleId] = readVehicleMeta(r.vehicleId);
       }
       setMetaMap(mm);
-    };
+    }
 
-    load();
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key) return;
-      if (e.key === REQUESTS_INDEX_KEY || e.key.startsWith("vehicle:")) load();
-    };
-    window.addEventListener("storage", onStorage);
+    loadRequests();
 
-    return () => window.removeEventListener("storage", onStorage);
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -312,6 +350,20 @@ export default function MaintenanceCenterPage() {
       </div>
     </main>
   );
+}
+
+function extractTitleFromDescription(
+  description: string | null,
+  systemAffected: string | null
+) {
+  if (description) {
+    const firstLine = description.split("\n")[0]?.trim();
+    if (firstLine?.startsWith("Title:")) {
+      const parsed = firstLine.slice("Title:".length).trim();
+      if (parsed) return parsed;
+    }
+  }
+  return systemAffected?.trim() ? `${systemAffected} issue` : "Maintenance Request";
 }
 
 /* ---------------- UI bits ---------------- */

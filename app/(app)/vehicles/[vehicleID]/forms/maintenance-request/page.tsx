@@ -2,6 +2,7 @@
 
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -39,76 +40,6 @@ type SystemAffected =
 type TriState = "Yes" | "No" | "Not sure";
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
-type MaintenanceRequestRecord = {
-  id: string;
-  vehicleId: string;
-
-  createdAt: string; // ISO
-  requestDate: string; // yyyy-mm-dd
-
-  employee: string;
-
-  issueIdentifiedDuring: IssueIdentifiedDuring;
-  drivabilityStatus: DrivabilityStatus;
-  unitStatus: UnitStatus;
-  locationNote?: string;
-
-  systemAffected: SystemAffected;
-  urgency: Urgency;
-
-  title: string;
-  description: string;
-
-  status: RequestStatus;
-
-  mitigationApplied?: TriState;
-  affectsNextShift?: TriState;
-  downtimeExpected?: TriState;
-
-  photoPlaceholder?: string;
-};
-
-const REQUESTS_INDEX_KEY = "maintenance:requests:index";
-
-type MaintenanceRequestIndexItem = {
-  id: string;
-  vehicleId: string;
-  createdAt: string;
-  requestDate: string;
-  status: RequestStatus;
-  urgency: Urgency;
-  systemAffected: SystemAffected;
-  drivabilityStatus: DrivabilityStatus;
-  title: string;
-  employee?: string;
-  maintenanceLogId?: string;
-};
-
-function safeJSON<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function upsertRequestIndex(item: MaintenanceRequestIndexItem) {
-  const existing = safeJSON<MaintenanceRequestIndexItem[]>(
-    localStorage.getItem(REQUESTS_INDEX_KEY),
-    []
-  );
-
-  const idx = existing.findIndex((x) => x.id === item.id);
-  if (idx >= 0) existing[idx] = { ...existing[idx], ...item };
-  else existing.unshift(item);
-
-  localStorage.setItem(REQUESTS_INDEX_KEY, JSON.stringify(existing));
-}
-
-
-function maintenanceRequestKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_request`;
-}
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
 }
@@ -203,7 +134,7 @@ export default function MaintenanceRequestPage() {
     return `${base} issue${end}`;
   }, [systemAffected, urgency]);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
@@ -218,51 +149,37 @@ export default function MaintenanceRequestPage() {
     if (!description.trim())
       return alert("Description of issue is required.");
 
-    const record: MaintenanceRequestRecord = {
-      id: crypto.randomUUID(),
-      vehicleId,
-      createdAt: new Date().toISOString(),
-      requestDate,
+    const supabase = createSupabaseBrowser();
+    const combinedDescription = [
+      `Title: ${finalTitle}`,
+      "",
+      description.trim(),
+      "",
+      `Employee: ${employee.trim()}`,
+      `Request Date: ${requestDate}`,
+      `Mitigation Applied: ${mitigationApplied}`,
+      `Affects Next Shift: ${affectsNextShift}`,
+      `Downtime Expected: ${downtimeExpected}`,
+      locationNote.trim() ? `Location Note: ${locationNote.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-      employee: employee.trim(),
-
-      issueIdentifiedDuring,
-      drivabilityStatus,
-      unitStatus,
-      locationNote: locationNote.trim() ? locationNote.trim() : undefined,
-
-      systemAffected,
-      urgency,
-
-      title: finalTitle,
-      description: description.trim(),
-
+    const { error } = await supabase.from("maintenance_requests").insert({
+      vehicle_id: vehicleId,
       status,
-
-      mitigationApplied,
-      affectsNextShift,
-      downtimeExpected,
-
-      photoPlaceholder: "Photo upload coming soon",
-    };
-
-    const key = maintenanceRequestKey(vehicleId);
-    const existing = JSON.parse(localStorage.getItem(key) || "[]");
-    existing.unshift(record);
-    localStorage.setItem(key, JSON.stringify(existing));
-
-    upsertRequestIndex({
-    id: record.id,
-    vehicleId: record.vehicleId,
-    createdAt: record.createdAt,
-    requestDate: record.requestDate,
-    status: record.status,
-    urgency: record.urgency,
-    systemAffected: record.systemAffected,
-    drivabilityStatus: record.drivabilityStatus,
-    title: record.title,
-    employee: record.employee,
+      urgency,
+      system_affected: systemAffected,
+      drivability: drivabilityStatus,
+      unit_status: unitStatus,
+      issue_identified_during: issueIdentifiedDuring,
+      description: combinedDescription,
     });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
 

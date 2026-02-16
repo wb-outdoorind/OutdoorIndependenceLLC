@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 /* =========================
    Types
@@ -58,7 +59,7 @@ type MaintenanceRequestRecord = {
   requestDate?: string;
 
   // compatibility (old)
-  mileage: number;
+  mileage?: number;
   title: string;
   status: RequestStatus;
   priority?: string;
@@ -78,6 +79,19 @@ type MaintenanceRequestRecord = {
   mitigationApplied?: string;
   affectsNextShift?: string;
   downtimeExpected?: string;
+};
+
+type MaintenanceRequestRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  status: string | null;
+  urgency: string | null;
+  system_affected: string | null;
+  drivability: string | null;
+  issue_identified_during: string | null;
+  unit_status: string | null;
+  description: string | null;
 };
 
 
@@ -124,10 +138,6 @@ function postTripKey(vehicleId: string) {
 
 function vehiclePmKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
-}
-
-function maintenanceRequestKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_request`;
 }
 
 function maintenanceLogKey(vehicleId: string) {
@@ -235,6 +245,60 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
   const vehicleId = params.vehicleId;
 
   const [filter, setFilter] = useState<FilterValue>("All");
+  const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadRequests() {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select(
+          "id,vehicle_id,created_at,status,urgency,system_affected,drivability,issue_identified_during,unit_status,description"
+        )
+        .eq("vehicle_id", vehicleId)
+        .order("created_at", { ascending: false });
+
+      if (!alive) return;
+      if (error || !data) {
+        setRequestRows([]);
+        return;
+      }
+
+      const mapped = (data as MaintenanceRequestRow[]).map((r) => {
+        const parsed = parseTitleAndDescription(r.description);
+        return {
+          id: r.id,
+          vehicleId: r.vehicle_id,
+          createdAt: r.created_at,
+          requestDate: r.created_at.slice(0, 10),
+          title: parsed.title || (r.system_affected ? `${r.system_affected} issue` : "Maintenance Request"),
+          status:
+            r.status === "Open" || r.status === "In Progress" || r.status === "Closed"
+              ? r.status
+              : "Open",
+          urgency:
+            r.urgency === "Low" || r.urgency === "Medium" || r.urgency === "High" || r.urgency === "Urgent"
+              ? r.urgency
+              : undefined,
+          systemAffected: r.system_affected ?? undefined,
+          drivabilityStatus: r.drivability ?? undefined,
+          issueIdentifiedDuring: r.issue_identified_during ?? undefined,
+          unitStatus: r.unit_status ?? undefined,
+          description: parsed.description || undefined,
+        } as MaintenanceRequestRecord;
+      });
+
+      setRequestRows(mapped);
+    }
+
+    loadRequests();
+
+    return () => {
+      alive = false;
+    };
+  }, [vehicleId]);
 
   const items = useMemo(() => {
     if (typeof window === "undefined") return [] as TimelineItem[];
@@ -291,10 +355,7 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
       })
     );
 
-        const requests = safeParse<MaintenanceRequestRecord[]>(
-      localStorage.getItem(maintenanceRequestKey(vehicleId)),
-      []
-    ).map((x): TimelineItem => {
+    const requests = requestRows.map((x): TimelineItem => {
       const pr = x.urgency ?? x.priority; // supports old "priority"
       const details = [
         x.status,
@@ -344,7 +405,7 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
     );
 
     return merged;
-  }, [vehicleId]);
+  }, [vehicleId, requestRows]);
 
   const filtered = useMemo(() => {
     if (filter === "All") return items;
@@ -444,4 +505,19 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
       </div>
     </main>
   );
+}
+
+function parseTitleAndDescription(raw: string | null) {
+  if (!raw) return { title: "", description: "" };
+  const lines = raw.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+
+  let title = "";
+  if (firstLine.startsWith("Title:")) {
+    title = firstLine.slice("Title:".length).trim();
+  }
+
+  if (lines.length <= 2) return { title, description: raw.trim() };
+  const description = lines.slice(2).join("\n").trim();
+  return { title, description };
 }
