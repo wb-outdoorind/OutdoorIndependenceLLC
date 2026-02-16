@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type DetectedBarcode = { rawValue?: string };
 type BarcodeDetectorLike = {
@@ -15,11 +16,10 @@ export default function ScanPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const [status, setStatus] = useState<string>("Starting camera…");
+  const [status, setStatus] = useState<string>("Starting camera...");
   const [result, setResult] = useState<string>("");
   const [supported, setSupported] = useState<boolean>(true);
   const router = useRouter();
-
 
   async function stopCamera() {
     if (streamRef.current) {
@@ -29,15 +29,84 @@ export default function ScanPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }
 
+  function parseDirectRoute(rawValue: string) {
+    const trimmed = rawValue.trim();
+
+    try {
+      const url = new URL(trimmed);
+      const parts = url.pathname.split("/").filter(Boolean);
+      const vehiclesIndex = parts.indexOf("vehicles");
+      if (vehiclesIndex !== -1 && parts[vehiclesIndex + 1]) {
+        return { kind: "vehicle" as const, id: decodeURIComponent(parts[vehiclesIndex + 1]) };
+      }
+
+      const equipmentIndex = parts.indexOf("equipment");
+      if (equipmentIndex !== -1 && parts[equipmentIndex + 1]) {
+        return { kind: "equipment" as const, id: decodeURIComponent(parts[equipmentIndex + 1]) };
+      }
+    } catch {
+      // not a URL
+    }
+
+    return null;
+  }
+
+  async function findRouteByQr(rawValue: string) {
+    const supabase = createSupabaseBrowser();
+
+    const direct = parseDirectRoute(rawValue);
+    if (direct) return direct;
+
+    const lookup = rawValue.trim();
+    if (!lookup) return null;
+
+    // 1) vehicles by asset_qr (preferred)
+    const vehicleByAssetQr = await supabase
+      .from("vehicles")
+      .select("id")
+      .eq("asset_qr", lookup)
+      .limit(1)
+      .maybeSingle();
+
+    if (vehicleByAssetQr.data?.id) {
+      return { kind: "vehicle" as const, id: vehicleByAssetQr.data.id };
+    }
+
+    if (vehicleByAssetQr.error) {
+      // fallback for legacy schema that may still use 'asset'
+      const vehicleByAsset = await supabase
+        .from("vehicles")
+        .select("id")
+        .eq("asset", lookup)
+        .limit(1)
+        .maybeSingle();
+
+      if (vehicleByAsset.data?.id) {
+        return { kind: "vehicle" as const, id: vehicleByAsset.data.id };
+      }
+    }
+
+    // 2) equipment by asset_qr
+    const equipmentByAssetQr = await supabase
+      .from("equipment")
+      .select("id")
+      .eq("asset_qr", lookup)
+      .limit(1)
+      .maybeSingle();
+
+    if (equipmentByAssetQr.data?.id) {
+      return { kind: "equipment" as const, id: equipmentByAssetQr.data.id };
+    }
+
+    return null;
+  }
+
   useEffect(() => {
     let rafId = 0;
     let detector: BarcodeDetectorLike | null = null;
 
     async function start() {
-      // BarcodeDetector support check
-      const hasDetector =
-        typeof window !== "undefined" &&
-        "BarcodeDetector" in window;
+      const hasDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
 
       if (!hasDetector) {
         setSupported(false);
@@ -65,7 +134,7 @@ export default function ScanPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
 
-        setStatus("Point your camera at a QR code…");
+        setStatus("Point your camera at a QR code...");
 
         const tick = async () => {
           if (!videoRef.current || result) return;
@@ -75,31 +144,31 @@ export default function ScanPage() {
             const barcodes = await detector.detect(videoRef.current);
             if (barcodes?.length) {
               const rawValue = (barcodes[0].rawValue ?? "").trim();
-
-                // Accept either:
-                // 1) a plain vehicleId like "TRK-102"
-                // 2) a full URL that ends with /vehicles/<id> or contains it
-                let vehicleId = rawValue;
-
-                try {
-                const url = new URL(rawValue);
-                const parts = url.pathname.split("/").filter(Boolean);
-                const vehiclesIndex = parts.indexOf("vehicles");
-                if (vehiclesIndex !== -1 && parts[vehiclesIndex + 1]) {
-                    vehicleId = parts[vehiclesIndex + 1];
-                }
-                } catch {
-                // not a URL, treat as plain ID
-                }
-
-                setResult(rawValue);
-                setStatus("✅ Scanned! Routing to vehicle…");
-                await stopCamera();
-
-                // route to the vehicle detail page
-                router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+              if (!rawValue) {
+                rafId = requestAnimationFrame(tick);
                 return;
+              }
 
+              setResult(rawValue);
+              setStatus("Scanned. Looking up asset...");
+
+              const route = await findRouteByQr(rawValue);
+              await stopCamera();
+
+              if (route?.kind === "vehicle") {
+                setStatus("Scanned vehicle. Routing...");
+                router.push(`/vehicles/${encodeURIComponent(route.id)}`);
+                return;
+              }
+
+              if (route?.kind === "equipment") {
+                setStatus("Scanned equipment. Routing...");
+                router.push(`/equipment/${encodeURIComponent(route.id)}`);
+                return;
+              }
+
+              setStatus("QR scanned, but no matching vehicle/equipment asset was found.");
+              return;
             }
           } catch {
             // ignore detect errors; keep scanning
@@ -157,12 +226,8 @@ export default function ScanPage() {
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          <p style={{ marginTop: 0 }}>
-            Your browser doesn’t support built-in QR scanning.
-          </p>
-          <p style={{ marginBottom: 0 }}>
-            If you want, we can add a fallback library (works on iPhone too).
-          </p>
+          <p style={{ marginTop: 0 }}>Your browser doesn’t support built-in QR scanning.</p>
+          <p style={{ marginBottom: 0 }}>If needed, we can add a fallback scanning library.</p>
         </div>
       ) : (
         <div
@@ -196,10 +261,7 @@ export default function ScanPage() {
           <div style={{ wordBreak: "break-word" }}>{result}</div>
 
           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              onClick={() => navigator.clipboard.writeText(result)}
-              style={{ padding: "10px 12px" }}
-            >
+            <button onClick={() => navigator.clipboard.writeText(result)} style={{ padding: "10px 12px" }}>
               Copy
             </button>
 
