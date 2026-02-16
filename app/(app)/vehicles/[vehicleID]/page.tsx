@@ -229,6 +229,12 @@ export default function VehicleDetailPage() {
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(true);
   const [vehicleErr, setVehicleErr] = useState<string | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHasMounted(true), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -344,7 +350,7 @@ export default function VehicleDetailPage() {
   }, [vehicleIdFromRoute, assetParam, plateParam]);
 
   const { localMileage, pmRecords } = useMemo(() => {
-    if (typeof window === "undefined") {
+    if (!hasMounted || typeof window === "undefined") {
       return {
         localMileage: undefined as number | undefined,
         pmRecords: [] as VehiclePMRecord[],
@@ -364,7 +370,7 @@ export default function VehicleDetailPage() {
         []
       ),
     };
-  }, [vehicleIdFromRoute, vehicle?.id]);
+  }, [hasMounted, vehicleIdFromRoute, vehicle?.id]);
 
   useEffect(() => {
     let alive = true;
