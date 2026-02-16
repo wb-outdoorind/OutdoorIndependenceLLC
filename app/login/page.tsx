@@ -1,11 +1,20 @@
 // app/login/page.tsx
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<main style={{ maxWidth: 440, margin: "0 auto", padding: 32 }}>Loading...</main>}>
+      <LoginPageContent />
+    </Suspense>
+  );
+}
+
+function LoginPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/";
