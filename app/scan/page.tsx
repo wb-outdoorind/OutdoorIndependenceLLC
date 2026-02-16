@@ -29,73 +29,101 @@ export default function ScanPage() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }
 
-  function parseDirectRoute(rawValue: string) {
-    const trimmed = rawValue.trim();
-
-    try {
-      const url = new URL(trimmed);
-      const parts = url.pathname.split("/").filter(Boolean);
-      const vehiclesIndex = parts.indexOf("vehicles");
-      if (vehiclesIndex !== -1 && parts[vehiclesIndex + 1]) {
-        return { kind: "vehicle" as const, id: decodeURIComponent(parts[vehiclesIndex + 1]) };
-      }
-
-      const equipmentIndex = parts.indexOf("equipment");
-      if (equipmentIndex !== -1 && parts[equipmentIndex + 1]) {
-        return { kind: "equipment" as const, id: decodeURIComponent(parts[equipmentIndex + 1]) };
-      }
-    } catch {
-      // not a URL
-    }
-
-    return null;
-  }
-
   async function findRouteByQr(rawValue: string) {
     const supabase = createSupabaseBrowser();
+    const qr = rawValue.trim();
+    if (!qr) return null;
 
-    const direct = parseDirectRoute(rawValue);
-    if (direct) return direct;
+    console.log("[scan] lookup start", { rawValue, qr });
 
-    const lookup = rawValue.trim();
-    if (!lookup) return null;
-
-    // 1) vehicles by asset_qr (preferred)
-    const vehicleByAssetQr = await supabase
+    // 1) vehicles exact on asset
+    const vehicleExact = await supabase
       .from("vehicles")
       .select("id")
-      .eq("asset_qr", lookup)
+      .eq("asset", qr)
       .limit(1)
       .maybeSingle();
-
-    if (vehicleByAssetQr.data?.id) {
-      return { kind: "vehicle" as const, id: vehicleByAssetQr.data.id };
+    if (vehicleExact.error) {
+      console.error("[scan] vehicles exact lookup error:", vehicleExact.error);
+    }
+    if (vehicleExact.data?.id) {
+      console.log("[scan] matched vehicle exact", { id: vehicleExact.data.id });
+      return { kind: "vehicle" as const, id: vehicleExact.data.id };
     }
 
-    if (vehicleByAssetQr.error) {
-      // fallback for legacy schema that may still use 'asset'
-      const vehicleByAsset = await supabase
-        .from("vehicles")
-        .select("id")
-        .eq("asset", lookup)
-        .limit(1)
-        .maybeSingle();
-
-      if (vehicleByAsset.data?.id) {
-        return { kind: "vehicle" as const, id: vehicleByAsset.data.id };
-      }
+    // fallback: vehicles ilike exact-ish
+    const vehicleIlikeExact = await supabase
+      .from("vehicles")
+      .select("id")
+      .ilike("asset", qr)
+      .limit(1)
+      .maybeSingle();
+    if (vehicleIlikeExact.error) {
+      console.error("[scan] vehicles ilike exact lookup error:", vehicleIlikeExact.error);
+    }
+    if (vehicleIlikeExact.data?.id) {
+      console.log("[scan] matched vehicle ilike exact", { id: vehicleIlikeExact.data.id });
+      return { kind: "vehicle" as const, id: vehicleIlikeExact.data.id };
     }
 
-    // 2) equipment by asset_qr
-    const equipmentByAssetQr = await supabase
+    // fallback: vehicles ilike contains
+    const vehicleContains = await supabase
+      .from("vehicles")
+      .select("id")
+      .ilike("asset", `%${qr}%`)
+      .limit(1)
+      .maybeSingle();
+    if (vehicleContains.error) {
+      console.error("[scan] vehicles ilike contains lookup error:", vehicleContains.error);
+    }
+    if (vehicleContains.data?.id) {
+      console.log("[scan] matched vehicle ilike contains", { id: vehicleContains.data.id });
+      return { kind: "vehicle" as const, id: vehicleContains.data.id };
+    }
+
+    // 2) equipment exact on asset_qr
+    const equipmentExact = await supabase
       .from("equipment")
       .select("id")
-      .eq("asset_qr", lookup)
+      .eq("asset_qr", qr)
       .limit(1)
       .maybeSingle();
+    if (equipmentExact.error) {
+      console.error("[scan] equipment exact lookup error:", equipmentExact.error);
+    }
+    if (equipmentExact.data?.id) {
+      console.log("[scan] matched equipment exact", { id: equipmentExact.data.id });
+      return { kind: "equipment" as const, id: equipmentExact.data.id };
+    }
 
-    if (equipmentByAssetQr.data?.id) {
-      return { kind: "equipment" as const, id: equipmentByAssetQr.data.id };
+    // fallback: equipment ilike exact-ish
+    const equipmentIlikeExact = await supabase
+      .from("equipment")
+      .select("id")
+      .ilike("asset_qr", qr)
+      .limit(1)
+      .maybeSingle();
+    if (equipmentIlikeExact.error) {
+      console.error("[scan] equipment ilike exact lookup error:", equipmentIlikeExact.error);
+    }
+    if (equipmentIlikeExact.data?.id) {
+      console.log("[scan] matched equipment ilike exact", { id: equipmentIlikeExact.data.id });
+      return { kind: "equipment" as const, id: equipmentIlikeExact.data.id };
+    }
+
+    // fallback: equipment ilike contains
+    const equipmentContains = await supabase
+      .from("equipment")
+      .select("id")
+      .ilike("asset_qr", `%${qr}%`)
+      .limit(1)
+      .maybeSingle();
+    if (equipmentContains.error) {
+      console.error("[scan] equipment ilike contains lookup error:", equipmentContains.error);
+    }
+    if (equipmentContains.data?.id) {
+      console.log("[scan] matched equipment ilike contains", { id: equipmentContains.data.id });
+      return { kind: "equipment" as const, id: equipmentContains.data.id };
     }
 
     return null;
@@ -143,13 +171,16 @@ export default function ScanPage() {
           try {
             const barcodes = await detector.detect(videoRef.current);
             if (barcodes?.length) {
-              const rawValue = (barcodes[0].rawValue ?? "").trim();
-              if (!rawValue) {
+              const rawValue = barcodes[0].rawValue ?? "";
+              const qr = rawValue.trim();
+              console.log("[scan] detected barcode", { rawValue, qr });
+
+              if (!qr) {
                 rafId = requestAnimationFrame(tick);
                 return;
               }
 
-              setResult(rawValue);
+              setResult(qr);
               setStatus("Scanned. Looking up asset...");
 
               const route = await findRouteByQr(rawValue);
