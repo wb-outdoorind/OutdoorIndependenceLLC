@@ -31,99 +31,112 @@ export default function ScanPage() {
 
   async function findRouteByQr(rawValue: string) {
     const supabase = createSupabaseBrowser();
-    const qr = rawValue.trim();
-    if (!qr) return null;
+    const qrTrimmed = rawValue.trim();
+    const qrLower = qrTrimmed.toLowerCase();
+    if (!qrTrimmed) return null;
 
-    console.log("[scan] lookup start", { rawValue, qr });
+    let lastSegment: string | null = null;
+    try {
+      const u = new URL(rawValue);
+      const pathParts = u.pathname.split("/").filter(Boolean);
+      lastSegment = pathParts.length ? decodeURIComponent(pathParts[pathParts.length - 1]) : null;
+    } catch {
+      // not a URL; no last segment
+    }
+
+    console.log("[scan] barcode.rawValue:", rawValue);
+    console.log("[scan] qrTrimmed:", qrTrimmed);
+    console.log("[scan] qrLower:", qrLower);
+    if (lastSegment) {
+      console.log("[scan] lastSegment:", lastSegment);
+    }
 
     // 1) vehicles exact on asset
     const vehicleExact = await supabase
       .from("vehicles")
       .select("id")
-      .eq("asset", qr)
+      .eq("asset", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    if (vehicleExact.error) {
-      console.error("[scan] vehicles exact lookup error:", vehicleExact.error);
-    }
+    console.log("[scan] vehicles eq(asset, qrTrimmed) found:", Boolean(vehicleExact.data?.id));
+    console.log("[scan] vehicles eq(asset, qrTrimmed) error:", vehicleExact.error);
     if (vehicleExact.data?.id) {
       console.log("[scan] matched vehicle exact", { id: vehicleExact.data.id });
       return { kind: "vehicle" as const, id: vehicleExact.data.id };
     }
 
-    // fallback: vehicles ilike exact-ish
-    const vehicleIlikeExact = await supabase
+    // 2) vehicles ilike on asset
+    const vehicleIlike = await supabase
       .from("vehicles")
       .select("id")
-      .ilike("asset", qr)
+      .ilike("asset", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    if (vehicleIlikeExact.error) {
-      console.error("[scan] vehicles ilike exact lookup error:", vehicleIlikeExact.error);
-    }
-    if (vehicleIlikeExact.data?.id) {
-      console.log("[scan] matched vehicle ilike exact", { id: vehicleIlikeExact.data.id });
-      return { kind: "vehicle" as const, id: vehicleIlikeExact.data.id };
-    }
-
-    // fallback: vehicles ilike contains
-    const vehicleContains = await supabase
-      .from("vehicles")
-      .select("id")
-      .ilike("asset", `%${qr}%`)
-      .limit(1)
-      .maybeSingle();
-    if (vehicleContains.error) {
-      console.error("[scan] vehicles ilike contains lookup error:", vehicleContains.error);
-    }
-    if (vehicleContains.data?.id) {
-      console.log("[scan] matched vehicle ilike contains", { id: vehicleContains.data.id });
-      return { kind: "vehicle" as const, id: vehicleContains.data.id };
+    console.log("[scan] vehicles ilike(asset, qrTrimmed) found:", Boolean(vehicleIlike.data?.id));
+    console.log("[scan] vehicles ilike(asset, qrTrimmed) error:", vehicleIlike.error);
+    if (vehicleIlike.data?.id) {
+      console.log("[scan] matched vehicle ilike", { id: vehicleIlike.data.id });
+      return { kind: "vehicle" as const, id: vehicleIlike.data.id };
     }
 
-    // 2) equipment exact on asset_qr
+    // 3) vehicles ilike on lastSegment when QR is URL
+    if (lastSegment) {
+      const vehicleLastSegment = await supabase
+        .from("vehicles")
+        .select("id")
+        .ilike("asset", lastSegment)
+        .limit(1)
+        .maybeSingle();
+      console.log("[scan] vehicles ilike(asset, lastSegment) found:", Boolean(vehicleLastSegment.data?.id));
+      console.log("[scan] vehicles ilike(asset, lastSegment) error:", vehicleLastSegment.error);
+      if (vehicleLastSegment.data?.id) {
+        console.log("[scan] matched vehicle lastSegment", { id: vehicleLastSegment.data.id });
+        return { kind: "vehicle" as const, id: vehicleLastSegment.data.id };
+      }
+    }
+
+    // 4) equipment exact on asset_qr
     const equipmentExact = await supabase
       .from("equipment")
       .select("id")
-      .eq("asset_qr", qr)
+      .eq("asset_qr", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    if (equipmentExact.error) {
-      console.error("[scan] equipment exact lookup error:", equipmentExact.error);
-    }
+    console.log("[scan] equipment eq(asset_qr, qrTrimmed) found:", Boolean(equipmentExact.data?.id));
+    console.log("[scan] equipment eq(asset_qr, qrTrimmed) error:", equipmentExact.error);
     if (equipmentExact.data?.id) {
       console.log("[scan] matched equipment exact", { id: equipmentExact.data.id });
       return { kind: "equipment" as const, id: equipmentExact.data.id };
     }
 
-    // fallback: equipment ilike exact-ish
-    const equipmentIlikeExact = await supabase
+    // 5) equipment ilike on asset_qr
+    const equipmentIlike = await supabase
       .from("equipment")
       .select("id")
-      .ilike("asset_qr", qr)
+      .ilike("asset_qr", qrTrimmed)
       .limit(1)
       .maybeSingle();
-    if (equipmentIlikeExact.error) {
-      console.error("[scan] equipment ilike exact lookup error:", equipmentIlikeExact.error);
-    }
-    if (equipmentIlikeExact.data?.id) {
-      console.log("[scan] matched equipment ilike exact", { id: equipmentIlikeExact.data.id });
-      return { kind: "equipment" as const, id: equipmentIlikeExact.data.id };
+    console.log("[scan] equipment ilike(asset_qr, qrTrimmed) found:", Boolean(equipmentIlike.data?.id));
+    console.log("[scan] equipment ilike(asset_qr, qrTrimmed) error:", equipmentIlike.error);
+    if (equipmentIlike.data?.id) {
+      console.log("[scan] matched equipment ilike", { id: equipmentIlike.data.id });
+      return { kind: "equipment" as const, id: equipmentIlike.data.id };
     }
 
-    // fallback: equipment ilike contains
-    const equipmentContains = await supabase
-      .from("equipment")
-      .select("id")
-      .ilike("asset_qr", `%${qr}%`)
-      .limit(1)
-      .maybeSingle();
-    if (equipmentContains.error) {
-      console.error("[scan] equipment ilike contains lookup error:", equipmentContains.error);
-    }
-    if (equipmentContains.data?.id) {
-      console.log("[scan] matched equipment ilike contains", { id: equipmentContains.data.id });
-      return { kind: "equipment" as const, id: equipmentContains.data.id };
+    // 6) equipment ilike on lastSegment when QR is URL
+    if (lastSegment) {
+      const equipmentLastSegment = await supabase
+        .from("equipment")
+        .select("id")
+        .ilike("asset_qr", lastSegment)
+        .limit(1)
+        .maybeSingle();
+      console.log("[scan] equipment ilike(asset_qr, lastSegment) found:", Boolean(equipmentLastSegment.data?.id));
+      console.log("[scan] equipment ilike(asset_qr, lastSegment) error:", equipmentLastSegment.error);
+      if (equipmentLastSegment.data?.id) {
+        console.log("[scan] matched equipment lastSegment", { id: equipmentLastSegment.data.id });
+        return { kind: "equipment" as const, id: equipmentLastSegment.data.id };
+      }
     }
 
     return null;
@@ -172,15 +185,18 @@ export default function ScanPage() {
             const barcodes = await detector.detect(videoRef.current);
             if (barcodes?.length) {
               const rawValue = barcodes[0].rawValue ?? "";
-              const qr = rawValue.trim();
-              console.log("[scan] detected barcode", { rawValue, qr });
+              const qrTrimmed = rawValue.trim();
+              const qrLower = qrTrimmed.toLowerCase();
+              console.log("[scan] detected barcode.rawValue:", rawValue);
+              console.log("[scan] detected qrTrimmed:", qrTrimmed);
+              console.log("[scan] detected qrLower:", qrLower);
 
-              if (!qr) {
+              if (!qrTrimmed) {
                 rafId = requestAnimationFrame(tick);
                 return;
               }
 
-              setResult(qr);
+              setResult(qrTrimmed);
               setStatus("Scanned. Looking up asset...");
 
               const route = await findRouteByQr(rawValue);
