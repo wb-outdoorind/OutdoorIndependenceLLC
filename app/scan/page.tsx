@@ -69,6 +69,7 @@ export default function ScanPage() {
 
         const tick = async () => {
           if (!videoRef.current || result) return;
+          if (!detector) return;
 
           try {
             const barcodes = await detector.detect(videoRef.current);
