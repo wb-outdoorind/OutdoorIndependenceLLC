@@ -13,9 +13,8 @@ type Choice = "pass" | "fail" | "na";
 
 type TripInspectionRecord = {
   id: string;
-  vehicleId: string;
   createdAt: string;
-  mileage: number;
+  mileage?: number;
 
   // old + new compatible
   defectsFound?: boolean;
@@ -39,6 +38,16 @@ type TripInspectionRecord = {
 
   // post-trip only
   exiting?: Record<string, Choice>;
+};
+
+type InspectionRow = {
+  id: string;
+  created_at: string;
+  vehicle_id: string;
+  inspection_type: string;
+  checklist: unknown;
+  overall_status: string | null;
+  mileage: number | null;
 };
 
 type VehiclePMRecord = {
@@ -131,18 +140,6 @@ type TimelineItem = {
 };
 
 type FilterValue = "All" | TimelineType;
-
-/* =========================
-   Storage Keys
-========================= */
-
-function preTripKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:pretrip`;
-}
-
-function postTripKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:posttrip`;
-}
 
 function vehiclePmKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
@@ -241,6 +238,27 @@ function failSummaryFromSections(sections?: TripInspectionRecord["sections"]) {
   return parts.length ? `Fails: ${parts.join(", ")}` : "";
 }
 
+function hasInspectionFailures(
+  sections?: TripInspectionRecord["sections"],
+  exiting?: TripInspectionRecord["exiting"]
+) {
+  if (sections) {
+    for (const sec of Object.values(sections)) {
+      if (!sec?.applicable) continue;
+      for (const v of Object.values(sec.items || {})) if (v === "fail") return true;
+    }
+  }
+  if (exiting) {
+    for (const v of Object.values(exiting)) if (v === "fail") return true;
+  }
+  return false;
+}
+
+function parseChecklist(value: unknown): Partial<TripInspectionRecord> {
+  if (!value || typeof value !== "object") return {};
+  return value as Partial<TripInspectionRecord>;
+}
+
 /* =========================
    Page
 ========================= */
@@ -250,10 +268,68 @@ export default function VehicleHistoryPage() {
   const vehicleId = decodeURIComponent(params.vehicleID);
 
   const [filter, setFilter] = useState<FilterValue>("All");
+  const [inspectionRows, setInspectionRows] = useState<TripInspectionRecord[]>([]);
   const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
   const [logRows, setLogRows] = useState<MaintenanceLogRecord[]>([]);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadInspections() {
+      const supabase = createSupabaseBrowser();
+      setInspectionError(null);
+
+      const { data, error } = await supabase
+        .from("inspections")
+        .select("id,created_at,vehicle_id,inspection_type,checklist,overall_status,mileage")
+        .eq("vehicle_id", params.vehicleID)
+        .order("created_at", { ascending: false });
+
+      if (!alive) return;
+      if (error || !data) {
+        if (error) console.error("[vehicle-history] inspections load error:", error);
+        setInspectionError(error?.message || "Failed to load inspections.");
+        setInspectionRows([]);
+        return;
+      }
+
+      const mapped = (data as InspectionRow[]).map((r) => {
+        const checklist = parseChecklist(r.checklist);
+        return {
+          id: r.id,
+          createdAt: r.created_at,
+          mileage: r.mileage ?? undefined,
+          type: r.inspection_type === "Post-Trip" ? "post-trip" : "pre-trip",
+          inspectionDate: typeof checklist.inspectionDate === "string" ? checklist.inspectionDate : undefined,
+          employee: typeof checklist.employee === "string" ? checklist.employee : undefined,
+          inspectionStatus:
+            r.overall_status === "Pass" ||
+            r.overall_status === "Fail - Maintenance Required" ||
+            r.overall_status === "Out of Service"
+              ? r.overall_status
+              : typeof checklist.inspectionStatus === "string"
+                ? (checklist.inspectionStatus as TripInspectionRecord["inspectionStatus"])
+                : undefined,
+          defectsFound:
+            typeof checklist.defectsFound === "boolean" ? checklist.defectsFound : undefined,
+          notes: typeof checklist.notes === "string" ? checklist.notes : undefined,
+          sections: checklist.sections,
+          exiting: checklist.exiting,
+        } as TripInspectionRecord;
+      });
+
+      setInspectionRows(mapped);
+    }
+
+    loadInspections();
+
+    return () => {
+      alive = false;
+    };
+  }, [params.vehicleID]);
 
   useEffect(() => {
     let alive = true;
@@ -357,9 +433,12 @@ export default function VehicleHistoryPage() {
   const items = useMemo(() => {
     if (typeof window === "undefined") return [] as TimelineItem[];
 
-    const preTrips = safeParse<TripInspectionRecord[]>(localStorage.getItem(preTripKey(vehicleId)), []).map(
+    const preTrips = inspectionRows.filter((x) => x.type !== "post-trip").map(
       (x): TimelineItem => {
-        const defects = Boolean(x.defectsFound);
+        const defects =
+          typeof x.defectsFound === "boolean"
+            ? x.defectsFound
+            : hasInspectionFailures(x.sections, x.exiting);
         const status = x.inspectionStatus;
         const failSummary = failSummaryFromSections(x.sections);
 
@@ -377,9 +456,12 @@ export default function VehicleHistoryPage() {
       }
     );
 
-    const postTrips = safeParse<TripInspectionRecord[]>(localStorage.getItem(postTripKey(vehicleId)), []).map(
+    const postTrips = inspectionRows.filter((x) => x.type === "post-trip").map(
       (x): TimelineItem => {
-        const defects = Boolean(x.defectsFound);
+        const defects =
+          typeof x.defectsFound === "boolean"
+            ? x.defectsFound
+            : hasInspectionFailures(x.sections, x.exiting);
         const status = x.inspectionStatus;
         const failSummary = failSummaryFromSections(x.sections);
 
@@ -459,7 +541,7 @@ export default function VehicleHistoryPage() {
     );
 
     return merged;
-  }, [vehicleId, requestRows, logRows]);
+  }, [vehicleId, inspectionRows, requestRows, logRows]);
 
   const filtered = useMemo(() => {
     if (filter === "All") return items;
@@ -494,6 +576,12 @@ export default function VehicleHistoryPage() {
           </Link>
         </div>
       </div>
+
+      {inspectionError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
+          {inspectionError}
+        </div>
+      ) : null}
 
       {requestError ? (
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>

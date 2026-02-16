@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 export type Choice = "pass" | "fail" | "na";
 export type VehicleType = "truck" | "car" | "skidsteer" | "loader";
@@ -49,12 +50,6 @@ type StoredInspectionRecord = {
   employeeSignature: string;
   managerSignature?: string;
 };
-
-function keyFor(type: InspectionType, vehicleId: string) {
-  return type === "pre-trip"
-    ? `vehicle:${vehicleId}:pretrip`
-    : `vehicle:${vehicleId}:posttrip`;
-}
 
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
@@ -274,6 +269,7 @@ export default function InspectionForm({
   const [notes, setNotes] = useState("");
   const [employeeSignature, setEmployeeSignature] = useState("");
   const [managerSignature, setManagerSignature] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -326,8 +322,9 @@ export default function InspectionForm({
     setExiting((prev) => ({ ...prev, [itemKey]: value }));
   }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitError(null);
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
 
@@ -358,29 +355,35 @@ export default function InspectionForm({
     if (!employeeSignature.trim())
       return alert("Employee Signature is required.");
 
-    const record: StoredInspectionRecord = {
-      id: crypto.randomUUID(),
-      vehicleId,
-      type,
-      createdAt: new Date().toISOString(),
-      inspectionDate,
-      mileage: m,
-      employee: employee.trim(),
+    const checklist = {
       sections: sectionState,
       exiting: exitingItems ? exiting : undefined,
       defectsFound,
       inspectionStatus,
       notes: notes.trim(),
+      employee: employee.trim(),
+      inspectionDate,
       employeeSignature: employeeSignature.trim(),
       managerSignature: managerSignature.trim()
         ? managerSignature.trim()
         : undefined,
+      type,
     };
 
-    const storageKey = keyFor(type, vehicleId);
-    const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    existing.unshift(record);
-    localStorage.setItem(storageKey, JSON.stringify(existing));
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase.from("inspections").insert({
+      vehicle_id: vehicleId,
+      inspection_type: type === "pre-trip" ? "Pre-Trip" : "Post-Trip",
+      checklist,
+      overall_status: inspectionStatus,
+      mileage: m,
+    });
+
+    if (error) {
+      console.error("Inspection insert failed:", error);
+      setSubmitError(error.message);
+      return;
+    }
 
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
 
@@ -403,6 +406,12 @@ export default function InspectionForm({
           {intro}
         </div>
       </div>
+
+      {submitError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
+          Failed to save inspection: {submitError}
+        </div>
+      ) : null}
 
       <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
         {/* General Info */}
