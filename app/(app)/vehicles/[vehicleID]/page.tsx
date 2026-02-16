@@ -6,12 +6,6 @@ import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 /* =========================
-   Supabase client
-========================= */
-
-const supabase = createSupabaseBrowser();
-
-/* =========================
    Types
 ========================= */
 
@@ -240,8 +234,12 @@ export default function VehicleDetailPage() {
     let alive = true;
 
     (async () => {
+      const supabase = createSupabaseBrowser();
       setVehicleLoading(true);
       setVehicleErr(null);
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      console.log("[vehicle-detail] user present:", Boolean(authData.user));
+      if (authErr) console.error("[vehicle-detail] auth check error:", authErr);
 
       const hydrateLocal = (row: VehicleRow) => {
         if (typeof window === "undefined") return;
@@ -269,6 +267,7 @@ export default function VehicleDetailPage() {
       if (!alive) return;
 
       if (byId.error) {
+        console.error("Vehicle load by id error:", byId.error);
         setVehicle(null);
         setVehicleErr(byId.error.message);
         setVehicleLoading(false);
@@ -294,6 +293,7 @@ export default function VehicleDetailPage() {
         if (!alive) return;
 
         if (byAsset.error) {
+          console.error("Vehicle load by asset error:", byAsset.error);
           setVehicle(null);
           setVehicleErr(byAsset.error.message);
           setVehicleLoading(false);
@@ -320,6 +320,7 @@ export default function VehicleDetailPage() {
         if (!alive) return;
 
         if (byPlate.error) {
+          console.error("Vehicle load by plate error:", byPlate.error);
           setVehicle(null);
           setVehicleErr(byPlate.error.message);
           setVehicleLoading(false);
@@ -376,6 +377,7 @@ export default function VehicleDetailPage() {
     let alive = true;
 
     (async () => {
+      const supabase = createSupabaseBrowser();
       setRequestPreviewError(null);
       const { data, error } = await supabase
         .from("maintenance_requests")
