@@ -27,10 +27,10 @@ function vehiclePmStorageKey(vehicleId: string) {
 export default function VehiclePreventativeMaintenanceForm({
   params,
 }: {
-  params: { vehicleId: string };
+  params: { vehicleID: string };
 }) {
   const router = useRouter();
-  const vehicleId = params.vehicleId;
+  const vehicleId = params.vehicleID;
 
   const [mileage, setMileage] = useState("");
   const [oilChangePerformed, setOilChangePerformed] = useState(true);

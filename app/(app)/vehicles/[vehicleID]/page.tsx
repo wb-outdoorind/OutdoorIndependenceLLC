@@ -533,7 +533,7 @@ export default function VehicleDetailPage() {
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
 
-          <Link href={`/vehicles/${routeIdForLinks}/preventative-maintenance`} style={actionBtnStyle()}>
+          <Link href={`/vehicles/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
             <span>Preventative Maintenance</span>
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
