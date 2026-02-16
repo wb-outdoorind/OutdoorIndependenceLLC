@@ -2,6 +2,7 @@
 
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 /* =========================
    Types (aligned with request)
@@ -60,42 +61,6 @@ type MaintenanceRequestRecord = {
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
 
-type MaintenanceLogRecord = {
-  id: string;
-  vehicleId: string;
-
-  createdAt: string; // ISO
-  serviceDate: string; // yyyy-mm-dd
-
-  mileage: number;
-  title: string;
-  status: MaintenanceLogStatus;
-  notes: string;
-
-  // link to request (when created from request)
-  requestId?: string;
-  origin?: "manual" | "from_request";
-
-  // receipt photos
-  receiptPhotos?: Attachment[];
-
-  // optional: costs/vendor
-  laborCost?: number;
-  partsCost?: number;
-  totalCost?: number;
-  vendorName?: string;
-  invoiceNumber?: string;
-
-  // optional: preventative
-  nextDueMileage?: number;
-  intervalMiles?: number;
-  nextDueDate?: string;
-  intervalDays?: number;
-  resetOilLife?: boolean;
-
-  closedAt?: string; // ISO when log is closed
-};
-
 /* =========================
    Keys
 ========================= */
@@ -103,31 +68,9 @@ type MaintenanceLogRecord = {
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
 }
-function maintenanceLogKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_log`;
-}
 function maintenanceRequestKey(vehicleId: string) {
   return `vehicle:${vehicleId}:maintenance_request`;
 }
-
-const REQUESTS_INDEX_KEY = "maintenance:requests:index";
-
-/* =========================
-   Index type
-========================= */
-type MaintenanceRequestIndexItem = {
-  id: string;
-  vehicleId: string;
-  createdAt: string;
-  requestDate: string;
-  status: RequestStatus;
-  urgency: Urgency;
-  systemAffected: SystemAffected;
-  drivabilityStatus: DrivabilityStatus;
-  title: string;
-  employee?: string;
-  maintenanceLogId?: string;
-};
 
 function safeJSON<T>(raw: string | null, fallback: T): T {
   try {
@@ -135,22 +78,6 @@ function safeJSON<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function upsertRequestIndex(item: Partial<MaintenanceRequestIndexItem> & { id: string }) {
-  const existing = safeJSON<MaintenanceRequestIndexItem[]>(
-    localStorage.getItem(REQUESTS_INDEX_KEY),
-    []
-  );
-
-  const idx = existing.findIndex((x) => x.id === item.id);
-  if (idx >= 0) {
-    existing[idx] = { ...existing[idx], ...item } as MaintenanceRequestIndexItem;
-  } else {
-    // If missing, we can’t fully reconstruct; best effort:
-    existing.unshift(item as MaintenanceRequestIndexItem);
-  }
-  localStorage.setItem(REQUESTS_INDEX_KEY, JSON.stringify(existing));
 }
 
 function todayYYYYMMDD() {
@@ -190,6 +117,7 @@ export default function MaintenanceLogPage() {
   // preventative
   const [nextDueMileage, setNextDueMileage] = useState("");
   const [resetOilLife, setResetOilLife] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
@@ -287,8 +215,9 @@ export default function MaintenanceLogPage() {
     setReceiptPhotos((prev) => prev.filter((p) => p.id !== id));
   }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitError(null);
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
 
@@ -306,81 +235,37 @@ export default function MaintenanceLogPage() {
     const l = Number(laborCost);
     const p = Number(partsCost);
 
-    const nowIso = new Date().toISOString();
-    const logId = crypto.randomUUID();
-
-    const record: MaintenanceLogRecord = {
-      id: logId,
-      vehicleId,
-      createdAt: nowIso,
-      serviceDate,
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase.from("maintenance_logs").insert({
+      vehicle_id: vehicleId,
+      request_id: requestId || null,
       mileage: m,
-      title: title.trim(),
-      status,
-      notes: notes.trim(),
-      requestId: requestId || undefined,
-      origin: requestId ? "from_request" : "manual",
-      receiptPhotos: receiptPhotos.length ? receiptPhotos : undefined,
+      notes: notes.trim()
+        ? notes.trim()
+        : [
+            `Title: ${title.trim()}`,
+            serviceDate ? `Service Date: ${serviceDate}` : "",
+            vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
+            invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
+            Number.isFinite(l) ? `Labor Cost: ${l}` : "",
+            Number.isFinite(p) ? `Parts Cost: ${p}` : "",
+            totalCost.trim() ? `Total Cost: ${totalCost}` : "",
+            nextDueMileage.trim() ? `Next Due Mileage: ${nextDueMileage.trim()}` : "",
+            resetOilLife ? "Reset Oil Life: Yes" : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+      status_update: status,
+    });
 
-      vendorName: vendorName.trim() ? vendorName.trim() : undefined,
-      invoiceNumber: invoiceNumber.trim() ? invoiceNumber.trim() : undefined,
-      laborCost: Number.isFinite(l) ? l : undefined,
-      partsCost: Number.isFinite(p) ? p : undefined,
-      totalCost: totalCost.trim() ? Number(totalCost) : undefined,
-
-      nextDueMileage: nextDueMileage.trim() ? Number(nextDueMileage) : undefined,
-      resetOilLife: resetOilLife || undefined,
-
-      closedAt: status === "Closed" ? nowIso : undefined,
-    };
-
-    // write log record per vehicle
-    const existingLogs = safeJSON<MaintenanceLogRecord[]>(
-      localStorage.getItem(maintenanceLogKey(vehicleId)),
-      []
-    );
-    existingLogs.unshift(record);
-    localStorage.setItem(maintenanceLogKey(vehicleId), JSON.stringify(existingLogs));
+    if (error) {
+      console.error("Maintenance log insert failed:", error);
+      setSubmitError(error.message);
+      return;
+    }
 
     // update vehicle mileage (only forward)
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
-
-    // If linked to request:
-    if (requestId) {
-      const reqKey = maintenanceRequestKey(vehicleId);
-      const requests = safeJSON<MaintenanceRequestRecord[]>(
-        localStorage.getItem(reqKey),
-        []
-      );
-      const idx = requests.findIndex((r) => r.id === requestId);
-
-      if (idx >= 0) {
-        const req = requests[idx];
-
-        // enforce one request → one log
-        if (req.maintenanceLogId) {
-          alert("This request already has a maintenance log. Not creating a duplicate link.");
-        } else {
-          const nextStatus: RequestStatus =
-            status === "Closed" ? "Closed" : "In Progress";
-
-          requests[idx] = {
-            ...req,
-            status: nextStatus,
-            maintenanceLogId: logId,
-            closedAt: status === "Closed" ? nowIso : req.closedAt,
-          };
-          localStorage.setItem(reqKey, JSON.stringify(requests));
-
-          // update global index too
-          upsertRequestIndex({
-            id: requestId,
-            status: nextStatus,
-            maintenanceLogId: logId,
-          });
-        }
-      }
-    }
 
     router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
@@ -401,6 +286,12 @@ export default function MaintenanceLogPage() {
       {requestId && !linkedRequest ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.9 }}>
           Could not find the request in localStorage for this vehicle. You can still log manually.
+        </div>
+      ) : null}
+
+      {submitError ? (
+        <div style={{ marginTop: 12, ...cardStyle, opacity: 0.95, color: "#ff9d9d" }}>
+          Failed to save maintenance log: {submitError}
         </div>
       ) : null}
 

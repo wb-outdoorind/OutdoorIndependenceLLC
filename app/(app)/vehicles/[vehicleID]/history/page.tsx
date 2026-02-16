@@ -98,12 +98,19 @@ type MaintenanceRequestRow = {
 
 type MaintenanceLogRecord = {
   id: string;
-  vehicleId: string;
   createdAt: string;
-  mileage: number;
-  title: string;
-  status: "Closed" | "In Progress";
-  notes: string;
+  mileage?: number;
+  statusUpdate?: string;
+  notes?: string;
+};
+
+type MaintenanceLogRow = {
+  id: string;
+  created_at: string;
+  mileage: number | null;
+  status_update: string | null;
+  notes: string | null;
+  vehicle_id: string;
 };
 
 type TimelineType =
@@ -139,10 +146,6 @@ function postTripKey(vehicleId: string) {
 
 function vehiclePmKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
-}
-
-function maintenanceLogKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_log`;
 }
 
 /* =========================
@@ -248,7 +251,9 @@ export default function VehicleHistoryPage() {
 
   const [filter, setFilter] = useState<FilterValue>("All");
   const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
+  const [logRows, setLogRows] = useState<MaintenanceLogRecord[]>([]);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -309,6 +314,45 @@ export default function VehicleHistoryPage() {
       alive = false;
     };
   }, [vehicleId, params.vehicleID]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadLogs() {
+      const supabase = createSupabaseBrowser();
+      setLogError(null);
+
+      const { data, error } = await supabase
+        .from("maintenance_logs")
+        .select("id,created_at,mileage,status_update,notes,vehicle_id")
+        .eq("vehicle_id", params.vehicleID)
+        .order("created_at", { ascending: false });
+
+      if (!alive) return;
+      if (error || !data) {
+        if (error) console.error("[vehicle-history] maintenance_logs load error:", error);
+        setLogError(error?.message || "Failed to load maintenance logs.");
+        setLogRows([]);
+        return;
+      }
+
+      setLogRows(
+        (data as MaintenanceLogRow[]).map((r) => ({
+          id: r.id,
+          createdAt: r.created_at,
+          mileage: r.mileage ?? undefined,
+          statusUpdate: r.status_update ?? undefined,
+          notes: r.notes ?? undefined,
+        }))
+      );
+    }
+
+    loadLogs();
+
+    return () => {
+      alive = false;
+    };
+  }, [params.vehicleID]);
 
   const items = useMemo(() => {
     if (typeof window === "undefined") return [] as TimelineItem[];
@@ -398,14 +442,14 @@ export default function VehicleHistoryPage() {
     });
 
 
-    const logs = safeParse<MaintenanceLogRecord[]>(localStorage.getItem(maintenanceLogKey(vehicleId)), []).map(
+    const logs = logRows.map(
       (x): TimelineItem => ({
         id: x.id,
         type: "Maintenance Log",
         createdAt: x.createdAt,
         mileage: x.mileage,
-        title: x.title?.trim() ? x.title : "Maintenance Log",
-        subtitle: x.status,
+        title: "Maintenance Log",
+        subtitle: x.statusUpdate,
         notes: x.notes?.trim() ? x.notes : undefined,
       })
     );
@@ -415,7 +459,7 @@ export default function VehicleHistoryPage() {
     );
 
     return merged;
-  }, [vehicleId, requestRows]);
+  }, [vehicleId, requestRows, logRows]);
 
   const filtered = useMemo(() => {
     if (filter === "All") return items;
@@ -454,6 +498,12 @@ export default function VehicleHistoryPage() {
       {requestError ? (
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
           {requestError}
+        </div>
+      ) : null}
+
+      {logError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
+          {logError}
         </div>
       ) : null}
 

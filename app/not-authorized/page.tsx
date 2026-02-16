@@ -1,12 +1,13 @@
 import Link from "next/link";
 
-export default function NotAuthorizedPage({
+export default async function NotAuthorizedPage({
   searchParams,
 }: {
-  searchParams?: { next?: string; reason?: string };
+  searchParams?: Promise<{ next?: string; reason?: string }>;
 }) {
-  const next = searchParams?.next || "/";
-  const reason = searchParams?.reason;
+  const resolvedSearchParams = await searchParams;
+  const next = resolvedSearchParams?.next || "/";
+  const reason = resolvedSearchParams?.reason;
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: 32 }}>

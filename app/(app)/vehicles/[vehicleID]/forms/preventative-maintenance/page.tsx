@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 function vehicleMileageKey(vehicleId: string) {
@@ -24,12 +24,9 @@ function vehiclePmStorageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
 }
 
-export default function VehiclePreventativeMaintenanceForm({
-  params,
-}: {
-  params: { vehicleID: string };
-}) {
+export default function VehiclePreventativeMaintenanceForm() {
   const router = useRouter();
+  const params = useParams<{ vehicleID: string }>();
   const vehicleId = params.vehicleID;
 
   const [mileage, setMileage] = useState("");
