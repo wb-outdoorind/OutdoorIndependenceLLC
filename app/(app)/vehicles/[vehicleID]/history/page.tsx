@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
@@ -241,27 +242,36 @@ function failSummaryFromSections(sections?: TripInspectionRecord["sections"]) {
    Page
 ========================= */
 
-export default function VehicleHistoryPage({ params }: { params: { vehicleId: string } }) {
-  const vehicleId = params.vehicleId;
+export default function VehicleHistoryPage() {
+  const params = useParams<{ vehicleID: string }>();
+  const vehicleId = decodeURIComponent(params.vehicleID);
 
   const [filter, setFilter] = useState<FilterValue>("All");
   const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
 
     async function loadRequests() {
       const supabase = createSupabaseBrowser();
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      console.log("[vehicle-history] user present:", Boolean(authData.user));
+      if (authErr) console.error("[vehicle-history] auth check error:", authErr);
+      setRequestError(null);
+
       const { data, error } = await supabase
         .from("maintenance_requests")
         .select(
           "id,vehicle_id,created_at,status,urgency,system_affected,drivability,issue_identified_during,unit_status,description"
         )
-        .eq("vehicle_id", vehicleId)
+        .eq("vehicle_id", params.vehicleID)
         .order("created_at", { ascending: false });
 
       if (!alive) return;
       if (error || !data) {
+        if (error) console.error("[vehicle-history] load error:", error);
+        setRequestError(error?.message || "Failed to load maintenance requests.");
         setRequestRows([]);
         return;
       }
@@ -298,7 +308,7 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
     return () => {
       alive = false;
     };
-  }, [vehicleId]);
+  }, [vehicleId, params.vehicleID]);
 
   const items = useMemo(() => {
     if (typeof window === "undefined") return [] as TimelineItem[];
@@ -440,6 +450,12 @@ export default function VehicleHistoryPage({ params }: { params: { vehicleId: st
           </Link>
         </div>
       </div>
+
+      {requestError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
+          {requestError}
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div style={{ marginTop: 16, ...cardStyle() }}>

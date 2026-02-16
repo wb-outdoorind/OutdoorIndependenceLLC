@@ -102,12 +102,21 @@ export default function MaintenanceCenterPage() {
 
   const [rows, setRows] = useState<MaintenanceRequestIndexItem[]>([]);
   const [metaMap, setMetaMap] = useState<Record<string, VehicleMeta>>({});
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
 
     async function loadRequests() {
       const supabase = createSupabaseBrowser();
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      console.log("[maintenance] user present:", Boolean(authData.user));
+      if (authErr) console.error("[maintenance] auth check error:", authErr);
+
+      setLoading(true);
+      setErrorMessage(null);
+
       const { data, error } = await supabase
         .from("maintenance_requests")
         .select(
@@ -117,8 +126,11 @@ export default function MaintenanceCenterPage() {
 
       if (!alive) return;
       if (error || !data) {
+        if (error) console.error("[maintenance] load error:", error);
+        setErrorMessage(error?.message || "Failed to load maintenance requests.");
         setRows([]);
         setMetaMap({});
+        setLoading(false);
         return;
       }
 
@@ -168,6 +180,7 @@ export default function MaintenanceCenterPage() {
         if (!mm[r.vehicleId]) mm[r.vehicleId] = readVehicleMeta(r.vehicleId);
       }
       setMetaMap(mm);
+      setLoading(false);
     }
 
     loadRequests();
@@ -270,7 +283,11 @@ export default function MaintenanceCenterPage() {
 
       {/* List */}
       <div style={{ marginTop: 16, ...cardStyle }}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ opacity: 0.75 }}>Loading maintenance requests...</div>
+        ) : errorMessage ? (
+          <div style={{ opacity: 0.9, color: "#ff9d9d" }}>{errorMessage}</div>
+        ) : filtered.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No requests found for this view.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
