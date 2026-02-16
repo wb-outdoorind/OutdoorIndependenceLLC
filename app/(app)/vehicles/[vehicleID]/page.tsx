@@ -42,21 +42,18 @@ type VehiclePMRecord = {
   notes?: string;
 };
 
-type MaintenanceLogRecord = {
+type MaintenanceRequestPreviewRow = {
   id: string;
-  vehicleId: string;
-  createdAt: string;
-  mileage: number;
-  title: string;
-  status: "Closed" | "In Progress";
-  notes: string;
+  created_at: string;
+  status: string | null;
+  system_affected: string | null;
+  description: string | null;
 };
 
 type HistoryPreviewItem = {
-  type: "Vehicle PM" | "Maintenance Log";
+  type: "Maintenance Request";
   createdAt: string;
   title: string;
-  mileage?: number;
   status?: string;
   notes?: string;
 };
@@ -69,9 +66,6 @@ type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
 function vehiclePmKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
-}
-function maintenanceLogKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_log`;
 }
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
@@ -110,6 +104,21 @@ function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function parseTitleAndDescription(raw: string | null) {
+  if (!raw) return { title: "", description: "" };
+  const lines = raw.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+
+  let title = "";
+  if (firstLine.startsWith("Title:")) {
+    title = firstLine.slice("Title:".length).trim();
+  }
+
+  if (lines.length <= 2) return { title, description: raw.trim() };
+  const description = lines.slice(2).join("\n").trim();
+  return { title, description };
 }
 
 function cardStyle(): React.CSSProperties {
@@ -215,6 +224,7 @@ export default function VehicleDetailPage() {
   const searchParams = useSearchParams();
   const assetParam = (searchParams.get("asset") || "").trim();
   const plateParam = (searchParams.get("plate") || "").trim();
+  const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(true);
@@ -333,12 +343,11 @@ export default function VehicleDetailPage() {
     };
   }, [vehicleIdFromRoute, assetParam, plateParam]);
 
-  const { localMileage, pmRecords, logRecords } = useMemo(() => {
+  const { localMileage, pmRecords } = useMemo(() => {
     if (typeof window === "undefined") {
       return {
         localMileage: undefined as number | undefined,
         pmRecords: [] as VehiclePMRecord[],
-        logRecords: [] as MaintenanceLogRecord[],
       };
     }
 
@@ -354,12 +363,34 @@ export default function VehicleDetailPage() {
         localStorage.getItem(vehiclePmKey(storageId)),
         []
       ),
-      logRecords: safeParse<MaintenanceLogRecord[]>(
-        localStorage.getItem(maintenanceLogKey(storageId)),
-        []
-      ),
     };
   }, [vehicleIdFromRoute, vehicle?.id]);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select("id,created_at,status,system_affected,description")
+        .eq("vehicle_id", params.vehicleID)
+        .order("created_at", { ascending: false })
+        .limit(4);
+
+      if (!alive) return;
+      if (error || !data) {
+        if (error) console.error("Vehicle preview requests load error:", error);
+        setRequestPreviewRows([]);
+        return;
+      }
+
+      setRequestPreviewRows(data as MaintenanceRequestPreviewRow[]);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [params.vehicleID]);
 
   // Display fields
   const displayName = vehicle?.name ?? "Vehicle";
@@ -388,28 +419,19 @@ export default function VehicleDetailPage() {
   const oilLifePercent = computeOilLifePercent(currentMileage, lastOilChangeMileage);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
-    const pmItems: HistoryPreviewItem[] = pmRecords.map((x) => ({
-      type: "Vehicle PM",
-      createdAt: x.createdAt,
-      title: x.oilChangePerformed ? "Vehicle PM — Oil Change Performed" : "Vehicle PM",
-      mileage: x.mileage,
-      status: x.oilChangePerformed ? "Oil life reset" : undefined,
-      notes: x.notes,
-    }));
-
-    const logItems: HistoryPreviewItem[] = logRecords.map((x) => ({
-      type: "Maintenance Log",
-      createdAt: x.createdAt,
-      title: x.title?.trim() ? x.title : "Maintenance Log",
-      mileage: x.mileage,
-      status: x.status,
-      notes: x.notes,
-    }));
-
-    return [...pmItems, ...logItems]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 4);
-  }, [pmRecords, logRecords]);
+    return requestPreviewRows.map((r) => {
+      const parsed = parseTitleAndDescription(r.description);
+      return {
+        type: "Maintenance Request",
+        createdAt: r.created_at,
+        title:
+          parsed.title ||
+          (r.system_affected?.trim() ? `${r.system_affected} issue` : "Maintenance Request"),
+        status: r.status ?? undefined,
+        notes: parsed.description || undefined,
+      };
+    });
+  }, [requestPreviewRows]);
 
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
@@ -550,13 +572,13 @@ export default function VehicleDetailPage() {
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>Recent Maintenance History</div>
-          <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 items (PM + Maintenance Logs)</div>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance requests</div>
         </div>
 
         <div style={{ marginTop: 12 }}>
           {historyPreview.length === 0 ? (
             <div style={{ opacity: 0.75 }}>
-              No maintenance history yet for this vehicle.
+              No maintenance requests yet.
             </div>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
@@ -581,8 +603,7 @@ export default function VehicleDetailPage() {
                   </div>
 
                   <div style={{ marginTop: 6, opacity: 0.82, fontSize: 13 }}>
-                    {typeof r.mileage === "number" ? <span>{r.mileage.toLocaleString()} mi</span> : null}
-                    {r.status ? <span>{typeof r.mileage === "number" ? " • " : ""}{r.status}</span> : null}
+                    {r.status ? <span>{r.status}</span> : null}
                   </div>
 
                   {r.notes?.trim() ? (
