@@ -29,11 +29,16 @@ type UsageRow = {
   reference_id: string | null;
   created_by: string | null;
   notes: string | null;
-  profiles: { email: string | null } | Array<{ email: string | null }> | null;
   inventory_items:
     | { name: string | null; location_id: string | null }
     | Array<{ name: string | null; location_id: string | null }>
     | null;
+};
+
+type ProfileLookupRow = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -99,6 +104,7 @@ export default function InventoryReportsClient() {
   const [items, setItems] = useState<InventoryItemRow[]>([]);
   const [locationMap, setLocationMap] = useState<Record<string, string>>({});
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
+  const [profileMap, setProfileMap] = useState<Record<string, { email: string | null; full_name: string | null }>>({});
 
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
@@ -169,7 +175,7 @@ export default function InventoryReportsClient() {
     let query = supabase
       .from("inventory_transactions")
       .select(
-        "id,created_at,item_id,change_qty,reference_type,reference_id,created_by,notes,profiles(email),inventory_items(name,location_id)"
+        "id,created_at,item_id,change_qty,reference_type,reference_id,created_by,notes,inventory_items(name,location_id)"
       )
       .eq("reason", "usage")
       .order("created_at", { ascending: false });
@@ -187,11 +193,45 @@ export default function InventoryReportsClient() {
       console.error("[inventory-reports] usage query error:", error);
       setUsageError(error.message || "Failed to load usage report.");
       setUsageRows([]);
+      setProfileMap({});
       setUsageLoading(false);
       return;
     }
 
-    setUsageRows((data ?? []) as UsageRow[]);
+    const rows = (data ?? []) as UsageRow[];
+    setUsageRows(rows);
+
+    const ids = Array.from(
+      new Set(
+        rows
+          .map((row) => row.created_by)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    if (ids.length === 0) {
+      setProfileMap({});
+      setUsageLoading(false);
+      return;
+    }
+
+    const { data: profiles, error: profileError } = await supabase
+      .from("profiles")
+      .select("id,email,full_name")
+      .in("id", ids);
+
+    if (profileError) {
+      console.error("[inventory-reports] profile lookup error:", profileError);
+      setProfileMap({});
+      setUsageLoading(false);
+      return;
+    }
+
+    const nextMap: Record<string, { email: string | null; full_name: string | null }> = {};
+    for (const row of (profiles ?? []) as ProfileLookupRow[]) {
+      nextMap[row.id] = { email: row.email, full_name: row.full_name };
+    }
+    setProfileMap(nextMap);
     setUsageLoading(false);
   }
 
@@ -273,7 +313,7 @@ export default function InventoryReportsClient() {
         Math.abs(Number(row.change_qty)),
         row.reference_type ?? "",
         row.reference_id ?? "",
-        firstOrNull(row.profiles)?.email ?? "",
+        row.created_by ? profileMap[row.created_by]?.email ?? row.created_by : "",
         row.notes ?? "",
       ]),
     ];
@@ -392,7 +432,13 @@ export default function InventoryReportsClient() {
                       <td style={tdStyle}>{Math.abs(Number(row.change_qty))}</td>
                       <td style={tdStyle}>{row.reference_type ?? "-"}</td>
                       <td style={tdStyle}>{row.reference_id ?? "-"}</td>
-                      <td style={tdStyle}>{firstOrNull(row.profiles)?.email ?? row.created_by ?? "-"}</td>
+                      <td style={tdStyle}>
+                        {row.created_by
+                          ? profileMap[row.created_by]?.email ||
+                            profileMap[row.created_by]?.full_name ||
+                            row.created_by
+                          : "-"}
+                      </td>
                       <td style={tdStyle}>{row.notes ?? "-"}</td>
                     </tr>
                   ))}
