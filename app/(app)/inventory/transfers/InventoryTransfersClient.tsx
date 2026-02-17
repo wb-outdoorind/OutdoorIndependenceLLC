@@ -77,6 +77,7 @@ export default function InventoryTransfersClient() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -150,6 +151,7 @@ export default function InventoryTransfersClient() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
+    setSuccessMessage(null);
 
     if (!itemId) return alert("Select an item.");
 
@@ -193,7 +195,25 @@ export default function InventoryTransfersClient() {
       return;
     }
 
-    router.push(`/inventory/${encodeURIComponent(itemId)}`);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              location_id: toLocationId,
+            }
+          : item
+      )
+    );
+
+    setQty("1");
+    setNotes("");
+    setItemSearch("");
+    setItemId("");
+    setFromLocationId("");
+    setToLocationId("");
+    setSubmitting(false);
+    setSuccessMessage("Transfer saved.");
   }
 
   return (
@@ -203,6 +223,9 @@ export default function InventoryTransfersClient() {
 
       {errorMessage ? (
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d" }}>{errorMessage}</div>
+      ) : null}
+      {successMessage ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#b8ffd9" }}>{successMessage}</div>
       ) : null}
 
       <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
