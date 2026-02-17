@@ -170,6 +170,9 @@ export default function InventoryPage() {
           <Link href="/inventory/transfers" style={secondaryButtonStyle}>
             Transfers
           </Link>
+          <Link href="/inventory/trends" style={secondaryButtonStyle}>
+            Trends
+          </Link>
 
           {canManageInventory(role) ? (
             <Link href="/inventory/new" style={buttonStyle}>
