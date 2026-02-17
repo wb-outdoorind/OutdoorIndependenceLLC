@@ -61,6 +61,19 @@ type MaintenanceRequestRecord = {
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
 
+type InventoryItem = {
+  id: string;
+  name: string;
+  category: string | null;
+  quantity: number;
+};
+
+type PartUsed = {
+  item_id: string;
+  name: string;
+  quantity_used: number;
+};
+
 /* =========================
    Keys
 ========================= */
@@ -118,6 +131,13 @@ export default function MaintenanceLogPage() {
   const [nextDueMileage, setNextDueMileage] = useState("");
   const [resetOilLife, setResetOilLife] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [partSearch, setPartSearch] = useState("");
+  const [selectedPartId, setSelectedPartId] = useState("");
+  const [selectedPartQty, setSelectedPartQty] = useState("1");
+  const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
@@ -178,6 +198,35 @@ export default function MaintenanceLogPage() {
     return () => window.clearTimeout(timer);
   }, [vehicleId, requestId, router]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setInventoryLoading(true);
+        setInventoryError(null);
+
+        const supabase = createSupabaseBrowser();
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select("id,name,category,quantity")
+          .eq("is_active", true)
+          .order("name", { ascending: true });
+
+        if (error) {
+          console.error("[maintenance-log] failed to load inventory items:", error);
+          setInventoryError(error.message);
+          setInventoryItems([]);
+          setInventoryLoading(false);
+          return;
+        }
+
+        setInventoryItems((data ?? []) as InventoryItem[]);
+        setInventoryLoading(false);
+      })();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const totalCost = useMemo(() => {
     const l = Number(laborCost);
     const p = Number(partsCost);
@@ -186,6 +235,39 @@ export default function MaintenanceLogPage() {
     if (!laborCost.trim() && !partsCost.trim()) return "";
     return String(lf + pf);
   }, [laborCost, partsCost]);
+
+  const filteredInventoryItems = useMemo(() => {
+    const q = partSearch.trim().toLowerCase();
+    const usedIds = new Set(partsUsed.map((p) => p.item_id));
+    const available = inventoryItems.filter((item) => !usedIds.has(item.id));
+    if (!q) return available;
+    return available.filter((item) =>
+      [item.name, item.category ?? "", item.id].join(" ").toLowerCase().includes(q)
+    );
+  }, [inventoryItems, partSearch, partsUsed]);
+
+  function addPartUsed() {
+    if (!selectedPartId) return;
+    const qty = Math.trunc(Number(selectedPartQty));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      alert("Enter a valid quantity used.");
+      return;
+    }
+
+    const selected = inventoryItems.find((item) => item.id === selectedPartId);
+    if (!selected) return;
+
+    setPartsUsed((prev) => [
+      ...prev,
+      { item_id: selected.id, name: selected.name, quantity_used: qty },
+    ]);
+    setSelectedPartId("");
+    setSelectedPartQty("1");
+  }
+
+  function removePartUsed(itemId: string) {
+    setPartsUsed((prev) => prev.filter((p) => p.item_id !== itemId));
+  }
 
   async function onPickReceiptPhoto(file: File) {
     // Basic size guard: refuse very large images (localStorage risk)
@@ -236,7 +318,9 @@ export default function MaintenanceLogPage() {
     const p = Number(partsCost);
 
     const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from("maintenance_logs").insert({
+    const { data: insertedLog, error } = await supabase
+      .from("maintenance_logs")
+      .insert({
       vehicle_id: vehicleId,
       request_id: requestId || null,
       mileage: m,
@@ -256,12 +340,41 @@ export default function MaintenanceLogPage() {
             .filter(Boolean)
             .join("\n"),
       status_update: status,
-    });
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Maintenance log insert failed:", error);
       setSubmitError(error.message);
       return;
+    }
+
+    if (partsUsed.length > 0) {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) {
+        console.error("Failed to resolve auth user for inventory usage logs:", authError);
+        setSubmitError("Maintenance log saved, but failed to apply parts usage (missing auth user).");
+        return;
+      }
+
+      const txPayload = partsUsed.map((part) => ({
+        item_id: part.item_id,
+        change_qty: -Math.abs(part.quantity_used),
+        reason: "usage",
+        reference_type: "maintenance_log",
+        reference_id: insertedLog.id,
+        created_by: authData.user.id,
+      }));
+
+      const { error: txError } = await supabase.from("inventory_transactions").insert(txPayload);
+      if (txError) {
+        console.error("Inventory usage insert failed:", txError);
+        setSubmitError(
+          `Maintenance log saved, but failed to record parts used: ${txError.message}`
+        );
+        return;
+      }
     }
 
     // update vehicle mileage (only forward)
@@ -427,6 +540,98 @@ export default function MaintenanceLogPage() {
               <input value={totalCost} readOnly style={{ ...inputStyle, opacity: 0.85 }} />
             </Field>
           </div>
+        </div>
+
+        <div style={{ marginTop: 16, ...cardStyle }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Parts Used</div>
+
+          <div style={gridStyle}>
+            <Field label="Search Inventory">
+              <input
+                value={partSearch}
+                onChange={(e) => setPartSearch(e.target.value)}
+                placeholder="Search by part name/category"
+                style={inputStyle}
+              />
+            </Field>
+
+            <Field label="Part">
+              <select
+                value={selectedPartId}
+                onChange={(e) => setSelectedPartId(e.target.value)}
+                style={inputStyle}
+                disabled={inventoryLoading || filteredInventoryItems.length === 0}
+              >
+                <option value="">
+                  {inventoryLoading
+                    ? "Loading parts..."
+                    : filteredInventoryItems.length
+                    ? "Select a part"
+                    : "No matching parts"}
+                </option>
+                {filteredInventoryItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} ({item.quantity} in stock)
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Quantity Used">
+              <input
+                value={selectedPartQty}
+                onChange={(e) => setSelectedPartQty(e.target.value)}
+                inputMode="numeric"
+                placeholder="1"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <button type="button" onClick={addPartUsed} style={secondaryButtonStyle}>
+              Add Part
+            </button>
+          </div>
+
+          {inventoryError ? (
+            <div style={{ marginTop: 10, color: "#ff9d9d" }}>
+              Failed to load inventory items: {inventoryError}
+            </div>
+          ) : null}
+
+          {partsUsed.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {partsUsed.map((part) => (
+                <div
+                  key={part.item_id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{part.name}</div>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>Qty Used: {part.quantity_used}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removePartUsed(part.item_id)}
+                    style={secondaryButtonStyle}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 10, opacity: 0.7 }}>No parts added.</div>
+          )}
         </div>
 
         <div style={{ marginTop: 16, ...cardStyle }}>
