@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
@@ -193,7 +194,6 @@ export default function OpsPage() {
 
   const [outOfServiceCount, setOutOfServiceCount] = useState(0);
   const [openRequestCount, setOpenRequestCount] = useState(0);
-  const [pmOverviewItems, setPmOverviewItems] = useState<Array<{ id: string; label: string; created_at: string; overdue: boolean }>>([]);
   const [lowInventoryCount, setLowInventoryCount] = useState(0);
   const [closedLast7Days, setClosedLast7Days] = useState(0);
   const [avgDaysToClose, setAvgDaysToClose] = useState(0);
@@ -204,6 +204,9 @@ export default function OpsPage() {
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
   const [downtimeAssetTypeFilter, setDowntimeAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [downtimeSearch, setDowntimeSearch] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  const router = useRouter();
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -212,6 +215,25 @@ export default function OpsPage() {
         setErrorMessage(null);
 
         const supabase = createSupabaseBrowser();
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+        if (userError) {
+          console.error("[ops] auth check error:", userError);
+          setErrorMessage(userError.message || "Failed to verify authentication.");
+          setIsAuthenticated(false);
+          setLoading(false);
+          return;
+        }
+        if (!user) {
+          setIsAuthenticated(false);
+          setErrorMessage("You must be signed in to view Maintenance Operations.");
+          setLoading(false);
+          router.replace("/login");
+          return;
+        }
+        setIsAuthenticated(true);
 
         const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
           supabase.from("vehicles").select("id,name,status,mileage,updated_at"),
@@ -322,28 +344,6 @@ export default function OpsPage() {
           ? closed.reduce((sum, r) => sum + daysBetween(r.created_at, r.updated_at), 0) / closed.length
           : 0;
 
-        const pmLike = openRequests
-          .filter((r) => {
-            const text = (r.description ?? "").toLowerCase();
-            return text.includes("prevent") || text.includes("pm");
-          })
-          .map((r) => {
-            const ageDays = daysBetween(r.created_at, new Date().toISOString());
-            const overdue = ageDays > 14;
-            const label = r.vehicle_id
-              ? `Vehicle ${r.vehicle_id}`
-              : r.equipment_id
-              ? `Equipment ${r.equipment_id}`
-              : "Unit";
-            return {
-              id: r.id,
-              label,
-              created_at: r.created_at,
-              overdue,
-            };
-          })
-          .sort((a, b) => Number(b.overdue) - Number(a.overdue));
-
         const lowStock = ((lowInvRes.data ?? []) as LowStockRow[]).filter(
           (row) => Number(row.quantity) <= Number(row.minimum_quantity)
         ).length;
@@ -356,7 +356,6 @@ export default function OpsPage() {
 
         setOutOfServiceCount(out);
         setOpenRequestCount(openRequests.length);
-        setPmOverviewItems(pmLike);
         setLowInventoryCount(lowStock);
         setClosedLast7Days(closed7);
         setAvgDaysToClose(Number(avgCloseDays.toFixed(1)));
@@ -365,7 +364,7 @@ export default function OpsPage() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [router]);
 
   const tabs: OpsTab[] = ["Overview", "PM Due", "Downtime", "Failures", "Performance"];
 
@@ -584,6 +583,59 @@ export default function OpsPage() {
     [downtimeRows]
   );
 
+  const openRequestsByAsset = useMemo(() => {
+    const vehicleNameById = new Map(vehicles.map((v) => [v.id, v.name || v.id]));
+    const equipmentNameById = new Map(equipment.map((e) => [e.id, e.name || e.id]));
+
+    const grouped = new Map<
+      string,
+      {
+        assetType: "Vehicle" | "Equipment";
+        assetId: string;
+        assetName: string;
+        href: string;
+        count: number;
+      }
+    >();
+
+    for (const row of allRequests) {
+      const status = (row.status ?? "").trim();
+      if (status !== "Open" && status !== "In Progress") continue;
+
+      if (row.vehicle_id) {
+        const key = `Vehicle:${row.vehicle_id}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          grouped.set(key, {
+            assetType: "Vehicle",
+            assetId: row.vehicle_id,
+            assetName: vehicleNameById.get(row.vehicle_id) ?? row.vehicle_id,
+            href: `/vehicles/${encodeURIComponent(row.vehicle_id)}`,
+            count: 1,
+          });
+        }
+      } else if (row.equipment_id) {
+        const key = `Equipment:${row.equipment_id}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          grouped.set(key, {
+            assetType: "Equipment",
+            assetId: row.equipment_id,
+            assetName: equipmentNameById.get(row.equipment_id) ?? row.equipment_id,
+            href: `/equipment/${encodeURIComponent(row.equipment_id)}`,
+            count: 1,
+          });
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => b.count - a.count);
+  }, [allRequests, equipment, vehicles]);
+
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Maintenance Operations</h1>
@@ -615,7 +667,7 @@ export default function OpsPage() {
         <div style={{ marginTop: 16, ...cardStyle(), color: "#ff9d9d" }}>{errorMessage}</div>
       ) : null}
 
-      {!loading && !errorMessage && tab === "Overview" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "Overview" ? (
         <>
           <div
             style={{
@@ -634,16 +686,14 @@ export default function OpsPage() {
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>PM Due / Overdue</div>
-            {pmOverviewItems.length === 0 ? (
-              <div style={{ opacity: 0.75 }}>
-                No PM-tagged open requests found. PM requests are inferred from descriptions containing “PM” or “prevent”.
-              </div>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Out of Service Units</div>
+            {downtimeRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No units currently marked Red Tagged or Out of Service.</div>
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
-                {pmOverviewItems.map((pm) => (
+                {downtimeRows.map((row) => (
                   <div
-                    key={pm.id}
+                    key={`overview-down:${row.assetType}:${row.assetId}`}
                     style={{
                       border: "1px solid rgba(255,255,255,0.12)",
                       borderRadius: 12,
@@ -656,16 +706,98 @@ export default function OpsPage() {
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 800 }}>{pm.label}</div>
+                      <Link href={row.detailHref} style={{ color: "inherit", fontWeight: 800 }}>
+                        {row.assetName}
+                      </Link>
                       <div style={{ opacity: 0.75, fontSize: 12 }}>
-                        Requested: {formatDateTime(pm.created_at)}
+                        {row.assetType} · {row.assetId} · Since {formatDateTime(row.downSince)}
                       </div>
                     </div>
-                    <div style={statusChipStyle(pm.overdue)}>{pm.overdue ? "Overdue" : "Due"}</div>
+                    <div style={statusChipStyle(row.status === "Red Tagged")}>{row.daysDown} days out</div>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+
+          <div style={{ marginTop: 16, ...cardStyle() }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Open Maintenance Requests</div>
+            {openRequestsByAsset.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {openRequestsByAsset.map((row) => (
+                  <div
+                    key={`overview-open:${row.assetType}:${row.assetId}`}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 12,
+                      padding: 10,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <Link href={row.href} style={{ color: "inherit", fontWeight: 800 }}>
+                        {row.assetName}
+                      </Link>
+                      <div style={{ opacity: 0.75, fontSize: 12 }}>
+                        {row.assetType} · {row.assetId}
+                      </div>
+                    </div>
+                    <div style={statusChipStyle(false)}>{row.count} open</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 16, ...cardStyle() }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>PM Due / Overdue</div>
+            {pmBoardRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No due or overdue PM units right now.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {pmBoardRows.slice(0, 8).map((row) => (
+                  <div
+                    key={`overview-pm:${row.assetType}:${row.assetId}`}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 12,
+                      padding: 10,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <Link href={row.pmFormHref} style={{ color: "inherit", fontWeight: 800 }}>
+                        {row.assetName}
+                      </Link>
+                      <div style={{ opacity: 0.75, fontSize: 12 }}>
+                        Due at {row.dueAt.toLocaleString()} {row.unit}
+                      </div>
+                    </div>
+                    <div style={statusChipStyle(row.status === "Overdue")}>{row.status}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 16, ...cardStyle() }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Low Inventory Count</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 24, fontWeight: 900 }}>{lowInventoryCount}</div>
+              <Link href="/inventory?filter=low" style={actionLinkStyle}>
+                View Low Stock
+              </Link>
+            </div>
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
@@ -694,7 +826,7 @@ export default function OpsPage() {
         </>
       ) : null}
 
-      {!loading && !errorMessage && tab === "PM Due" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "PM Due" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>PM Due Board</div>
 
@@ -788,7 +920,7 @@ export default function OpsPage() {
         </div>
       ) : null}
 
-      {!loading && !errorMessage && tab === "Downtime" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "Downtime" ? (
         <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
           <div style={cardStyle()}>
             <div style={{ fontWeight: 900, marginBottom: 4 }}>Red Tag Board</div>
@@ -923,7 +1055,7 @@ export default function OpsPage() {
         </div>
       ) : null}
 
-      {!loading && !errorMessage && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" ? (
+      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
