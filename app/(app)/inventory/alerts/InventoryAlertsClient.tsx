@@ -1,13 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type SubscriptionRow = {
-  id: string;
-  email: string;
+type RecipientRow = {
+  profile_id: string;
   is_enabled: boolean;
   created_at: string;
+  profile: {
+    id: string;
+    full_name: string | null;
+    email: string | null;
+    role: string | null;
+  } | null;
+};
+
+type ProfileOption = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -37,32 +49,79 @@ function formatDateTime(iso: string) {
 }
 
 export default function InventoryAlertsClient() {
-  const [rows, setRows] = useState<SubscriptionRow[]>([]);
+  const [rows, setRows] = useState<RecipientRow[]>([]);
+  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [newEmail, setNewEmail] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>([]);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
+
+  const selectedSet = useMemo(() => new Set(selectedProfileIds), [selectedProfileIds]);
+  const recipientIds = useMemo(() => new Set(rows.map((r) => r.profile_id)), [rows]);
+
+  const filteredProfiles = useMemo(() => {
+    const q = pickerSearch.trim().toLowerCase();
+    const base = profiles.filter((p) => !recipientIds.has(p.id));
+    if (!q) return base;
+
+    return base.filter((p) => {
+      const hay = [p.full_name ?? "", p.email ?? "", p.role ?? ""].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [pickerSearch, profiles, recipientIds]);
 
   async function loadData() {
     const supabase = createSupabaseBrowser();
     setLoading(true);
     setErrorMessage(null);
 
-    const { data, error } = await supabase
-      .from("inventory_low_stock_subscriptions")
-      .select("id,email,is_enabled,created_at")
-      .order("email", { ascending: true });
+    const [recipientsRes, profilesRes] = await Promise.all([
+      supabase
+        .from("inventory_alert_recipients")
+        .select("profile_id,is_enabled,created_at,profiles!inner(id,full_name,email,role)")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("profiles")
+        .select("id,full_name,email,role")
+        .order("full_name", { ascending: true }),
+    ]);
 
-    if (error) {
-      console.error("[inventory-alerts] load error:", error);
-      setErrorMessage(error.message || "Failed to load subscriptions.");
+    if (recipientsRes.error || profilesRes.error) {
+      console.error("[inventory-alerts] load error:", {
+        recipientsError: recipientsRes.error,
+        profilesError: profilesRes.error,
+      });
+      setErrorMessage(recipientsRes.error?.message || profilesRes.error?.message || "Failed to load recipients.");
       setRows([]);
+      setProfiles([]);
       setLoading(false);
       return;
     }
 
-    setRows((data ?? []) as SubscriptionRow[]);
+    const rawRows = (recipientsRes.data ?? []) as unknown[];
+    const nextRows: RecipientRow[] = rawRows.map((entry) => {
+      const row = entry as {
+        profile_id: string;
+        is_enabled: boolean;
+        created_at: string;
+        profiles: ProfileOption[] | ProfileOption | null;
+      };
+      const profile = Array.isArray(row.profiles) ? (row.profiles[0] ?? null) : row.profiles;
+      return {
+        profile_id: row.profile_id,
+        is_enabled: row.is_enabled,
+        created_at: row.created_at,
+        profile,
+      };
+    });
+
+    setRows(nextRows);
+    setProfiles((profilesRes.data ?? []) as ProfileOption[]);
     setLoading(false);
   }
 
@@ -70,44 +129,21 @@ export default function InventoryAlertsClient() {
     const timer = window.setTimeout(() => {
       void loadData();
     }, 0);
-
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function onAddEmail(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitError(null);
-
-    const email = newEmail.trim().toLowerCase();
-    if (!email) return;
+  async function onToggle(row: RecipientRow) {
+    setBusyId(row.profile_id);
 
     const supabase = createSupabaseBrowser();
     const { error } = await supabase
-      .from("inventory_low_stock_subscriptions")
-      .upsert({ email, is_enabled: true }, { onConflict: "email" });
-
-    if (error) {
-      console.error("[inventory-alerts] add email error:", error);
-      setSubmitError(error.message);
-      return;
-    }
-
-    setNewEmail("");
-    await loadData();
-  }
-
-  async function onToggle(row: SubscriptionRow) {
-    setBusyId(row.id);
-
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase
-      .from("inventory_low_stock_subscriptions")
+      .from("inventory_alert_recipients")
       .update({ is_enabled: !row.is_enabled })
-      .eq("id", row.id);
+      .eq("profile_id", row.profile_id);
 
     if (error) {
       console.error("[inventory-alerts] toggle error:", error);
-      alert(error.message || "Failed to update subscription.");
+      alert(error.message || "Failed to update recipient.");
       setBusyId(null);
       return;
     }
@@ -116,21 +152,22 @@ export default function InventoryAlertsClient() {
     setBusyId(null);
   }
 
-  async function onDelete(row: SubscriptionRow) {
-    const confirmed = window.confirm(`Delete ${row.email}?`);
+  async function onRemove(row: RecipientRow) {
+    const nameOrEmail = row.profile?.full_name || row.profile?.email || row.profile_id;
+    const confirmed = window.confirm(`Remove ${nameOrEmail} from alerts?`);
     if (!confirmed) return;
 
-    setBusyId(row.id);
+    setBusyId(row.profile_id);
 
     const supabase = createSupabaseBrowser();
     const { error } = await supabase
-      .from("inventory_low_stock_subscriptions")
+      .from("inventory_alert_recipients")
       .delete()
-      .eq("id", row.id);
+      .eq("profile_id", row.profile_id);
 
     if (error) {
-      console.error("[inventory-alerts] delete error:", error);
-      alert(error.message || "Failed to delete subscription.");
+      console.error("[inventory-alerts] remove error:", error);
+      alert(error.message || "Failed to remove recipient.");
       setBusyId(null);
       return;
     }
@@ -139,100 +176,230 @@ export default function InventoryAlertsClient() {
     setBusyId(null);
   }
 
+  function openPicker() {
+    setPickerError(null);
+    setPickerSearch("");
+    setSelectedProfileIds([]);
+    setShowPicker(true);
+  }
+
+  function toggleSelect(profileId: string) {
+    setSelectedProfileIds((prev) => {
+      if (prev.includes(profileId)) return prev.filter((id) => id !== profileId);
+      return [...prev, profileId];
+    });
+  }
+
+  async function onConfirmAddRecipients() {
+    if (selectedProfileIds.length === 0) {
+      setPickerError("Select at least one employee.");
+      return;
+    }
+
+    setPickerBusy(true);
+    setPickerError(null);
+
+    const supabase = createSupabaseBrowser();
+    const payload = selectedProfileIds.map((profileId) => ({ profile_id: profileId, is_enabled: true }));
+
+    const { error } = await supabase
+      .from("inventory_alert_recipients")
+      .upsert(payload, { onConflict: "profile_id" });
+
+    if (error) {
+      console.error("[inventory-alerts] add recipients error:", error);
+      setPickerError(error.message || "Failed to add recipients.");
+      setPickerBusy(false);
+      return;
+    }
+
+    setShowPicker(false);
+    setPickerBusy(false);
+    await loadData();
+  }
+
   return (
-    <main style={{ maxWidth: 920, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Low-Stock Alerts</h1>
-      <div style={{ opacity: 0.75 }}>Manage email subscriptions for inventory low-stock alerts.</div>
+    <main style={{ maxWidth: 980, margin: "0 auto", paddingBottom: 32 }}>
+      <h1 style={{ marginBottom: 6 }}>Inventory Alert Recipients</h1>
+      <div style={{ opacity: 0.75 }}>Manage employee recipients for low-stock inventory emails.</div>
 
       <div style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Add Subscription</div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 900 }}>Recipients</div>
+          <button type="button" onClick={openPicker} style={buttonStyle}>
+            Add Recipients
+          </button>
+        </div>
 
-        <form onSubmit={onAddEmail}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10 }}>
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="name@company.com"
-              style={inputStyle()}
-              required
-            />
-            <button type="submit" style={buttonStyle}>
-              Add Email
-            </button>
-          </div>
-          {submitError ? <div style={{ marginTop: 8, color: "#ff9d9d" }}>{submitError}</div> : null}
-        </form>
-      </div>
+        <div style={{ marginTop: 12 }}>
+          {loading ? (
+            <div style={{ opacity: 0.75 }}>Loading recipients...</div>
+          ) : errorMessage ? (
+            <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
+          ) : rows.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No recipients configured.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {rows.map((row) => (
+                <div
+                  key={row.profile_id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "rgba(255,255,255,0.02)",
+                    display: "grid",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div>
+                      <div style={{ fontWeight: 900 }}>{row.profile?.full_name ?? "(No name)"}</div>
+                      <div style={{ opacity: 0.8, fontSize: 13 }}>{row.profile?.email ?? "No email"}</div>
+                      <div style={{ opacity: 0.68, fontSize: 12 }}>Role: {row.profile?.role ?? "-"}</div>
+                    </div>
 
-      <div style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Subscriptions</div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        padding: "3px 10px",
+                        borderRadius: 999,
+                        border: row.is_enabled
+                          ? "1px solid rgba(0,255,120,0.22)"
+                          : "1px solid rgba(255,190,100,0.30)",
+                        background: row.is_enabled
+                          ? "rgba(0,255,120,0.08)"
+                          : "rgba(255,190,100,0.10)",
+                      }}
+                    >
+                      {row.is_enabled ? "Enabled" : "Disabled"}
+                    </div>
+                  </div>
 
-        {loading ? (
-          <div style={{ opacity: 0.75 }}>Loading subscriptions...</div>
-        ) : errorMessage ? (
-          <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
-        ) : rows.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No subscriptions yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 12,
-                  padding: 12,
-                  background: "rgba(255,255,255,0.02)",
-                  display: "grid",
-                  gap: 8,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <div style={{ fontWeight: 900 }}>{row.email}</div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      padding: "3px 10px",
-                      borderRadius: 999,
-                      border: row.is_enabled
-                        ? "1px solid rgba(0,255,120,0.22)"
-                        : "1px solid rgba(255,190,100,0.30)",
-                      background: row.is_enabled
-                        ? "rgba(0,255,120,0.08)"
-                        : "rgba(255,190,100,0.10)",
-                    }}
-                  >
-                    {row.is_enabled ? "Enabled" : "Disabled"}
+                  <div style={{ opacity: 0.68, fontSize: 12 }}>Added: {formatDateTime(row.created_at)}</div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => void onToggle(row)}
+                      style={secondaryButtonStyle}
+                      disabled={busyId === row.profile_id}
+                    >
+                      {row.is_enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onRemove(row)}
+                      style={dangerButtonStyle}
+                      disabled={busyId === row.profile_id}
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
-
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Added: {formatDateTime(row.created_at)}</div>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => void onToggle(row)}
-                    style={secondaryButtonStyle}
-                    disabled={busyId === row.id}
-                  >
-                    {row.is_enabled ? "Disable" : "Enable"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void onDelete(row)}
-                    style={dangerButtonStyle}
-                    disabled={busyId === row.id}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {showPicker ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              width: "min(760px, 100%)",
+              maxHeight: "80vh",
+              overflow: "auto",
+              ...cardStyle(),
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div style={{ fontWeight: 900 }}>Add Recipients</div>
+              <button
+                type="button"
+                onClick={() => setShowPicker(false)}
+                style={secondaryButtonStyle}
+                disabled={pickerBusy}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <input
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                placeholder="Search employees by name, email, role"
+                style={inputStyle()}
+              />
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              {filteredProfiles.length === 0 ? (
+                <div style={{ opacity: 0.75 }}>No employees available to add.</div>
+              ) : (
+                filteredProfiles.map((profile) => (
+                  <label
+                    key={profile.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr",
+                      gap: 10,
+                      alignItems: "start",
+                      padding: 10,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(profile.id)}
+                      onChange={() => toggleSelect(profile.id)}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800 }}>{profile.full_name ?? "(No name)"}</div>
+                      <div style={{ opacity: 0.8, fontSize: 13 }}>{profile.email ?? "No email"}</div>
+                      <div style={{ opacity: 0.68, fontSize: 12 }}>Role: {profile.role ?? "-"}</div>
+                    </div>
+                  </label>
+                ))
+              )}
+            </div>
+
+            {pickerError ? <div style={{ marginTop: 10, color: "#ff9d9d" }}>{pickerError}</div> : null}
+
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowPicker(false)}
+                style={secondaryButtonStyle}
+                disabled={pickerBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void onConfirmAddRecipients()}
+                style={buttonStyle}
+                disabled={pickerBusy}
+              >
+                {pickerBusy ? "Saving..." : "Add Selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
