@@ -29,6 +29,7 @@ type RequestRow = {
   id: string;
   created_at: string;
   updated_at: string;
+  closed_at?: string | null;
   status: string | null;
   description: string | null;
   system_affected?: string | null;
@@ -39,6 +40,7 @@ type RequestRow = {
 type MaintenanceLogRow = {
   id: string;
   created_at: string;
+  created_by?: string | null;
   request_id?: string | null;
   notes?: string | null;
   status_update?: string | null;
@@ -181,6 +183,16 @@ function csvCell(value: string | number | null | undefined) {
   return `"${raw.replaceAll('"', '""')}"`;
 }
 
+function weekStartIso(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  const day = date.getDay();
+  const offset = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - offset);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString().slice(0, 10);
+}
+
 function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | null | undefined>>) {
   const lines = [headers.map((h) => csvCell(h)).join(","), ...rows.map((row) => row.map((cell) => csvCell(cell)).join(","))];
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -254,6 +266,13 @@ export default function OpsPage() {
   const [failureEndDate, setFailureEndDate] = useState(() => toDateInputValue(new Date()));
   const [failureAssetTypeFilter, setFailureAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [failureSystemFilter, setFailureSystemFilter] = useState("All");
+  const [performanceStartDate, setPerformanceStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return toDateInputValue(d);
+  });
+  const [performanceEndDate, setPerformanceEndDate] = useState(() => toDateInputValue(new Date()));
+  const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   const router = useRouter();
@@ -285,15 +304,26 @@ export default function OpsPage() {
         }
         setIsAuthenticated(true);
 
+        const fetchRequestsWithOptionalClosedAt = async (
+          table: "maintenance_requests" | "equipment_maintenance_requests",
+          assetKey: "vehicle_id" | "equipment_id"
+        ) => {
+          const withClosed = await supabase
+            .from(table)
+            .select(`id,${assetKey},created_at,updated_at,closed_at,status,description,system_affected`);
+          if (!withClosed.error) return withClosed;
+          const code = (withClosed.error as { code?: string }).code;
+          if (code !== "42703") return withClosed;
+          return supabase
+            .from(table)
+            .select(`id,${assetKey},created_at,updated_at,status,description,system_affected`);
+        };
+
         const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
           supabase.from("vehicles").select("id,name,status,mileage,updated_at"),
           supabase.from("equipment").select("id,name,status,current_hours,updated_at"),
-          supabase
-            .from("maintenance_requests")
-            .select("id,vehicle_id,created_at,updated_at,status,description,system_affected"),
-          supabase
-            .from("equipment_maintenance_requests")
-            .select("id,equipment_id,created_at,updated_at,status,description,system_affected"),
+          fetchRequestsWithOptionalClosedAt("maintenance_requests", "vehicle_id"),
+          fetchRequestsWithOptionalClosedAt("equipment_maintenance_requests", "equipment_id"),
           supabase
             .from("inventory_items")
             .select("quantity,minimum_quantity")
@@ -304,11 +334,11 @@ export default function OpsPage() {
             .order("created_at", { ascending: false }),
           supabase
             .from("maintenance_logs")
-            .select("id,vehicle_id,created_at,request_id,notes,status_update")
+            .select("id,vehicle_id,created_at,created_by,request_id,notes,status_update")
             .order("created_at", { ascending: false }),
           supabase
             .from("equipment_maintenance_logs")
-            .select("id,equipment_id,created_at,request_id,notes,status_update")
+            .select("id,equipment_id,created_at,created_by,request_id,notes,status_update")
             .order("created_at", { ascending: false }),
         ]);
 
@@ -359,6 +389,7 @@ export default function OpsPage() {
           ...((((vehicleLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
             id: row.id,
             created_at: row.created_at,
+            created_by: row.created_by ?? null,
             request_id: row.request_id ?? null,
             notes: row.notes ?? null,
             status_update: row.status_update ?? null,
@@ -368,6 +399,7 @@ export default function OpsPage() {
           ...((((equipmentLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
             id: row.id,
             created_at: row.created_at,
+            created_by: row.created_by ?? null,
             request_id: row.request_id ?? null,
             notes: row.notes ?? null,
             status_update: row.status_update ?? null,
@@ -375,6 +407,36 @@ export default function OpsPage() {
             equipment_id: row.equipment_id ?? null,
           }))),
         ];
+
+        const uniqueCreatorIds = Array.from(
+          new Set(
+            maintenanceLogRows
+              .map((row) => row.created_by)
+              .filter((id): id is string => typeof id === "string" && id.length > 0)
+          )
+        );
+        if (uniqueCreatorIds.length > 0) {
+          const profilesRes = await supabase
+            .from("profiles")
+            .select("id,full_name,email")
+            .in("id", uniqueCreatorIds);
+          if (profilesRes.error) {
+            console.error("[ops] profiles lookup error:", profilesRes.error);
+          } else {
+            const nameMap: Record<string, string> = {};
+            const profiles = (profilesRes.data ?? []) as Array<{
+              id: string;
+              full_name?: string | null;
+              email?: string | null;
+            }>;
+            for (const profile of profiles) {
+              nameMap[profile.id] = profile.full_name?.trim() || profile.email?.trim() || profile.id;
+            }
+            setProfileNameById(nameMap);
+          }
+        } else {
+          setProfileNameById({});
+        }
 
         const unitRows = [...vehicleRows, ...equipmentRows];
         const out = unitRows.filter((u) => {
@@ -826,6 +888,102 @@ export default function OpsPage() {
   }, [failureRows]);
 
   const recentFailures = useMemo(() => failureRows.slice(0, 20), [failureRows]);
+
+  const performanceRange = useMemo(() => {
+    const startTs = performanceStartDate
+      ? new Date(`${performanceStartDate}T00:00:00`).getTime()
+      : Number.NEGATIVE_INFINITY;
+    const endTs = performanceEndDate
+      ? new Date(`${performanceEndDate}T23:59:59.999`).getTime()
+      : Number.POSITIVE_INFINITY;
+    return { startTs, endTs };
+  }, [performanceEndDate, performanceStartDate]);
+
+  const performanceRequestsInRange = useMemo(
+    () =>
+      allRequests.filter((row) => {
+        const t = new Date(row.created_at).getTime();
+        return Number.isFinite(t) && t >= performanceRange.startTs && t <= performanceRange.endTs;
+      }),
+    [allRequests, performanceRange.endTs, performanceRange.startTs]
+  );
+
+  const performanceLogsInRange = useMemo(
+    () =>
+      allMaintenanceLogs.filter((row) => {
+        const t = new Date(row.created_at).getTime();
+        return Number.isFinite(t) && t >= performanceRange.startTs && t <= performanceRange.endTs;
+      }),
+    [allMaintenanceLogs, performanceRange.endTs, performanceRange.startTs]
+  );
+
+  const performanceOpenCount = useMemo(
+    () =>
+      performanceRequestsInRange.filter((row) => {
+        const status = (row.status ?? "").trim();
+        return status === "Open" || status === "In Progress";
+      }).length,
+    [performanceRequestsInRange]
+  );
+
+  const performanceClosedRequests = useMemo(
+    () =>
+      performanceRequestsInRange.filter((row) => {
+        const status = (row.status ?? "").trim();
+        return status === "Closed";
+      }),
+    [performanceRequestsInRange]
+  );
+
+  const performanceClosedCount = performanceClosedRequests.length;
+
+  const performanceAvgCloseDays = useMemo(() => {
+    if (performanceClosedRequests.length === 0) return 0;
+    const total = performanceClosedRequests.reduce((sum, row) => {
+      const closedTime = row.closed_at || row.updated_at;
+      return sum + daysBetween(row.created_at, closedTime);
+    }, 0);
+    return Number((total / performanceClosedRequests.length).toFixed(1));
+  }, [performanceClosedRequests]);
+
+  const performanceWeeklyRows = useMemo(() => {
+    const createdMap = new Map<string, number>();
+    const closedMap = new Map<string, number>();
+
+    for (const row of performanceRequestsInRange) {
+      const week = weekStartIso(row.created_at);
+      createdMap.set(week, (createdMap.get(week) ?? 0) + 1);
+      if ((row.status ?? "").trim() === "Closed") {
+        const closedTime = row.closed_at || row.updated_at;
+        const closedWeek = weekStartIso(closedTime);
+        closedMap.set(closedWeek, (closedMap.get(closedWeek) ?? 0) + 1);
+      }
+    }
+
+    const weeks = Array.from(new Set([...createdMap.keys(), ...closedMap.keys()]))
+      .filter((w) => w !== "Unknown")
+      .sort((a, b) => a.localeCompare(b));
+    return weeks.map((week) => ({
+      week,
+      created: createdMap.get(week) ?? 0,
+      closed: closedMap.get(week) ?? 0,
+    }));
+  }, [performanceRequestsInRange]);
+
+  const performanceByMechanic = useMemo(() => {
+    const counts = new Map<string, { createdBy: string; display: string; count: number }>();
+    for (const log of performanceLogsInRange) {
+      const createdBy = log.created_by ?? "Unknown";
+      const existing = counts.get(createdBy);
+      const display = createdBy === "Unknown" ? "Unknown" : profileNameById[createdBy] || createdBy;
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(createdBy, { createdBy, display, count: 1 });
+      }
+    }
+    return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.display.localeCompare(b.display));
+  }, [performanceLogsInRange, profileNameById]);
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
@@ -1477,7 +1635,190 @@ export default function OpsPage() {
         </div>
       ) : null}
 
-      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" && tab !== "Failures" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "Performance" ? (
+        <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+          <div style={cardStyle()}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Maintenance Velocity</div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 10,
+              }}
+            >
+              <Field label="Start Date">
+                <input
+                  type="date"
+                  value={performanceStartDate}
+                  onChange={(e) => setPerformanceStartDate(e.target.value)}
+                  style={inputStyle()}
+                />
+              </Field>
+              <Field label="End Date">
+                <input
+                  type="date"
+                  value={performanceEndDate}
+                  onChange={(e) => setPerformanceEndDate(e.target.value)}
+                  style={inputStyle()}
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <div style={metricStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.74 }}>Open Requests (In Range)</div>
+              <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{performanceOpenCount}</div>
+            </div>
+            <div style={metricStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.74 }}>Closed Requests (In Range)</div>
+              <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{performanceClosedCount}</div>
+            </div>
+            <div style={metricStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.74 }}>Avg Time to Close</div>
+              <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{performanceAvgCloseDays} days</div>
+            </div>
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontWeight: 900 }}>Requests Created vs Closed by Week</div>
+              <button
+                type="button"
+                style={actionButtonStyle}
+                onClick={() =>
+                  downloadCsv(
+                    "ops-weekly-created-closed.csv",
+                    ["week_start", "created", "closed"],
+                    performanceWeeklyRows.map((row) => [row.week, row.created, row.closed])
+                  )
+                }
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {performanceWeeklyRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No request velocity data in the selected date range.</div>
+            ) : (
+              <>
+                <svg viewBox="0 0 640 220" width="100%" height={220}>
+                  {(() => {
+                    const maxValue = Math.max(
+                      1,
+                      ...performanceWeeklyRows.flatMap((row) => [row.created, row.closed])
+                    );
+                    const left = 40;
+                    const right = 620;
+                    const top = 20;
+                    const bottom = 190;
+                    const width = right - left;
+                    const height = bottom - top;
+                    const denom = Math.max(1, performanceWeeklyRows.length - 1);
+
+                    const pointX = (idx: number) => left + (idx / denom) * width;
+                    const pointY = (value: number) => bottom - (value / maxValue) * height;
+
+                    const createdPoints = performanceWeeklyRows
+                      .map((row, idx) => `${pointX(idx)},${pointY(row.created)}`)
+                      .join(" ");
+                    const closedPoints = performanceWeeklyRows
+                      .map((row, idx) => `${pointX(idx)},${pointY(row.closed)}`)
+                      .join(" ");
+
+                    return (
+                      <>
+                        <line x1={left} y1={bottom} x2={right} y2={bottom} stroke="rgba(255,255,255,0.2)" />
+                        <line x1={left} y1={top} x2={left} y2={bottom} stroke="rgba(255,255,255,0.2)" />
+                        <polyline fill="none" stroke="rgba(120,200,255,0.9)" strokeWidth="2.5" points={createdPoints} />
+                        <polyline fill="none" stroke="rgba(126,255,167,0.9)" strokeWidth="2.5" points={closedPoints} />
+                        <text x={left} y={12} fill="currentColor" fontSize="11">
+                          Created (blue) / Closed (green)
+                        </text>
+                      </>
+                    );
+                  })()}
+                </svg>
+
+                <div style={{ overflowX: "auto", marginTop: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Week Start</th>
+                        <th style={thStyle}>Created</th>
+                        <th style={thStyle}>Closed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {performanceWeeklyRows.map((row) => (
+                        <tr key={`perf-week:${row.week}`}>
+                          <td style={tdStyle}>{row.week}</td>
+                          <td style={tdStyle}>{row.created}</td>
+                          <td style={tdStyle}>{row.closed}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontWeight: 900 }}>By Mechanic</div>
+              <button
+                type="button"
+                style={actionButtonStyle}
+                onClick={() =>
+                  downloadCsv(
+                    "ops-by-mechanic.csv",
+                    ["created_by", "display_name_or_email", "logs_count"],
+                    performanceByMechanic.map((row) => [row.createdBy, row.display, row.count])
+                  )
+                }
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {performanceLogsInRange.every((row) => !row.created_by) ? (
+              <div style={{ opacity: 0.75 }}>No `created_by` data found on maintenance logs for this range.</div>
+            ) : performanceByMechanic.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No maintenance logs found in the selected date range.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Mechanic</th>
+                      <th style={thStyle}>Created By</th>
+                      <th style={thStyle}>Logs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {performanceByMechanic.map((row) => (
+                      <tr key={`perf-mechanic:${row.createdBy}`}>
+                        <td style={tdStyle}>{row.display}</td>
+                        <td style={tdStyle}>{row.createdBy}</td>
+                        <td style={tdStyle}>{row.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" && tab !== "Failures" && tab !== "Performance" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
