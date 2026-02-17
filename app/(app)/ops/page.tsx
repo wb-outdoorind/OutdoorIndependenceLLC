@@ -13,6 +13,7 @@ type VehicleRow = {
   name: string;
   status: string | null;
   mileage: number | null;
+  updated_at: string;
 };
 
 type EquipmentRow = {
@@ -20,6 +21,7 @@ type EquipmentRow = {
   name: string;
   status: string | null;
   current_hours: number | null;
+  updated_at: string;
 };
 
 type RequestRow = {
@@ -28,6 +30,13 @@ type RequestRow = {
   updated_at: string;
   status: string | null;
   description: string | null;
+  vehicle_id?: string | null;
+  equipment_id?: string | null;
+};
+
+type MaintenanceLogRow = {
+  id: string;
+  created_at: string;
   vehicle_id?: string | null;
   equipment_id?: string | null;
 };
@@ -63,6 +72,23 @@ type PmBoardRow = {
   overdueAmount: number;
   pmFormHref: string;
   historyHref: string;
+};
+
+type DowntimeStatus = "Red Tagged" | "Out of Service";
+
+type DowntimeRow = {
+  assetId: string;
+  assetName: string;
+  assetType: "Vehicle" | "Equipment";
+  status: DowntimeStatus;
+  downSince: string;
+  daysDown: number;
+  openRequestsCount: number;
+  lastMaintenanceLogDate: string | null;
+  latestIssueSummary: string | null;
+  detailHref: string;
+  historyHref: string;
+  maintenanceHref: string;
 };
 
 const VEHICLE_PM_INTERVAL_MILES = 5000;
@@ -162,6 +188,8 @@ export default function OpsPage() {
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [equipment, setEquipment] = useState<EquipmentRow[]>([]);
   const [equipmentPmEvents, setEquipmentPmEvents] = useState<EquipmentPmEventRow[]>([]);
+  const [allRequests, setAllRequests] = useState<RequestRow[]>([]);
+  const [allMaintenanceLogs, setAllMaintenanceLogs] = useState<MaintenanceLogRow[]>([]);
 
   const [outOfServiceCount, setOutOfServiceCount] = useState(0);
   const [openRequestCount, setOpenRequestCount] = useState(0);
@@ -173,6 +201,9 @@ export default function OpsPage() {
   const [pmStatusFilter, setPmStatusFilter] = useState<PmStatusFilter>("All");
   const [pmAssetTypeFilter, setPmAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [pmSearch, setPmSearch] = useState("");
+  const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
+  const [downtimeAssetTypeFilter, setDowntimeAssetTypeFilter] = useState<AssetTypeFilter>("All");
+  const [downtimeSearch, setDowntimeSearch] = useState("");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -182,9 +213,9 @@ export default function OpsPage() {
 
         const supabase = createSupabaseBrowser();
 
-        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes] = await Promise.all([
-          supabase.from("vehicles").select("id,name,status,mileage"),
-          supabase.from("equipment").select("id,name,status,current_hours"),
+        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
+          supabase.from("vehicles").select("id,name,status,mileage,updated_at"),
+          supabase.from("equipment").select("id,name,status,current_hours,updated_at"),
           supabase
             .from("maintenance_requests")
             .select("id,vehicle_id,created_at,updated_at,status,description"),
@@ -199,6 +230,14 @@ export default function OpsPage() {
             .from("equipment_pm_events")
             .select("id,equipment_id,created_at,hours")
             .order("created_at", { ascending: false }),
+          supabase
+            .from("maintenance_logs")
+            .select("id,vehicle_id,created_at")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("equipment_maintenance_logs")
+            .select("id,equipment_id,created_at")
+            .order("created_at", { ascending: false }),
         ]);
 
         if (
@@ -207,7 +246,9 @@ export default function OpsPage() {
           vehicleReqRes.error ||
           equipmentReqRes.error ||
           lowInvRes.error ||
-          eqPmRes.error
+          eqPmRes.error ||
+          vehicleLogsRes.error ||
+          equipmentLogsRes.error
         ) {
           console.error("[ops] load error:", {
             vehiclesError: vehiclesRes.error,
@@ -216,6 +257,8 @@ export default function OpsPage() {
             equipmentRequestsError: equipmentReqRes.error,
             lowInventoryError: lowInvRes.error,
             equipmentPmError: eqPmRes.error,
+            vehicleLogsError: vehicleLogsRes.error,
+            equipmentLogsError: equipmentLogsRes.error,
           });
           setErrorMessage(
             vehiclesRes.error?.message ||
@@ -224,6 +267,8 @@ export default function OpsPage() {
               equipmentReqRes.error?.message ||
               lowInvRes.error?.message ||
               eqPmRes.error?.message ||
+              vehicleLogsRes.error?.message ||
+              equipmentLogsRes.error?.message ||
               "Failed to load operations overview."
           );
           setLoading(false);
@@ -237,6 +282,20 @@ export default function OpsPage() {
         const requestRows: RequestRow[] = [
           ...(((vehicleReqRes.data ?? []) as RequestRow[]) || []),
           ...(((equipmentReqRes.data ?? []) as RequestRow[]) || []),
+        ];
+        const maintenanceLogRows: MaintenanceLogRow[] = [
+          ...((((vehicleLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
+            id: row.id,
+            created_at: row.created_at,
+            vehicle_id: row.vehicle_id ?? null,
+            equipment_id: null,
+          }))),
+          ...((((equipmentLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
+            id: row.id,
+            created_at: row.created_at,
+            vehicle_id: null,
+            equipment_id: row.equipment_id ?? null,
+          }))),
         ];
 
         const unitRows = [...vehicleRows, ...equipmentRows];
@@ -292,6 +351,8 @@ export default function OpsPage() {
         setVehicles(vehicleRows);
         setEquipment(equipmentRows);
         setEquipmentPmEvents(eqPmRows);
+        setAllRequests(requestRows);
+        setAllMaintenanceLogs(maintenanceLogRows);
 
         setOutOfServiceCount(out);
         setOpenRequestCount(openRequests.length);
@@ -423,6 +484,105 @@ export default function OpsPage() {
       return hay.includes(q);
     });
   }, [pmBoardRows, pmStatusFilter, pmAssetTypeFilter, pmSearch]);
+
+  const downtimeRows = useMemo(() => {
+    const nowIso = new Date().toISOString();
+    const openRequestsByAsset = new Map<string, RequestRow[]>();
+    for (const row of allRequests) {
+      const status = (row.status ?? "").trim();
+      if (status !== "Open" && status !== "In Progress") continue;
+      const assetKey = row.vehicle_id
+        ? `Vehicle:${row.vehicle_id}`
+        : row.equipment_id
+        ? `Equipment:${row.equipment_id}`
+        : null;
+      if (!assetKey) continue;
+      const existing = openRequestsByAsset.get(assetKey) ?? [];
+      existing.push(row);
+      openRequestsByAsset.set(assetKey, existing);
+    }
+    for (const rows of openRequestsByAsset.values()) {
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+
+    const lastLogByAsset = new Map<string, string>();
+    for (const log of allMaintenanceLogs) {
+      const assetKey = log.vehicle_id
+        ? `Vehicle:${log.vehicle_id}`
+        : log.equipment_id
+        ? `Equipment:${log.equipment_id}`
+        : null;
+      if (!assetKey) continue;
+      if (!lastLogByAsset.has(assetKey)) {
+        lastLogByAsset.set(assetKey, log.created_at);
+      }
+    }
+
+    const rows: DowntimeRow[] = [];
+    for (const v of vehicles) {
+      const status = (v.status ?? "").trim() as DowntimeStatus;
+      if (status !== "Red Tagged" && status !== "Out of Service") continue;
+      const assetKey = `Vehicle:${v.id}`;
+      const openRows = openRequestsByAsset.get(assetKey) ?? [];
+      rows.push({
+        assetId: v.id,
+        assetName: v.name || v.id,
+        assetType: "Vehicle",
+        status,
+        downSince: v.updated_at,
+        daysDown: daysBetween(v.updated_at, nowIso),
+        openRequestsCount: openRows.length,
+        lastMaintenanceLogDate: lastLogByAsset.get(assetKey) ?? null,
+        latestIssueSummary: openRows[0]?.description ?? null,
+        detailHref: `/vehicles/${encodeURIComponent(v.id)}`,
+        historyHref: `/vehicles/${encodeURIComponent(v.id)}/history`,
+        maintenanceHref: `/maintenance?assetType=Vehicle&assetId=${encodeURIComponent(v.id)}`,
+      });
+    }
+
+    for (const e of equipment) {
+      const status = (e.status ?? "").trim() as DowntimeStatus;
+      if (status !== "Red Tagged" && status !== "Out of Service") continue;
+      const assetKey = `Equipment:${e.id}`;
+      const openRows = openRequestsByAsset.get(assetKey) ?? [];
+      rows.push({
+        assetId: e.id,
+        assetName: e.name || e.id,
+        assetType: "Equipment",
+        status,
+        downSince: e.updated_at,
+        daysDown: daysBetween(e.updated_at, nowIso),
+        openRequestsCount: openRows.length,
+        lastMaintenanceLogDate: lastLogByAsset.get(assetKey) ?? null,
+        latestIssueSummary: openRows[0]?.description ?? null,
+        detailHref: `/equipment/${encodeURIComponent(e.id)}`,
+        historyHref: `/equipment/${encodeURIComponent(e.id)}/history`,
+        maintenanceHref: `/maintenance?assetType=Equipment&assetId=${encodeURIComponent(e.id)}`,
+      });
+    }
+
+    rows.sort((a, b) => b.daysDown - a.daysDown);
+    return rows;
+  }, [allMaintenanceLogs, allRequests, equipment, vehicles]);
+
+  const filteredDowntimeRows = useMemo(() => {
+    const query = downtimeSearch.trim().toLowerCase();
+    return downtimeRows.filter((row) => {
+      if (downtimeStatusFilter !== "All" && row.status !== downtimeStatusFilter) return false;
+      if (downtimeAssetTypeFilter !== "All") {
+        if (downtimeAssetTypeFilter === "Vehicles" && row.assetType !== "Vehicle") return false;
+        if (downtimeAssetTypeFilter === "Equipment" && row.assetType !== "Equipment") return false;
+      }
+      if (!query) return true;
+      const hay = `${row.assetName} ${row.assetId}`.toLowerCase();
+      return hay.includes(query);
+    });
+  }, [downtimeAssetTypeFilter, downtimeRows, downtimeSearch, downtimeStatusFilter]);
+
+  const redTagRows = useMemo(
+    () => downtimeRows.filter((row) => row.status === "Red Tagged").sort((a, b) => b.daysDown - a.daysDown),
+    [downtimeRows]
+  );
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
@@ -628,7 +788,142 @@ export default function OpsPage() {
         </div>
       ) : null}
 
-      {!loading && !errorMessage && tab !== "Overview" && tab !== "PM Due" ? (
+      {!loading && !errorMessage && tab === "Downtime" ? (
+        <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+          <div style={cardStyle()}>
+            <div style={{ fontWeight: 900, marginBottom: 4 }}>Red Tag Board</div>
+            <div style={{ opacity: 0.75, marginBottom: 10 }}>
+              Down since uses asset <code>updated_at</code> as an approximation when no explicit downtime start is stored.
+            </div>
+            {redTagRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No red-tagged assets.</div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {redTagRows.map((row) => (
+                  <div key={`red:${row.assetType}:${row.assetId}`} style={metricStyle()}>
+                    <Link href={row.detailHref} style={{ color: "inherit", textDecoration: "none" }}>
+                      <div style={{ fontWeight: 900 }}>{row.assetName}</div>
+                    </Link>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>{row.assetType} · {row.assetId}</div>
+                    <div style={{ marginTop: 8, fontSize: 24, fontWeight: 900 }}>{row.daysDown}d down</div>
+                    <div style={{ opacity: 0.78, fontSize: 12, marginTop: 4 }}>
+                      Since: {formatDateTime(row.downSince)}
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 13 }}>
+                      {row.latestIssueSummary ? row.latestIssueSummary : "No issue summary available."}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Downtime</div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
+              <Field label="Asset Type">
+                <select
+                  value={downtimeAssetTypeFilter}
+                  onChange={(e) => setDowntimeAssetTypeFilter(e.target.value as AssetTypeFilter)}
+                  style={inputStyle()}
+                >
+                  <option>All</option>
+                  <option>Vehicles</option>
+                  <option>Equipment</option>
+                </select>
+              </Field>
+
+              <Field label="Status">
+                <select
+                  value={downtimeStatusFilter}
+                  onChange={(e) => setDowntimeStatusFilter(e.target.value as "All" | DowntimeStatus)}
+                  style={inputStyle()}
+                >
+                  <option>All</option>
+                  <option>Red Tagged</option>
+                  <option>Out of Service</option>
+                </select>
+              </Field>
+
+              <Field label="Search">
+                <input
+                  value={downtimeSearch}
+                  onChange={(e) => setDowntimeSearch(e.target.value)}
+                  placeholder="Search asset name or id"
+                  style={inputStyle()}
+                />
+              </Field>
+            </div>
+
+            {filteredDowntimeRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No downtime units match the current filters.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Asset</th>
+                      <th style={thStyle}>Type</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Down Since</th>
+                      <th style={thStyle}>Days Down</th>
+                      <th style={thStyle}>Open Requests Count</th>
+                      <th style={thStyle}>Last Maintenance Log Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDowntimeRows.map((row) => (
+                      <tr key={`down:${row.assetType}:${row.assetId}`}>
+                        <td style={tdStyle}>
+                          <Link href={row.detailHref} style={{ color: "inherit", fontWeight: 800 }}>
+                            {row.assetName}
+                          </Link>
+                          <div style={{ opacity: 0.72, fontSize: 12 }}>{row.assetId}</div>
+                        </td>
+                        <td style={tdStyle}>{row.assetType}</td>
+                        <td style={tdStyle}>
+                          <span style={statusChipStyle(row.status === "Red Tagged")}>{row.status}</span>
+                        </td>
+                        <td style={tdStyle}>{formatDateTime(row.downSince)}</td>
+                        <td style={tdStyle}>{row.daysDown}</td>
+                        <td style={tdStyle}>
+                          <Link href={row.maintenanceHref} style={actionLinkStyle}>
+                            {row.openRequestsCount}
+                          </Link>
+                        </td>
+                        <td style={tdStyle}>
+                          {row.lastMaintenanceLogDate ? formatDateTime(row.lastMaintenanceLogDate) : "—"}
+                          <div style={{ marginTop: 8 }}>
+                            <Link href={row.historyHref} style={actionLinkStyle}>
+                              View History
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !errorMessage && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
