@@ -10,6 +10,8 @@ type InventoryItemRow = {
   quantity: number;
   minimum_quantity: number;
   location_id: string | null;
+  supplier: string | null;
+  supplier_link: string | null;
   is_active: boolean;
 };
 
@@ -25,6 +27,13 @@ type UsageRow = {
   change_qty: number;
   reference_type: string | null;
   reference_id: string | null;
+  created_by: string | null;
+  notes: string | null;
+  profiles: { email: string | null } | Array<{ email: string | null }> | null;
+  inventory_items:
+    | { name: string | null; location_id: string | null }
+    | Array<{ name: string | null; location_id: string | null }>
+    | null;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -81,6 +90,11 @@ function formatDateTime(iso: string) {
   return d.toLocaleString();
 }
 
+function firstOrNull<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
 export default function InventoryReportsClient() {
   const [items, setItems] = useState<InventoryItemRow[]>([]);
   const [locationMap, setLocationMap] = useState<Record<string, string>>({});
@@ -119,7 +133,7 @@ export default function InventoryReportsClient() {
     const [itemsRes, locationsRes] = await Promise.all([
       supabase
         .from("inventory_items")
-        .select("id,name,category,quantity,minimum_quantity,location_id,is_active")
+        .select("id,name,category,quantity,minimum_quantity,location_id,supplier,supplier_link,is_active")
         .eq("is_active", true)
         .order("name", { ascending: true }),
       supabase.from("inventory_locations").select("id,name"),
@@ -154,7 +168,9 @@ export default function InventoryReportsClient() {
 
     let query = supabase
       .from("inventory_transactions")
-      .select("id,created_at,item_id,change_qty,reference_type,reference_id")
+      .select(
+        "id,created_at,item_id,change_qty,reference_type,reference_id,created_by,notes,profiles(email),inventory_items(name,location_id)"
+      )
       .eq("reason", "usage")
       .order("created_at", { ascending: false });
 
@@ -197,7 +213,17 @@ export default function InventoryReportsClient() {
 
   function onExportCurrentInventory() {
     const rows: Array<Array<string | number>> = [
-      ["Item ID", "Item", "Category", "Qty", "Min", "Location", "Low Stock"],
+      [
+        "id",
+        "name",
+        "category",
+        "quantity",
+        "minimum_quantity",
+        "location_name",
+        "supplier",
+        "supplier_link",
+        "is_active",
+      ],
       ...items.map((item) => [
         item.id,
         item.name,
@@ -205,11 +231,13 @@ export default function InventoryReportsClient() {
         item.quantity,
         item.minimum_quantity,
         item.location_id ? locationMap[item.location_id] ?? "" : "",
-        Number(item.quantity) <= Number(item.minimum_quantity) ? "Yes" : "No",
+        item.supplier ?? "",
+        item.supplier_link ?? "",
+        item.is_active ? "true" : "false",
       ]),
     ];
 
-    downloadCsv("inventory_current.csv", rows);
+    downloadCsv("inventory.csv", rows);
   }
 
   function onExportLowStock() {
@@ -230,14 +258,23 @@ export default function InventoryReportsClient() {
 
   function onExportUsage() {
     const rows: Array<Array<string | number>> = [
-      ["Date", "Item ID", "Item", "Quantity Used", "Reference Type", "Reference ID"],
+      [
+        "date",
+        "item",
+        "qty_used",
+        "reference_type",
+        "reference_id",
+        "created_by_email",
+        "notes",
+      ],
       ...usageRows.map((row) => [
         row.created_at,
-        row.item_id,
-        itemNameById[row.item_id] ?? row.item_id,
+        firstOrNull(row.inventory_items)?.name ?? itemNameById[row.item_id] ?? row.item_id,
         Math.abs(Number(row.change_qty)),
         row.reference_type ?? "",
         row.reference_id ?? "",
+        firstOrNull(row.profiles)?.email ?? "",
+        row.notes ?? "",
       ]),
     ];
 
@@ -252,10 +289,10 @@ export default function InventoryReportsClient() {
       <div style={{ marginTop: 16, ...cardStyle() }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="button" onClick={onExportCurrentInventory} style={buttonStyle}>
-            Export Current Inventory CSV
+            Export Inventory CSV
           </button>
           <button type="button" onClick={onExportLowStock} style={buttonStyle}>
-            Export Low-Stock CSV
+            Export Low Stock CSV
           </button>
           <button type="button" onClick={onExportUsage} style={buttonStyle}>
             Export Usage CSV
@@ -343,16 +380,20 @@ export default function InventoryReportsClient() {
                     <th style={thStyle}>Quantity Used</th>
                     <th style={thStyle}>Reference Type</th>
                     <th style={thStyle}>Reference ID</th>
+                    <th style={thStyle}>Created By</th>
+                    <th style={thStyle}>Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usageRows.map((row) => (
                     <tr key={row.id}>
                       <td style={tdStyle}>{formatDateTime(row.created_at)}</td>
-                      <td style={tdStyle}>{itemNameById[row.item_id] ?? row.item_id}</td>
+                      <td style={tdStyle}>{firstOrNull(row.inventory_items)?.name ?? itemNameById[row.item_id] ?? row.item_id}</td>
                       <td style={tdStyle}>{Math.abs(Number(row.change_qty))}</td>
                       <td style={tdStyle}>{row.reference_type ?? "-"}</td>
                       <td style={tdStyle}>{row.reference_id ?? "-"}</td>
+                      <td style={tdStyle}>{firstOrNull(row.profiles)?.email ?? row.created_by ?? "-"}</td>
+                      <td style={tdStyle}>{row.notes ?? "-"}</td>
                     </tr>
                   ))}
                 </tbody>
