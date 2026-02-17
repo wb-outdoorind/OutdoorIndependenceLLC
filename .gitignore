@@ -43,3 +43,4 @@ node_modules
 next-env.d.ts
 .DS_Store
 OI_APP_Assets.xlsx
+OI_APP_Inventory .xlsx
