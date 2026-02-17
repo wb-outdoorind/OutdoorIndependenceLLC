@@ -47,8 +47,7 @@ type ReferenceRow = {
 };
 
 type LocationUsageRow = {
-  from_label: string;
-  to_label: string;
+  location_label: string;
   total_used: number;
 };
 
@@ -369,14 +368,13 @@ export default function InventoryTrendsClient() {
         : itemMeta.location_id
         ? locationMap[itemMeta.location_id] ?? itemMeta.location_id
         : "-";
-      const toLabel = row.to_location_id ? locationMap[row.to_location_id] ?? row.to_location_id : "-";
 
-      if (fromLabel !== "-" || toLabel !== "-") {
+      if (fromLabel !== "-") {
         locationDataAvailable = true;
-        const locKey = `${fromLabel} -> ${toLabel}`;
+        const locKey = fromLabel;
         const locExisting = locationTotals.get(locKey);
         if (locExisting) locExisting.total_used += used;
-        else locationTotals.set(locKey, { from_label: fromLabel, to_label: toLabel, total_used: used });
+        else locationTotals.set(locKey, { location_label: fromLabel, total_used: used });
       }
     }
 
@@ -464,8 +462,8 @@ export default function InventoryTrendsClient() {
 
   function exportLocationCsv() {
     const rows: Array<Array<string | number>> = [
-      ["from_location", "to_location", "total_used"],
-      ...computed.byLocation.map((row) => [row.from_label, row.to_label, row.total_used]),
+      ["from_location", "total_used"],
+      ...computed.byLocation.map((row) => [row.location_label, row.total_used]),
     ];
     downloadCsv("inventory_trends_by_location.csv", rows);
   }
@@ -799,16 +797,14 @@ export default function InventoryTrendsClient() {
                   <table style={tableStyle}>
                     <thead>
                       <tr>
-                        <th style={thStyle}>From</th>
-                        <th style={thStyle}>To</th>
+                        <th style={thStyle}>From Location</th>
                         <th style={thStyle}>Total Used</th>
                       </tr>
                     </thead>
                     <tbody>
                       {computed.byLocation.map((row) => (
-                        <tr key={`${row.from_label}->${row.to_label}`}>
-                          <td style={tdStyle}>{row.from_label}</td>
-                          <td style={tdStyle}>{row.to_label}</td>
+                        <tr key={row.location_label}>
+                          <td style={tdStyle}>{row.location_label}</td>
                           <td style={tdStyle}>{row.total_used}</td>
                         </tr>
                       ))}

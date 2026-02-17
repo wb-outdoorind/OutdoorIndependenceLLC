@@ -30,12 +30,19 @@ type InventoryItem = {
   name: string;
   category: string | null;
   quantity: number;
+  location_id: string | null;
+};
+
+type InventoryLocation = {
+  id: string;
+  name: string;
 };
 
 type PartUsed = {
   item_id: string;
   name: string;
   quantity_used: number;
+  from_location_id: string | null;
 };
 
 function canManagePartsUsage(role: Role | null) {
@@ -99,6 +106,7 @@ export default function EquipmentMaintenanceLogPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [inventoryLocations, setInventoryLocations] = useState<InventoryLocation[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [partSearch, setPartSearch] = useState("");
@@ -188,19 +196,29 @@ export default function EquipmentMaintenanceLogPage() {
         setInventoryLoading(true);
         setInventoryError(null);
         const supabase = createSupabaseBrowser();
-        const { data, error } = await supabase
-          .from("inventory_items")
-          .select("id,name,category,quantity")
-          .eq("is_active", true)
-          .order("name", { ascending: true });
-        if (error) {
-          console.error("[equipment-maintenance-log] inventory load error:", error);
-          setInventoryError(error.message);
+        const [itemsRes, locationsRes] = await Promise.all([
+          supabase
+            .from("inventory_items")
+            .select("id,name,category,quantity,location_id")
+            .eq("is_active", true)
+            .order("name", { ascending: true }),
+          supabase.from("inventory_locations").select("id,name").order("name", { ascending: true }),
+        ]);
+        if (itemsRes.error || locationsRes.error) {
+          console.error("[equipment-maintenance-log] inventory load error:", {
+            itemsError: itemsRes.error,
+            locationsError: locationsRes.error,
+          });
+          setInventoryError(
+            itemsRes.error?.message || locationsRes.error?.message || "Failed to load inventory."
+          );
           setInventoryItems([]);
+          setInventoryLocations([]);
           setInventoryLoading(false);
           return;
         }
-        setInventoryItems((data ?? []) as InventoryItem[]);
+        setInventoryItems((itemsRes.data ?? []) as InventoryItem[]);
+        setInventoryLocations((locationsRes.data ?? []) as InventoryLocation[]);
         setInventoryLoading(false);
       })();
     }, 0);
@@ -226,9 +244,18 @@ export default function EquipmentMaintenanceLogPage() {
     }
     const selected = inventoryItems.find((item) => item.id === selectedPartId);
     if (!selected) return;
+    if (qty > selected.quantity) {
+      alert(`Qty Used (${qty}) cannot exceed available quantity (${selected.quantity}).`);
+      return;
+    }
     setPartsUsed((prev) => [
       ...prev,
-      { item_id: selected.id, name: selected.name, quantity_used: qty },
+      {
+        item_id: selected.id,
+        name: selected.name,
+        quantity_used: qty,
+        from_location_id: selected.location_id ?? null,
+      },
     ]);
     setSelectedPartId("");
     setSelectedPartQty("1");
@@ -236,6 +263,16 @@ export default function EquipmentMaintenanceLogPage() {
 
   function removePartUsed(itemId: string) {
     setPartsUsed((prev) => prev.filter((p) => p.item_id !== itemId));
+  }
+
+  function updatePartFromLocation(itemId: string, fromLocationId: string) {
+    setPartsUsed((prev) =>
+      prev.map((part) =>
+        part.item_id === itemId
+          ? { ...part, from_location_id: fromLocationId || null }
+          : part
+      )
+    );
   }
 
   async function onPickReceiptPhoto(file: File) {
@@ -323,8 +360,25 @@ export default function EquipmentMaintenanceLogPage() {
         return;
       }
 
+      for (const part of partsUsed) {
+        const qty = Math.trunc(Number(part.quantity_used));
+        if (!Number.isFinite(qty) || qty <= 0) {
+          setSubmitError(`Invalid Qty Used for ${part.name}.`);
+          return;
+        }
+        const matchedItem = inventoryItems.find((item) => item.id === part.item_id);
+        if (matchedItem && qty > matchedItem.quantity) {
+          setSubmitError(
+            `Qty Used for ${part.name} exceeds available quantity (${matchedItem.quantity}).`
+          );
+          return;
+        }
+      }
+
       const txPayload = partsUsed.map((part) => ({
         item_id: part.item_id,
+        from_location_id: part.from_location_id ?? null,
+        to_location_id: null,
         change_qty: -Math.abs(part.quantity_used),
         reason: "usage",
         reference_type: "maintenance_log",
@@ -548,6 +602,24 @@ export default function EquipmentMaintenanceLogPage() {
                   <div>
                     <div style={{ fontWeight: 800 }}>{part.name}</div>
                     <div style={{ fontSize: 12, opacity: 0.75 }}>Qty Used: {part.quantity_used}</div>
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 4 }}>
+                        Pulled From Location
+                      </div>
+                      <select
+                        value={part.from_location_id ?? ""}
+                        onChange={(e) => updatePartFromLocation(part.item_id, e.target.value)}
+                        style={{ ...inputStyle, maxWidth: 280 }}
+                        disabled={!canSubmitPartsUsage}
+                      >
+                        <option value="">Not specified</option>
+                        {inventoryLocations.map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <button
                     type="button"
