@@ -31,6 +31,7 @@ type RequestRow = {
   updated_at: string;
   status: string | null;
   description: string | null;
+  system_affected?: string | null;
   vehicle_id?: string | null;
   equipment_id?: string | null;
 };
@@ -38,6 +39,9 @@ type RequestRow = {
 type MaintenanceLogRow = {
   id: string;
   created_at: string;
+  request_id?: string | null;
+  notes?: string | null;
+  status_update?: string | null;
   vehicle_id?: string | null;
   equipment_id?: string | null;
 };
@@ -90,6 +94,19 @@ type DowntimeRow = {
   detailHref: string;
   historyHref: string;
   maintenanceHref: string;
+};
+
+type FailureRow = {
+  id: string;
+  created_at: string;
+  request_id: string | null;
+  assetType: "Vehicle" | "Equipment";
+  assetId: string;
+  assetName: string;
+  systemAffected: string;
+  description: string;
+  detailHref: string;
+  historyHref: string;
 };
 
 const VEHICLE_PM_INTERVAL_MILES = 5000;
@@ -152,6 +169,31 @@ function inputStyle(): React.CSSProperties {
   };
 }
 
+function toDateInputValue(date: Date) {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function csvCell(value: string | number | null | undefined) {
+  const raw = value == null ? "" : String(value);
+  return `"${raw.replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | null | undefined>>) {
+  const lines = [headers.map((h) => csvCell(h)).join(","), ...rows.map((row) => row.map((cell) => csvCell(cell)).join(","))];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function vehiclePmStorageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
 }
@@ -204,6 +246,14 @@ export default function OpsPage() {
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
   const [downtimeAssetTypeFilter, setDowntimeAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [downtimeSearch, setDowntimeSearch] = useState("");
+  const [failureStartDate, setFailureStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 90);
+    return toDateInputValue(d);
+  });
+  const [failureEndDate, setFailureEndDate] = useState(() => toDateInputValue(new Date()));
+  const [failureAssetTypeFilter, setFailureAssetTypeFilter] = useState<AssetTypeFilter>("All");
+  const [failureSystemFilter, setFailureSystemFilter] = useState("All");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   const router = useRouter();
@@ -240,10 +290,10 @@ export default function OpsPage() {
           supabase.from("equipment").select("id,name,status,current_hours,updated_at"),
           supabase
             .from("maintenance_requests")
-            .select("id,vehicle_id,created_at,updated_at,status,description"),
+            .select("id,vehicle_id,created_at,updated_at,status,description,system_affected"),
           supabase
             .from("equipment_maintenance_requests")
-            .select("id,equipment_id,created_at,updated_at,status,description"),
+            .select("id,equipment_id,created_at,updated_at,status,description,system_affected"),
           supabase
             .from("inventory_items")
             .select("quantity,minimum_quantity")
@@ -254,11 +304,11 @@ export default function OpsPage() {
             .order("created_at", { ascending: false }),
           supabase
             .from("maintenance_logs")
-            .select("id,vehicle_id,created_at")
+            .select("id,vehicle_id,created_at,request_id,notes,status_update")
             .order("created_at", { ascending: false }),
           supabase
             .from("equipment_maintenance_logs")
-            .select("id,equipment_id,created_at")
+            .select("id,equipment_id,created_at,request_id,notes,status_update")
             .order("created_at", { ascending: false }),
         ]);
 
@@ -309,12 +359,18 @@ export default function OpsPage() {
           ...((((vehicleLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
             id: row.id,
             created_at: row.created_at,
+            request_id: row.request_id ?? null,
+            notes: row.notes ?? null,
+            status_update: row.status_update ?? null,
             vehicle_id: row.vehicle_id ?? null,
             equipment_id: null,
           }))),
           ...((((equipmentLogsRes.data ?? []) as MaintenanceLogRow[]) || []).map((row) => ({
             id: row.id,
             created_at: row.created_at,
+            request_id: row.request_id ?? null,
+            notes: row.notes ?? null,
+            status_update: row.status_update ?? null,
             vehicle_id: null,
             equipment_id: row.equipment_id ?? null,
           }))),
@@ -635,6 +691,141 @@ export default function OpsPage() {
 
     return Array.from(grouped.values()).sort((a, b) => b.count - a.count);
   }, [allRequests, equipment, vehicles]);
+
+  const failureRows = useMemo(() => {
+    const vehicleNameById = new Map(vehicles.map((v) => [v.id, v.name || v.id]));
+    const equipmentNameById = new Map(equipment.map((e) => [e.id, e.name || e.id]));
+    const vehicleRequestsById = new Map(
+      allRequests.filter((r) => Boolean(r.vehicle_id)).map((r) => [r.id, r])
+    );
+    const equipmentRequestsById = new Map(
+      allRequests.filter((r) => Boolean(r.equipment_id)).map((r) => [r.id, r])
+    );
+
+    const start = failureStartDate ? new Date(`${failureStartDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+    const end = failureEndDate ? new Date(`${failureEndDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
+
+    const rows: FailureRow[] = [];
+    for (const log of allMaintenanceLogs) {
+      const createdAtTs = new Date(log.created_at).getTime();
+      if (!Number.isFinite(createdAtTs) || createdAtTs < start || createdAtTs > end) continue;
+
+      const isVehicle = Boolean(log.vehicle_id);
+      const isEquipment = Boolean(log.equipment_id);
+      if (!isVehicle && !isEquipment) continue;
+
+      const assetType = isVehicle ? "Vehicle" : "Equipment";
+      const assetId = isVehicle ? String(log.vehicle_id) : String(log.equipment_id);
+
+      if (failureAssetTypeFilter === "Vehicles" && assetType !== "Vehicle") continue;
+      if (failureAssetTypeFilter === "Equipment" && assetType !== "Equipment") continue;
+
+      const linkedRequest =
+        log.request_id && assetType === "Vehicle"
+          ? vehicleRequestsById.get(log.request_id)
+          : log.request_id
+          ? equipmentRequestsById.get(log.request_id)
+          : null;
+
+      const systemAffected = (linkedRequest?.system_affected ?? "").trim() || "Unspecified";
+      if (failureSystemFilter !== "All" && systemAffected !== failureSystemFilter) continue;
+
+      const description =
+        (linkedRequest?.description ?? "").trim() ||
+        (log.notes ?? "").trim() ||
+        (log.status_update ?? "").trim() ||
+        "No description";
+
+      rows.push({
+        id: log.id,
+        created_at: log.created_at,
+        request_id: log.request_id ?? null,
+        assetType,
+        assetId,
+        assetName: assetType === "Vehicle" ? vehicleNameById.get(assetId) ?? assetId : equipmentNameById.get(assetId) ?? assetId,
+        systemAffected,
+        description,
+        detailHref:
+          assetType === "Vehicle"
+            ? `/vehicles/${encodeURIComponent(assetId)}`
+            : `/equipment/${encodeURIComponent(assetId)}`,
+        historyHref:
+          assetType === "Vehicle"
+            ? `/vehicles/${encodeURIComponent(assetId)}/history`
+            : `/equipment/${encodeURIComponent(assetId)}/history`,
+      });
+    }
+
+    rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return rows;
+  }, [
+    allMaintenanceLogs,
+    allRequests,
+    equipment,
+    failureAssetTypeFilter,
+    failureEndDate,
+    failureStartDate,
+    failureSystemFilter,
+    vehicles,
+  ]);
+
+  const failureSystemOptions = useMemo(() => {
+    const vehicleRequestsById = new Map(allRequests.filter((r) => Boolean(r.vehicle_id)).map((r) => [r.id, r]));
+    const equipmentRequestsById = new Map(allRequests.filter((r) => Boolean(r.equipment_id)).map((r) => [r.id, r]));
+    const start = failureStartDate ? new Date(`${failureStartDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+    const end = failureEndDate ? new Date(`${failureEndDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
+    const set = new Set<string>();
+    for (const log of allMaintenanceLogs) {
+      const createdAtTs = new Date(log.created_at).getTime();
+      if (!Number.isFinite(createdAtTs) || createdAtTs < start || createdAtTs > end) continue;
+      const assetType = log.vehicle_id ? "Vehicle" : log.equipment_id ? "Equipment" : null;
+      if (!assetType) continue;
+      if (failureAssetTypeFilter === "Vehicles" && assetType !== "Vehicle") continue;
+      if (failureAssetTypeFilter === "Equipment" && assetType !== "Equipment") continue;
+      const linkedRequest =
+        log.request_id && assetType === "Vehicle"
+          ? vehicleRequestsById.get(log.request_id)
+          : log.request_id
+          ? equipmentRequestsById.get(log.request_id)
+          : null;
+      const systemAffected = (linkedRequest?.system_affected ?? "").trim() || "Unspecified";
+      set.add(systemAffected);
+    }
+    return ["All", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [allMaintenanceLogs, allRequests, failureAssetTypeFilter, failureEndDate, failureStartDate]);
+
+  const topSystems = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of failureRows) {
+      counts.set(row.systemAffected, (counts.get(row.systemAffected) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([system, count]) => ({ system, count }))
+      .sort((a, b) => b.count - a.count || a.system.localeCompare(b.system))
+      .slice(0, 20);
+  }, [failureRows]);
+
+  const topRepeatAssets = useMemo(() => {
+    const counts = new Map<string, { assetType: "Vehicle" | "Equipment"; assetId: string; assetName: string; count: number; href: string }>();
+    for (const row of failureRows) {
+      const key = `${row.assetType}:${row.assetId}`;
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, {
+          assetType: row.assetType,
+          assetId: row.assetId,
+          assetName: row.assetName,
+          count: 1,
+          href: row.detailHref,
+        });
+      }
+    }
+    return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.assetName.localeCompare(b.assetName)).slice(0, 20);
+  }, [failureRows]);
+
+  const recentFailures = useMemo(() => failureRows.slice(0, 20), [failureRows]);
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
@@ -1055,7 +1246,238 @@ export default function OpsPage() {
         </div>
       ) : null}
 
-      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "Failures" ? (
+        <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+          <div style={cardStyle()}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Failure Frequency</div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
+              <Field label="Start Date">
+                <input type="date" value={failureStartDate} onChange={(e) => setFailureStartDate(e.target.value)} style={inputStyle()} />
+              </Field>
+              <Field label="End Date">
+                <input type="date" value={failureEndDate} onChange={(e) => setFailureEndDate(e.target.value)} style={inputStyle()} />
+              </Field>
+              <Field label="Asset Type">
+                <select
+                  value={failureAssetTypeFilter}
+                  onChange={(e) => setFailureAssetTypeFilter(e.target.value as AssetTypeFilter)}
+                  style={inputStyle()}
+                >
+                  <option>All</option>
+                  <option>Vehicles</option>
+                  <option>Equipment</option>
+                </select>
+              </Field>
+              <Field label="System Affected">
+                <select value={failureSystemFilter} onChange={(e) => setFailureSystemFilter(e.target.value)} style={inputStyle()}>
+                  {failureSystemOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div style={{ opacity: 0.75, fontSize: 12 }}>
+              Showing {failureRows.length} failure log{failureRows.length === 1 ? "" : "s"}.
+            </div>
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ fontWeight: 900 }}>Top Systems Affected</div>
+              <button
+                type="button"
+                style={actionButtonStyle}
+                onClick={() =>
+                  downloadCsv(
+                    "ops-top-systems.csv",
+                    ["system_affected", "count"],
+                    topSystems.map((row) => [row.system, row.count])
+                  )
+                }
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {topSystems.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No failure systems found for the current filters.</div>
+            ) : (
+              <>
+                <svg viewBox={`0 0 640 ${Math.max(80, topSystems.length * 24 + 20)}`} width="100%" height={Math.max(120, topSystems.length * 24 + 20)}>
+                  {(() => {
+                    const maxCount = Math.max(...topSystems.map((r) => r.count), 1);
+                    const left = 180;
+                    const maxWidth = 420;
+                    return topSystems.map((row, idx) => {
+                      const y = 20 + idx * 24;
+                      const width = (row.count / maxCount) * maxWidth;
+                      return (
+                        <g key={`sys-bar:${row.system}`}>
+                          <text x={8} y={y + 14} fill="currentColor" fontSize="11">
+                            {row.system}
+                          </text>
+                          <rect x={left} y={y} width={width} height={14} rx={4} fill="rgba(255,120,120,0.65)" />
+                          <text x={left + width + 8} y={y + 12} fill="currentColor" fontSize="11">
+                            {row.count}
+                          </text>
+                        </g>
+                      );
+                    });
+                  })()}
+                </svg>
+
+                <div style={{ overflowX: "auto", marginTop: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>System Affected</th>
+                        <th style={thStyle}>Count</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topSystems.map((row) => (
+                        <tr key={`sys-row:${row.system}`}>
+                          <td style={tdStyle}>{row.system}</td>
+                          <td style={tdStyle}>{row.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ fontWeight: 900 }}>Top Repeat Assets</div>
+              <button
+                type="button"
+                style={actionButtonStyle}
+                onClick={() =>
+                  downloadCsv(
+                    "ops-top-repeat-assets.csv",
+                    ["asset_type", "asset_id", "asset_name", "failure_count"],
+                    topRepeatAssets.map((row) => [row.assetType, row.assetId, row.assetName, row.count])
+                  )
+                }
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {topRepeatAssets.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No repeat assets found for the current filters.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Asset</th>
+                      <th style={thStyle}>Type</th>
+                      <th style={thStyle}>Failures</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topRepeatAssets.map((row) => (
+                      <tr key={`asset-repeat:${row.assetType}:${row.assetId}`}>
+                        <td style={tdStyle}>
+                          <Link href={row.href} style={{ color: "inherit", fontWeight: 800 }}>
+                            {row.assetName}
+                          </Link>
+                          <div style={{ opacity: 0.72, fontSize: 12 }}>{row.assetId}</div>
+                        </td>
+                        <td style={tdStyle}>{row.assetType}</td>
+                        <td style={tdStyle}>{row.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div style={cardStyle()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ fontWeight: 900 }}>Recent Failures</div>
+              <button
+                type="button"
+                style={actionButtonStyle}
+                onClick={() =>
+                  downloadCsv(
+                    "ops-recent-failures.csv",
+                    ["created_at", "asset_type", "asset_id", "asset_name", "system_affected", "description", "request_id", "history_url"],
+                    recentFailures.map((row) => [
+                      row.created_at,
+                      row.assetType,
+                      row.assetId,
+                      row.assetName,
+                      row.systemAffected,
+                      row.description,
+                      row.request_id ?? "",
+                      row.historyHref,
+                    ])
+                  )
+                }
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {recentFailures.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No recent failures found for the current filters.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {recentFailures.map((row) => (
+                  <div
+                    key={`recent-failure:${row.id}`}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 12,
+                      padding: 10,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ minWidth: 240 }}>
+                      <div style={{ fontWeight: 800 }}>
+                        <Link href={row.detailHref} style={{ color: "inherit" }}>
+                          {row.assetName}
+                        </Link>{" "}
+                        <span style={{ opacity: 0.72 }}>({row.assetType})</span>
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>
+                        {row.assetId} · {formatDateTime(row.created_at)}
+                        {row.request_id ? ` · Request ${row.request_id}` : ""}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <strong>{row.systemAffected}</strong> - {row.description}
+                      </div>
+                    </div>
+                    <Link href={row.historyHref} style={actionLinkStyle}>
+                      View History
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" && tab !== "Failures" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
@@ -1088,4 +1510,15 @@ const actionLinkStyle: React.CSSProperties = {
   color: "inherit",
   fontWeight: 700,
   fontSize: 12,
+};
+
+const actionButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 10,
+  padding: "6px 9px",
+  background: "rgba(255,255,255,0.03)",
+  color: "inherit",
+  fontWeight: 700,
+  fontSize: 12,
+  cursor: "pointer",
 };
