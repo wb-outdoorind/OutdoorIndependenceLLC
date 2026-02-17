@@ -3,6 +3,7 @@
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { writeAudit } from "@/lib/audit";
 
 /* =========================
    Types (aligned with request)
@@ -60,6 +61,7 @@ type MaintenanceRequestRecord = {
 };
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
+type Role = "owner" | "office_admin" | "mechanic" | "employee";
 
 type InventoryItem = {
   id: string;
@@ -73,6 +75,10 @@ type PartUsed = {
   name: string;
   quantity_used: number;
 };
+
+function canManagePartsUsage(role: Role | null) {
+  return role === "owner" || role === "office_admin" || role === "mechanic";
+}
 
 /* =========================
    Keys
@@ -138,9 +144,11 @@ export default function MaintenanceLogPage() {
   const [selectedPartId, setSelectedPartId] = useState("");
   const [selectedPartQty, setSelectedPartQty] = useState("1");
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
+  const [userRole, setUserRole] = useState<Role | null>(null);
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
+  const canSubmitPartsUsage = canManagePartsUsage(userRole);
 
   // load current vehicle mileage + request (if requestId present)
   useEffect(() => {
@@ -201,6 +209,31 @@ export default function MaintenanceLogPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void (async () => {
+        const supabase = createSupabaseBrowser();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          setUserRole("employee");
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+
+        setUserRole((profile?.role as Role | undefined) ?? "employee");
+      })();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!canSubmitPartsUsage) return;
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
         setInventoryLoading(true);
         setInventoryError(null);
 
@@ -225,7 +258,7 @@ export default function MaintenanceLogPage() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [canSubmitPartsUsage]);
 
   const totalCost = useMemo(() => {
     const l = Number(laborCost);
@@ -351,6 +384,11 @@ export default function MaintenanceLogPage() {
     }
 
     if (partsUsed.length > 0) {
+      if (!canSubmitPartsUsage) {
+        setSubmitError("You do not have permission to submit parts usage.");
+        return;
+      }
+
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData?.user) {
         console.error("Failed to resolve auth user for inventory usage logs:", authError);
@@ -364,17 +402,39 @@ export default function MaintenanceLogPage() {
         reason: "usage",
         reference_type: "maintenance_log",
         reference_id: insertedLog.id,
+        notes: null,
         created_by: authData.user.id,
       }));
 
       const { error: txError } = await supabase.from("inventory_transactions").insert(txPayload);
       if (txError) {
         console.error("Inventory usage insert failed:", txError);
+        if (
+          txError.message.toLowerCase().includes("below 0") ||
+          txError.message.toLowerCase().includes("cannot go below")
+        ) {
+          setSubmitError(
+            "Not enough inventory quantity for one or more selected parts. Reduce Qty Used and try again."
+          );
+          return;
+        }
         setSubmitError(
           `Maintenance log saved, but failed to record parts used: ${txError.message}`
         );
         return;
       }
+
+      await writeAudit({
+        action: "inventory_usage",
+        table_name: "inventory_transactions",
+        meta: {
+          maintenance_log_id: insertedLog.id,
+          items: partsUsed.map((part) => ({
+            item_id: part.item_id,
+            qty: part.quantity_used,
+          })),
+        },
+      });
     }
 
     // update vehicle mileage (only forward)
@@ -544,6 +604,11 @@ export default function MaintenanceLogPage() {
 
         <div style={{ marginTop: 16, ...cardStyle }}>
           <div style={{ fontWeight: 900, marginBottom: 12 }}>Parts Used</div>
+          {!canSubmitPartsUsage ? (
+            <div style={{ opacity: 0.75, marginBottom: 10 }}>
+              Parts usage entry is limited to owner, office_admin, or mechanic.
+            </div>
+          ) : null}
 
           <div style={gridStyle}>
             <Field label="Search Inventory">
@@ -552,6 +617,7 @@ export default function MaintenanceLogPage() {
                 onChange={(e) => setPartSearch(e.target.value)}
                 placeholder="Search by part name/category"
                 style={inputStyle}
+                disabled={!canSubmitPartsUsage}
               />
             </Field>
 
@@ -560,7 +626,7 @@ export default function MaintenanceLogPage() {
                 value={selectedPartId}
                 onChange={(e) => setSelectedPartId(e.target.value)}
                 style={inputStyle}
-                disabled={inventoryLoading || filteredInventoryItems.length === 0}
+                disabled={!canSubmitPartsUsage || inventoryLoading || filteredInventoryItems.length === 0}
               >
                 <option value="">
                   {inventoryLoading
@@ -584,12 +650,13 @@ export default function MaintenanceLogPage() {
                 inputMode="numeric"
                 placeholder="1"
                 style={inputStyle}
+                disabled={!canSubmitPartsUsage}
               />
             </Field>
           </div>
 
           <div style={{ marginTop: 12 }}>
-            <button type="button" onClick={addPartUsed} style={secondaryButtonStyle}>
+            <button type="button" onClick={addPartUsed} style={secondaryButtonStyle} disabled={!canSubmitPartsUsage}>
               Add Part
             </button>
           </div>
@@ -623,6 +690,7 @@ export default function MaintenanceLogPage() {
                     type="button"
                     onClick={() => removePartUsed(part.item_id)}
                     style={secondaryButtonStyle}
+                    disabled={!canSubmitPartsUsage}
                   >
                     Remove
                   </button>

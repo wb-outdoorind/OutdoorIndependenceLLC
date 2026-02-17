@@ -4,8 +4,10 @@ import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { writeAudit } from "@/lib/audit";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
+type Role = "owner" | "office_admin" | "mechanic" | "employee";
 
 type EquipmentRequestOption = {
   id: string;
@@ -22,6 +24,23 @@ type Attachment = {
   dataUrl: string;
   kind?: "receipt" | "issue" | "other";
 };
+
+type InventoryItem = {
+  id: string;
+  name: string;
+  category: string | null;
+  quantity: number;
+};
+
+type PartUsed = {
+  item_id: string;
+  name: string;
+  quantity_used: number;
+};
+
+function canManagePartsUsage(role: Role | null) {
+  return role === "owner" || role === "office_admin" || role === "mechanic";
+}
 
 function equipmentHoursKey(equipmentId: string) {
   return `equipment:${equipmentId}:hours`;
@@ -78,7 +97,37 @@ export default function EquipmentMaintenanceLogPage() {
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [partSearch, setPartSearch] = useState("");
+  const [selectedPartId, setSelectedPartId] = useState("");
+  const [selectedPartQty, setSelectedPartQty] = useState("1");
+  const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
   const [currentHours] = useState<number | null>(initialStoredHours);
+  const canSubmitPartsUsage = canManagePartsUsage(userRole);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const supabase = createSupabaseBrowser();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          setUserRole("employee");
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+        setUserRole((profile?.role as Role | undefined) ?? "employee");
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!equipmentId) return;
@@ -132,6 +181,63 @@ export default function EquipmentMaintenanceLogPage() {
     return String(lf + pf);
   }, [laborCost, partsCost]);
 
+  useEffect(() => {
+    if (!canSubmitPartsUsage) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setInventoryLoading(true);
+        setInventoryError(null);
+        const supabase = createSupabaseBrowser();
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select("id,name,category,quantity")
+          .eq("is_active", true)
+          .order("name", { ascending: true });
+        if (error) {
+          console.error("[equipment-maintenance-log] inventory load error:", error);
+          setInventoryError(error.message);
+          setInventoryItems([]);
+          setInventoryLoading(false);
+          return;
+        }
+        setInventoryItems((data ?? []) as InventoryItem[]);
+        setInventoryLoading(false);
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [canSubmitPartsUsage]);
+
+  const filteredInventoryItems = useMemo(() => {
+    const q = partSearch.trim().toLowerCase();
+    const usedIds = new Set(partsUsed.map((p) => p.item_id));
+    const available = inventoryItems.filter((item) => !usedIds.has(item.id));
+    if (!q) return available;
+    return available.filter((item) =>
+      [item.id, item.name, item.category ?? ""].join(" ").toLowerCase().includes(q)
+    );
+  }, [inventoryItems, partSearch, partsUsed]);
+
+  function addPartUsed() {
+    if (!selectedPartId) return;
+    const qty = Math.trunc(Number(selectedPartQty));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      alert("Enter a valid Qty Used.");
+      return;
+    }
+    const selected = inventoryItems.find((item) => item.id === selectedPartId);
+    if (!selected) return;
+    setPartsUsed((prev) => [
+      ...prev,
+      { item_id: selected.id, name: selected.name, quantity_used: qty },
+    ]);
+    setSelectedPartId("");
+    setSelectedPartQty("1");
+  }
+
+  function removePartUsed(itemId: string) {
+    setPartsUsed((prev) => prev.filter((p) => p.item_id !== itemId));
+  }
+
   async function onPickReceiptPhoto(file: File) {
     if (file.size > 2_000_000) {
       alert("That photo is large (>2MB). Please retake at a lower resolution or crop it.");
@@ -173,31 +279,89 @@ export default function EquipmentMaintenanceLogPage() {
     const p = Number(partsCost);
 
     const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from("equipment_maintenance_logs").insert({
-      equipment_id: equipmentId,
-      request_id: selectedRequestId || null,
-      hours: h,
-      notes: notes.trim()
-        ? notes.trim()
-        : [
-            `Title: ${title.trim()}`,
-            serviceDate ? `Service Date: ${serviceDate}` : "",
-            vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
-            invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
-            Number.isFinite(l) ? `Labor Cost: ${l}` : "",
-            Number.isFinite(p) ? `Parts Cost: ${p}` : "",
-            totalCost.trim() ? `Total Cost: ${totalCost}` : "",
-            nextDueHours.trim() ? `Next Due Hours: ${nextDueHours.trim()}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-      status_update: status,
-    });
+    const { data: insertedLog, error } = await supabase
+      .from("equipment_maintenance_logs")
+      .insert({
+        equipment_id: equipmentId,
+        request_id: selectedRequestId || null,
+        hours: h,
+        notes: notes.trim()
+          ? notes.trim()
+          : [
+              `Title: ${title.trim()}`,
+              serviceDate ? `Service Date: ${serviceDate}` : "",
+              vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
+              invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
+              Number.isFinite(l) ? `Labor Cost: ${l}` : "",
+              Number.isFinite(p) ? `Parts Cost: ${p}` : "",
+              totalCost.trim() ? `Total Cost: ${totalCost}` : "",
+              nextDueHours.trim() ? `Next Due Hours: ${nextDueHours.trim()}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+        status_update: status,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Equipment maintenance log insert failed:", error);
       setSubmitError(error.message);
       return;
+    }
+
+    if (partsUsed.length > 0) {
+      if (!canSubmitPartsUsage) {
+        setSubmitError("You do not have permission to submit parts usage.");
+        return;
+      }
+
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) {
+        console.error("Failed to resolve auth user for inventory usage logs:", authError);
+        setSubmitError("Maintenance log saved, but failed to apply parts usage (missing auth user).");
+        return;
+      }
+
+      const txPayload = partsUsed.map((part) => ({
+        item_id: part.item_id,
+        change_qty: -Math.abs(part.quantity_used),
+        reason: "usage",
+        reference_type: "maintenance_log",
+        reference_id: insertedLog.id,
+        notes: null,
+        created_by: authData.user.id,
+      }));
+
+      const { error: txError } = await supabase.from("inventory_transactions").insert(txPayload);
+      if (txError) {
+        console.error("Inventory usage insert failed:", txError);
+        if (
+          txError.message.toLowerCase().includes("below 0") ||
+          txError.message.toLowerCase().includes("cannot go below")
+        ) {
+          setSubmitError(
+            "Not enough inventory quantity for one or more selected parts. Reduce Qty Used and try again."
+          );
+          return;
+        }
+        setSubmitError(
+          `Maintenance log saved, but failed to record parts used: ${txError.message}`
+        );
+        return;
+      }
+
+      await writeAudit({
+        action: "inventory_usage",
+        table_name: "inventory_transactions",
+        meta: {
+          maintenance_log_id: insertedLog.id,
+          items: partsUsed.map((part) => ({
+            item_id: part.item_id,
+            qty: part.quantity_used,
+          })),
+        },
+      });
     }
 
     localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
@@ -299,6 +463,106 @@ export default function EquipmentMaintenanceLogPage() {
               <input value={totalCost} readOnly style={{ ...inputStyle, opacity: 0.85 }} />
             </Field>
           </div>
+        </div>
+
+        <div style={{ marginTop: 16, ...cardStyle }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Parts Used</div>
+          {!canSubmitPartsUsage ? (
+            <div style={{ opacity: 0.75, marginBottom: 10 }}>
+              Parts usage entry is limited to owner, office_admin, or mechanic.
+            </div>
+          ) : null}
+
+          <div style={gridStyle}>
+            <Field label="Search Inventory">
+              <input
+                value={partSearch}
+                onChange={(e) => setPartSearch(e.target.value)}
+                placeholder="Search by item name/category"
+                style={inputStyle}
+                disabled={!canSubmitPartsUsage}
+              />
+            </Field>
+
+            <Field label="Part">
+              <select
+                value={selectedPartId}
+                onChange={(e) => setSelectedPartId(e.target.value)}
+                style={inputStyle}
+                disabled={!canSubmitPartsUsage || inventoryLoading || filteredInventoryItems.length === 0}
+              >
+                <option value="">
+                  {inventoryLoading
+                    ? "Loading parts..."
+                    : filteredInventoryItems.length
+                    ? "Select a part"
+                    : "No matching parts"}
+                </option>
+                {filteredInventoryItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} ({item.quantity} in stock)
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Qty Used">
+              <input
+                value={selectedPartQty}
+                onChange={(e) => setSelectedPartQty(e.target.value)}
+                inputMode="numeric"
+                placeholder="1"
+                style={inputStyle}
+                disabled={!canSubmitPartsUsage}
+              />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <button type="button" onClick={addPartUsed} style={secondaryButtonStyle} disabled={!canSubmitPartsUsage}>
+              Add Part
+            </button>
+          </div>
+
+          {inventoryError ? (
+            <div style={{ marginTop: 10, color: "#ff9d9d" }}>
+              Failed to load inventory items: {inventoryError}
+            </div>
+          ) : null}
+
+          {partsUsed.length > 0 ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {partsUsed.map((part) => (
+                <div
+                  key={part.item_id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{part.name}</div>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>Qty Used: {part.quantity_used}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removePartUsed(part.item_id)}
+                    style={secondaryButtonStyle}
+                    disabled={!canSubmitPartsUsage}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 10, opacity: 0.7 }}>No parts added.</div>
+          )}
         </div>
 
         <div style={{ marginTop: 16, ...cardStyle }}>
