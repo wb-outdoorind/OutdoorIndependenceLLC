@@ -1,0 +1,23 @@
+-- 0009_inventory_transactions.sql
+-- Scaffold only: inventory_transactions table (intentionally not applied yet)
+
+-- Future table sketch (commented out on purpose):
+-- create table if not exists public.inventory_transactions (
+--   id uuid primary key default gen_random_uuid(),
+--   created_at timestamptz not null default now(),
+--   updated_at timestamptz not null default now(),
+--
+--   item_id text not null references public.inventory_items(id) on delete cascade,
+--   location_id uuid null references public.inventory_locations(id) on delete set null,
+--   transaction_type text not null, -- e.g. 'in','out','adjustment','transfer'
+--   quantity_delta integer not null,
+--   reason text,
+--   reference_id text,
+--   created_by uuid not null default auth.uid()
+-- );
+--
+-- create index if not exists inventory_transactions_item_id_idx
+--   on public.inventory_transactions (item_id);
+--
+-- create index if not exists inventory_transactions_created_at_idx
+--   on public.inventory_transactions (created_at desc);
