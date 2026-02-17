@@ -227,6 +227,14 @@ export default function InventoryItemDetailPage() {
           <Link href="/inventory" style={secondaryButtonStyle}>
             ← Back to Inventory
           </Link>
+          <Link
+            href={`/inventory/transfers?itemId=${encodeURIComponent(itemId)}${
+              item?.location_id ? `&fromLocationId=${encodeURIComponent(item.location_id)}` : ""
+            }`}
+            style={secondaryButtonStyle}
+          >
+            Quick Transfer
+          </Link>
         </div>
       </div>
 

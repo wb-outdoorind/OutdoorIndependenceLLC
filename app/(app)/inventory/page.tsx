@@ -167,6 +167,9 @@ export default function InventoryPage() {
           <Link href="/inventory/ledger" style={secondaryButtonStyle}>
             Ledger
           </Link>
+          <Link href="/inventory/transfers" style={secondaryButtonStyle}>
+            Transfers
+          </Link>
 
           {canManageInventory(role) ? (
             <Link href="/inventory/new" style={buttonStyle}>
