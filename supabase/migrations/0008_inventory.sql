@@ -10,8 +10,7 @@ create table if not exists public.inventory_locations (
 
   name text not null unique,
   location_type text,
-  vehicle_id text null references public.vehicles(id) on delete set null,
-  equipment_id text null references public.equipment(id) on delete set null
+  notes text
 );
 
 create table if not exists public.inventory_items (
@@ -33,12 +32,6 @@ create table if not exists public.inventory_items (
 
 create index if not exists inventory_locations_location_type_idx
   on public.inventory_locations (location_type);
-
-create index if not exists inventory_locations_vehicle_id_idx
-  on public.inventory_locations (vehicle_id);
-
-create index if not exists inventory_locations_equipment_id_idx
-  on public.inventory_locations (equipment_id);
 
 create index if not exists inventory_items_name_idx
   on public.inventory_items (name);
@@ -91,7 +84,7 @@ create policy inventory_items_select_authenticated
   to authenticated
   using (true);
 
--- INSERT/UPDATE limited to owner, office_admin, mechanic roles.
+-- INSERT/UPDATE/DELETE limited to owner, office_admin, mechanic roles.
 -- Requires public.profiles with role text keyed by auth user id.
 drop policy if exists inventory_locations_insert_role_based on public.inventory_locations;
 create policy inventory_locations_insert_role_based
@@ -129,6 +122,20 @@ create policy inventory_locations_update_role_based
     )
   );
 
+drop policy if exists inventory_locations_delete_role_based on public.inventory_locations;
+create policy inventory_locations_delete_role_based
+  on public.inventory_locations
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('owner', 'office_admin', 'mechanic')
+    )
+  );
+
 drop policy if exists inventory_items_insert_role_based on public.inventory_items;
 create policy inventory_items_insert_role_based
   on public.inventory_items
@@ -157,6 +164,20 @@ create policy inventory_items_update_role_based
     )
   )
   with check (
+    exists (
+      select 1
+      from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('owner', 'office_admin', 'mechanic')
+    )
+  );
+
+drop policy if exists inventory_items_delete_role_based on public.inventory_items;
+create policy inventory_items_delete_role_based
+  on public.inventory_items
+  for delete
+  to authenticated
+  using (
     exists (
       select 1
       from public.profiles p
