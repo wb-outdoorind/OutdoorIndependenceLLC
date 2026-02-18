@@ -141,7 +141,7 @@ export default function MaintenanceRequestPage() {
 
     const m = Number(mileage);
     if (!requestDate) return alert("Request Date is required.");
-    if (!employee.trim()) return alert("Employee is required.");
+    if (!employee.trim()) return alert("Teammate is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
 
     const finalTitle = title.trim() ? title.trim() : suggestedTitle;
@@ -155,7 +155,7 @@ export default function MaintenanceRequestPage() {
       "",
       description.trim(),
       "",
-      `Employee: ${employee.trim()}`,
+      `Teammate: ${employee.trim()}`,
       `Request Date: ${requestDate}`,
       `Mitigation Applied: ${mitigationApplied}`,
       `Affects Next Shift: ${affectsNextShift}`,
@@ -242,11 +242,11 @@ export default function MaintenanceRequestPage() {
               />
             </Field>
 
-            <Field label="Employee *">
+            <Field label="Teammate *">
               <input
                 value={employee}
                 onChange={(e) => setEmployee(e.target.value)}
-                placeholder="Employee name"
+                placeholder="Teammate name"
                 style={inputStyle()}
                 required
               />

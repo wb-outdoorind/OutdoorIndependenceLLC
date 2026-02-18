@@ -200,7 +200,7 @@ export default function MaintenanceLogPage() {
           ? prev
           : [
               `From Request (${req.id})`,
-              `Employee: ${req.employee}`,
+              `Teammate: ${req.employee}`,
               `Urgency: ${req.urgency}`,
               `System: ${req.systemAffected}`,
               `Drivability: ${req.drivabilityStatus}`,

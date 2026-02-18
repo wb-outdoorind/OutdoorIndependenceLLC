@@ -331,7 +331,7 @@ export default function InspectionForm({
     const m = Number(mileage);
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
-    if (!employee.trim()) return alert("Employee is required.");
+    if (!employee.trim()) return alert("Teammate is required.");
 
     if (defectsFound && !notes.trim())
       return alert("Notes are required when any item is marked Fail.");
@@ -353,7 +353,7 @@ export default function InspectionForm({
     }
 
     if (!employeeSignature.trim())
-      return alert("Employee Signature is required.");
+      return alert("Teammate Signature is required.");
 
     const checklist = {
       sections: sectionState,
@@ -454,12 +454,12 @@ export default function InspectionForm({
 
             <div>
               <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Employee *
+                Teammate *
               </div>
               <input
                 value={employee}
                 onChange={(e) => setEmployee(e.target.value)}
-                placeholder="Employee name"
+                placeholder="Teammate name"
                 style={inputStyle()}
               />
             </div>
@@ -666,7 +666,7 @@ export default function InspectionForm({
           >
             <div>
               <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Employee Signature *
+                Teammate Signature *
               </div>
               <input
                 value={employeeSignature}

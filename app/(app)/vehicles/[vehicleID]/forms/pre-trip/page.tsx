@@ -4,7 +4,7 @@ import InspectionForm, { InspectionSection } from "../_components/InspectionForm
 
 const intro = `The Daily Pre-Trip Inspection is a mandatory safety and readiness inspection that must be completed by the assigned employee before operating or transporting any company vehicle, trailer, or equipment. This inspection is required prior to leaving the shop or yard and must be submitted in AirTable by scanning the vehicle’s assigned QR code or by using the "Vehicle Lookup" Interface on AirTable.
 
-Employees are responsible for thoroughly inspecting all applicable components of the vehicle and any attached or associated equipment, including trucks, trailers, plows, salters, and skid/loader machinery. All inspection items must be accurately completed based on the actual condition of the equipment at the time of inspection.
+Teammates are responsible for thoroughly inspecting all applicable components of the vehicle and any attached or associated equipment, including trucks, trailers, plows, salters, and skid/loader machinery. All inspection items must be accurately completed based on the actual condition of the equipment at the time of inspection.
 
 If any defect, damage, malfunction, or unsafe condition is identified:
 • The issue must be clearly documented in the inspection form

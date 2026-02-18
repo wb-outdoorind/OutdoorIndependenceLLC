@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 
 /* =========================
    Types
@@ -591,6 +592,8 @@ export default function VehicleDetailPage() {
           </Link>
         </div>
       </div>
+
+      <AcademyAssetSection vehicleId={stableVehicleId} assetType={vehicle?.type ?? ""} />
 
       {/* Maintenance history preview */}
       <div style={{ marginTop: 18, ...cardStyle() }}>

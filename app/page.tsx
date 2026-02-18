@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import LogoutButton from "./logout-button";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -8,8 +9,9 @@ const tiles = [
   { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
   { title: "Vehicles", href: "/vehicles", desc: "Vehicle info, inspections, and maintenance" },
   { title: "Inventory", href: "/inventory?filter=low", desc: "Parts, stock levels, reorder tracking" },
-  { title: "Employees", href: "/employees", desc: "Team list, roles, and permissions" },
-  { title: "Operations & Inspections", href: "/ops", desc: "Dashboards, inspections, maintenance history" },
+  { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
+  { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
+  { title: "Maintenance Operations", href: "/ops", desc: "Dashboards, inspections, maintenance history" },
   { title: "Scan QR Code", href: "/scan", desc: "Scan an asset QR code to pull it up fast" },
   { title: "Maintenance Center", href: "/maintenance", desc: "Fleet-wide maintenance queue for mechanics" },
 
@@ -41,19 +43,19 @@ export default async function Home() {
   }
 
   return (
-    <main style={{ padding: 32, maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-  <div>
-    <h1 style={{ fontSize: 34, marginBottom: 6 }}>Home</h1>
-    <p style={{ opacity: 0.75, marginTop: 0 }}>
-      Choose a section to manage assets and operations.
-    </p>
-  </div>
-
-  <LogoutButton />
-</div>
-
+    <main style={{ padding: "16px 32px 32px 6px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+        <Image
+          src="/App_Logo.png"
+          alt="Outdoor Independence logo"
+          width={300}
+          height={56}
+          style={{ height: 56, width: "auto", objectFit: "contain" }}
+        />
+        <LogoutButton />
+      </div>
       <p style={{ opacity: 0.75, marginTop: 0 }}>
+        Choose a section to manage assets and operations.
       </p>
 
       <div

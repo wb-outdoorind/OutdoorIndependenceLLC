@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 
 function TopNav() {
@@ -26,7 +27,7 @@ function TopNav() {
         style={{
           maxWidth: 1100,
           margin: "0 auto",
-          padding: "14px 16px",
+          padding: "8px 16px 12px 8px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -34,21 +35,28 @@ function TopNav() {
         }}
       >
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
-  <div style={{ fontWeight: 800, lineHeight: 1.1 }}>
-    Inspection App
-  </div>
-  <div style={{ fontSize: 12, opacity: 0.7 }}>
-    Operations & Maintenance
-  </div>
-</Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Image
+              src="/App_Logo.png"
+              alt="Outdoor Independence logo"
+              width={32}
+              height={32}
+              style={{ objectFit: "contain", borderRadius: 8 }}
+            />
+            <div>
+              <div style={{ fontWeight: 800, lineHeight: 1.1 }}>Inspection App</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Operations & Maintenance</div>
+            </div>
+          </div>
+        </Link>
 
 
         <nav style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link href="/equipment" style={linkStyle}>Equipment</Link>
           <Link href="/vehicles" style={linkStyle}>Vehicles</Link>
           <Link href="/inventory" style={linkStyle}>Inventory</Link>
-          <Link href="/employees" style={linkStyle}>Employees</Link>
-          <Link href="/ops" style={linkStyle}>Ops & Inspections</Link>
+          <Link href="/employees" style={linkStyle}>Teammates</Link>
+          <Link href="/ops" style={linkStyle}>Maintenance Operations</Link>
         </nav>
       </div>
     </header>

@@ -5,7 +5,7 @@ import InspectionForm, { InspectionItem, InspectionSection } from "../_component
 export default function PostTripPage() {
   const intro = `The Daily Post-Trip Inspection is a mandatory condition and accountability inspection that must be completed by the assigned employee immediately upon returning to the shop or yard with any company truck, trailer, or equipment. This inspection must be submitted in AirTable before leaving the vehicle unattended or ending the work shift and is accessed by scanning the vehicle’s assigned QR code.
 
-Employees are required to accurately document the condition of all applicable vehicles and equipment, including any damage, defects, operational issues, or abnormal conditions identified during use. Ending mileage or operating hours must be recorded to support maintenance scheduling and compliance tracking.
+Teammates are required to accurately document the condition of all applicable vehicles and equipment, including any damage, defects, operational issues, or abnormal conditions identified during use. Ending mileage or operating hours must be recorded to support maintenance scheduling and compliance tracking.
 
 If any unsafe condition, damage, or mechanical issue is identified:
 • The issue must be clearly documented in the inspection

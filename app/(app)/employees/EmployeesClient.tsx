@@ -5,7 +5,7 @@ import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
 
-type Employee = {
+type Teammate = {
   id: string;
   full_name: string;
   role: string;
@@ -16,7 +16,7 @@ type Employee = {
 };
 
 export default function EmployeesClient({ role }: { role: string }) {
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<Teammate[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [q, setQ] = useState("");
@@ -26,7 +26,7 @@ export default function EmployeesClient({ role }: { role: string }) {
   const canManage = role === "owner" || role === "office_admin";
 
   /* ===============================
-     Load Employees
+     Load Teammates
   =============================== */
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export default function EmployeesClient({ role }: { role: string }) {
      Resend Invite + Audit
   =============================== */
 
-  async function resendInvite(emp: Employee) {
+  async function resendInvite(emp: Teammate) {
     const ok = confirm(`Resend invite email to ${emp.email || "this employee"}?`);
     if (!ok) return;
 
@@ -114,7 +114,7 @@ export default function EmployeesClient({ role }: { role: string }) {
     alert("Invite resent successfully.");
   }
 
-  async function auditEditClick(emp: Employee) {
+  async function auditEditClick(emp: Teammate) {
     // Optional: track that an admin opened an employee record
     await writeAudit({
       action: "open_employee_edit",
@@ -140,7 +140,7 @@ export default function EmployeesClient({ role }: { role: string }) {
         }}
       >
         <div>
-          <h1 style={{ marginBottom: 6 }}>Employees</h1>
+          <h1 style={{ marginBottom: 6 }}>Teammates</h1>
           <div style={{ opacity: 0.7, fontSize: 13 }}>
             Search, filter, and manage employee profiles.
           </div>
@@ -148,7 +148,7 @@ export default function EmployeesClient({ role }: { role: string }) {
 
         {canManage && (
           <Link href="/employees/new" style={buttonStyle}>
-            + Add Employee
+            + Add Teammate
           </Link>
         )}
       </div>
@@ -191,7 +191,7 @@ export default function EmployeesClient({ role }: { role: string }) {
         </div>
       </div>
 
-      {/* Employee Cards */}
+      {/* Teammate Cards */}
       {loading ? (
         <p style={{ opacity: 0.7, marginTop: 18 }}>Loading...</p>
       ) : (
@@ -283,7 +283,7 @@ function prettyRole(role: string) {
   if (r === "owner") return "Owner";
   if (r === "office_admin") return "Office Admin";
   if (r === "mechanic") return "Mechanic";
-  if (r === "employee") return "Employee";
+  if (r === "employee") return "Teammate";
   return role || "Unknown";
 }
 

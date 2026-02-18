@@ -26,7 +26,7 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
-    if (!prof?.email) return NextResponse.json({ error: "Employee email missing" }, { status: 400 });
+    if (!prof?.email) return NextResponse.json({ error: "Teammate email missing" }, { status: 400 });
 
     const origin = req.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
     const redirectTo = `${origin}/auth/callback`;

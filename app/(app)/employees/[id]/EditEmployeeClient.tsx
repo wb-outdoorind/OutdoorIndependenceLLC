@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type Employee = {
+type Teammate = {
   id: string;
   full_name: string | null;
   role: string | null;
@@ -44,10 +44,10 @@ const PERMISSION_GROUPS: Array<{
     ],
   },
   {
-    group: "Employees",
+    group: "Teammates",
     items: [
-      { key: "employees.view", label: "Employees View" },
-      { key: "employees.manage", label: "Employees Manage" },
+      { key: "employees.view", label: "Teammates View" },
+      { key: "employees.manage", label: "Teammates Manage" },
     ],
   },
   {
@@ -93,7 +93,7 @@ function rolePresetAllowed(role: string | null, perm: string) {
 export default function EditEmployeeClient({ id }: { id: string }) {
   const router = useRouter();
 
-  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [employee, setEmployee] = useState<Teammate | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -336,12 +336,12 @@ export default function EditEmployeeClient({ id }: { id: string }) {
   if (errMsg) {
     return (
       <main style={{ padding: 32, maxWidth: 760, margin: "0 auto" }}>
-        <h1 style={{ marginBottom: 6 }}>Edit Employee</h1>
+        <h1 style={{ marginBottom: 6 }}>Edit Teammate</h1>
         <div style={{ ...cardStyle, marginTop: 12 }}>
           <div style={{ fontWeight: 900, marginBottom: 8 }}>Supabase error</div>
           <div style={{ opacity: 0.9 }}>{errMsg}</div>
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Employee ID: <code>{safeId}</code>
+            Teammate ID: <code>{safeId}</code>
           </div>
 
           <div style={{ marginTop: 14 }}>
@@ -357,11 +357,11 @@ export default function EditEmployeeClient({ id }: { id: string }) {
   if (!employee) {
     return (
       <main style={{ padding: 32, maxWidth: 760, margin: "0 auto" }}>
-        <h1 style={{ marginBottom: 6 }}>Edit Employee</h1>
+        <h1 style={{ marginBottom: 6 }}>Edit Teammate</h1>
         <div style={{ ...cardStyle, marginTop: 12 }}>
-          <div style={{ opacity: 0.9 }}>Employee not found.</div>
+          <div style={{ opacity: 0.9 }}>Teammate not found.</div>
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            Employee ID: <code>{safeId}</code>
+            Teammate ID: <code>{safeId}</code>
           </div>
 
           <div style={{ marginTop: 14 }}>
@@ -378,7 +378,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
     <main style={{ padding: 32, maxWidth: 760, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
         <div>
-          <h1 style={{ marginBottom: 6 }}>Edit Employee</h1>
+          <h1 style={{ marginBottom: 6 }}>Edit Teammate</h1>
           <div style={{ opacity: 0.7, fontSize: 13 }}>
             Update role, status, and contact details.
           </div>
@@ -412,7 +412,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
               <option value="owner">Owner</option>
               <option value="office_admin">Office Admin</option>
               <option value="mechanic">Mechanic</option>
-              <option value="employee">Employee</option>
+              <option value="employee">Teammate</option>
             </select>
             {isSelfOwner ? (
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
@@ -460,7 +460,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
             <input value={employee.email ?? ""} readOnly style={{ ...inputStyle, opacity: 0.8 }} />
           </Field>
 
-          <Field label="Employee ID (read-only)">
+          <Field label="Teammate ID (read-only)">
             <input value={employee.id} readOnly style={{ ...inputStyle, opacity: 0.8 }} />
           </Field>
         </div>

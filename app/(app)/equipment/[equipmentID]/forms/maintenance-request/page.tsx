@@ -127,7 +127,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
     const h = Number(hours);
     if (!requestDate) return alert("Request Date is required.");
-    if (!employee.trim()) return alert("Employee is required.");
+    if (!employee.trim()) return alert("Teammate is required.");
     if (!Number.isFinite(h) || h < 0) return alert("Enter valid hours.");
 
     const finalTitle = title.trim() ? title.trim() : suggestedTitle;
@@ -138,7 +138,7 @@ export default function EquipmentMaintenanceRequestPage() {
       "",
       description.trim(),
       "",
-      `Employee: ${employee.trim()}`,
+      `Teammate: ${employee.trim()}`,
       `Request Date: ${requestDate}`,
       `Hours: ${h}`,
       `Mitigation Applied: ${mitigationApplied}`,
@@ -206,8 +206,8 @@ export default function EquipmentMaintenanceRequestPage() {
               <input value={hours} onChange={(e) => setHours(e.target.value)} inputMode="numeric" placeholder="e.g. 1530" style={inputStyle()} required />
             </Field>
 
-            <Field label="Employee *">
-              <input value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Employee name" style={inputStyle()} required />
+            <Field label="Teammate *">
+              <input value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Teammate name" style={inputStyle()} required />
             </Field>
           </div>
         </div>

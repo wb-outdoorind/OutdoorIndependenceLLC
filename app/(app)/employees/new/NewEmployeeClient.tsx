@@ -59,7 +59,7 @@ export default function NewEmployeeClient() {
         return;
       }
 
-      setMsg("Invite sent! Employee will receive an email link to join.");
+      setMsg("Invite sent! Teammate will receive an email link to join.");
       router.push("/employees");
     } catch (err: unknown) {
       setMsg(err instanceof Error ? err.message : "Failed to invite employee.");
@@ -79,7 +79,7 @@ export default function NewEmployeeClient() {
         }}
       >
         <div>
-          <h1 style={{ marginBottom: 6 }}>Add Employee</h1>
+          <h1 style={{ marginBottom: 6 }}>Add Teammate</h1>
           <div style={{ opacity: 0.7, fontSize: 13 }}>
             This will send an invite email and create the employee profile.
           </div>
@@ -90,7 +90,7 @@ export default function NewEmployeeClient() {
       </div>
 
       <form onSubmit={onSubmit} style={{ marginTop: 14, ...cardStyle }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Employee Details</div>
+        <div style={{ fontWeight: 900, marginBottom: 12 }}>Teammate Details</div>
 
         <div style={gridStyle}>
           <Field label="Full Name *">
@@ -117,7 +117,7 @@ export default function NewEmployeeClient() {
               onChange={(e) => setRole(e.target.value as Role)}
               style={inputStyle}
             >
-              <option value="employee">Employee</option>
+              <option value="employee">Teammate</option>
               <option value="mechanic">Mechanic</option>
               <option value="office_admin">Office Admin</option>
               <option value="owner">Owner</option>
