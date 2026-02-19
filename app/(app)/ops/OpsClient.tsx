@@ -111,6 +111,18 @@ type FailureRow = {
   historyHref: string;
 };
 
+type AssetHealthRow = {
+  assetType: "Vehicle" | "Equipment";
+  assetId: string;
+  assetName: string;
+  healthScore: number;
+  operationalScore: number;
+  mechanicScore: number;
+  openRequests: number;
+  pmStatus: "On Track" | "Due Soon" | "Overdue";
+  detailHref: string;
+};
+
 const VEHICLE_PM_INTERVAL_MILES = 5000;
 const EQUIPMENT_PM_INTERVAL_HOURS = 250;
 const VEHICLE_DUE_SOON_WINDOW_MILES = Math.max(100, Math.round(VEHICLE_PM_INTERVAL_MILES * 0.1));
@@ -145,6 +157,26 @@ function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function maintenanceLogQualityScore(log: MaintenanceLogRow, linkedRequestStatus?: string | null) {
+  let score = 100;
+  if (!log.request_id) score -= 12;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+
+  const notesLength = (log.notes ?? "").trim().length;
+  if (notesLength < 20) score -= 8;
+  if (notesLength === 0) score -= 8;
+
+  const normalizedLinkedStatus = (linkedRequestStatus ?? "").trim();
+  if (normalizedLinkedStatus === "Open") score -= 14;
+  else if (normalizedLinkedStatus === "In Progress") score -= 8;
+
+  return clampPercent(score);
 }
 
 function statusChipStyle(overdue: boolean): React.CSSProperties {
@@ -760,6 +792,125 @@ export default function OpsPage({
     return Array.from(grouped.values()).sort((a, b) => b.count - a.count);
   }, [allRequests, equipment, vehicles]);
 
+  const assetHealthRows = useMemo(() => {
+    const requestStatusById = new Map<string, string | null>();
+    for (const req of allRequests) {
+      requestStatusById.set(req.id, req.status ?? null);
+    }
+
+    const openRequestCountByAsset = new Map<string, number>();
+    for (const req of allRequests) {
+      const status = (req.status ?? "").trim();
+      if (status !== "Open" && status !== "In Progress") continue;
+      const key = req.vehicle_id
+        ? `Vehicle:${req.vehicle_id}`
+        : req.equipment_id
+        ? `Equipment:${req.equipment_id}`
+        : null;
+      if (!key) continue;
+      openRequestCountByAsset.set(key, (openRequestCountByAsset.get(key) ?? 0) + 1);
+    }
+
+    const pmStatusByAsset = new Map<string, "Due Soon" | "Overdue">();
+    for (const row of pmBoardRows) {
+      pmStatusByAsset.set(`${row.assetType}:${row.assetId}`, row.status);
+    }
+
+    const logQualityByAsset = new Map<string, number[]>();
+    for (const log of allMaintenanceLogs) {
+      const key = log.vehicle_id
+        ? `Vehicle:${log.vehicle_id}`
+        : log.equipment_id
+        ? `Equipment:${log.equipment_id}`
+        : null;
+      if (!key) continue;
+      const current = logQualityByAsset.get(key) ?? [];
+      current.push(maintenanceLogQualityScore(log, log.request_id ? requestStatusById.get(log.request_id) : null));
+      logQualityByAsset.set(key, current);
+    }
+
+    const rows: AssetHealthRow[] = [];
+
+    for (const v of vehicles) {
+      const key = `Vehicle:${v.id}`;
+      const openCount = openRequestCountByAsset.get(key) ?? 0;
+      const pmStatus = pmStatusByAsset.get(key) ?? "On Track";
+      const qualityRows = (logQualityByAsset.get(key) ?? []).slice(0, 6);
+      const mechanicScore = qualityRows.length
+        ? Math.round(qualityRows.reduce((sum, val) => sum + val, 0) / qualityRows.length)
+        : 75;
+
+      let operationalScore = 100;
+      const status = (v.status ?? "").trim();
+      if (status === "Red Tagged" || status === "Out of Service") operationalScore -= 30;
+      operationalScore -= Math.min(36, openCount * 12);
+      if (pmStatus === "Overdue") operationalScore -= 20;
+      if (pmStatus === "Due Soon") operationalScore -= 10;
+      operationalScore = clampPercent(operationalScore);
+
+      const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+      rows.push({
+        assetType: "Vehicle",
+        assetId: v.id,
+        assetName: v.name || v.id,
+        healthScore,
+        operationalScore,
+        mechanicScore,
+        openRequests: openCount,
+        pmStatus,
+        detailHref: `/vehicles/${encodeURIComponent(v.id)}`,
+      });
+    }
+
+    for (const e of equipment) {
+      const key = `Equipment:${e.id}`;
+      const openCount = openRequestCountByAsset.get(key) ?? 0;
+      const pmStatus = pmStatusByAsset.get(key) ?? "On Track";
+      const qualityRows = (logQualityByAsset.get(key) ?? []).slice(0, 6);
+      const mechanicScore = qualityRows.length
+        ? Math.round(qualityRows.reduce((sum, val) => sum + val, 0) / qualityRows.length)
+        : 75;
+
+      let operationalScore = 100;
+      const status = (e.status ?? "").trim();
+      if (status === "Red Tagged" || status === "Out of Service") operationalScore -= 30;
+      operationalScore -= Math.min(36, openCount * 12);
+      if (pmStatus === "Overdue") operationalScore -= 20;
+      if (pmStatus === "Due Soon") operationalScore -= 10;
+      operationalScore = clampPercent(operationalScore);
+
+      const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+      rows.push({
+        assetType: "Equipment",
+        assetId: e.id,
+        assetName: e.name || e.id,
+        healthScore,
+        operationalScore,
+        mechanicScore,
+        openRequests: openCount,
+        pmStatus,
+        detailHref: `/equipment/${encodeURIComponent(e.id)}`,
+      });
+    }
+
+    rows.sort((a, b) => a.healthScore - b.healthScore || b.openRequests - a.openRequests);
+    return rows;
+  }, [allMaintenanceLogs, allRequests, equipment, pmBoardRows, vehicles]);
+
+  const averageAssetHealthScore = useMemo(() => {
+    if (!assetHealthRows.length) return 0;
+    return Math.round(
+      assetHealthRows.reduce((sum, row) => sum + row.healthScore, 0) / assetHealthRows.length
+    );
+  }, [assetHealthRows]);
+
+  const averageMechanicAssetScore = useMemo(() => {
+    if (!assetHealthRows.length) return 0;
+    return Math.round(
+      assetHealthRows.reduce((sum, row) => sum + row.mechanicScore, 0) / assetHealthRows.length
+    );
+  }, [assetHealthRows]);
+
   const failureRows = useMemo(() => {
     const vehicleNameById = new Map(vehicles.map((v) => [v.id, v.name || v.id]));
     const equipmentNameById = new Map(equipment.map((e) => [e.id, e.name || e.id]));
@@ -977,19 +1128,34 @@ export default function OpsPage({
   }, [performanceRequestsInRange]);
 
   const performanceByMechanic = useMemo(() => {
-    const counts = new Map<string, { createdBy: string; display: string; count: number }>();
+    const requestStatusById = new Map<string, string | null>();
+    for (const row of allRequests) {
+      requestStatusById.set(row.id, row.status ?? null);
+    }
+
+    const counts = new Map<string, { createdBy: string; display: string; count: number; qualityTotal: number }>();
     for (const log of performanceLogsInRange) {
       const createdBy = log.created_by ?? "Unknown";
       const existing = counts.get(createdBy);
       const display = createdBy === "Unknown" ? "Unknown" : profileNameById[createdBy] || createdBy;
+      const quality = maintenanceLogQualityScore(
+        log,
+        log.request_id ? requestStatusById.get(log.request_id) : null
+      );
       if (existing) {
         existing.count += 1;
+        existing.qualityTotal += quality;
       } else {
-        counts.set(createdBy, { createdBy, display, count: 1 });
+        counts.set(createdBy, { createdBy, display, count: 1, qualityTotal: quality });
       }
     }
-    return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.display.localeCompare(b.display));
-  }, [performanceLogsInRange, profileNameById]);
+    return Array.from(counts.values())
+      .map((row) => ({
+        ...row,
+        avgQuality: row.count ? Math.round(row.qualityTotal / row.count) : 0,
+      }))
+      .sort((a, b) => b.avgQuality - a.avgQuality || b.count - a.count || a.display.localeCompare(b.display));
+  }, [allRequests, performanceLogsInRange, profileNameById]);
 
   return (
     <div style={embedded ? { paddingBottom: 32 } : { maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
@@ -1038,6 +1204,58 @@ export default function OpsPage({
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 4 }}>{card.value}</div>
               </div>
             ))}
+            <div style={metricStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.74 }}>Avg Asset Health Score</div>
+              <div style={{ fontSize: 28, fontWeight: 900, marginTop: 4 }}>{averageAssetHealthScore}%</div>
+            </div>
+            <div style={metricStyle()}>
+              <div style={{ fontSize: 12, opacity: 0.74 }}>Avg Mechanic Score (Assets)</div>
+              <div style={{ fontSize: 28, fontWeight: 900, marginTop: 4 }}>{averageMechanicAssetScore}%</div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16, ...cardStyle() }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Asset Health Blend</div>
+            <div style={{ opacity: 0.75, marginBottom: 10 }}>
+              Health score blends operational status (65%) and mechanic score (35%).
+            </div>
+            {assetHealthRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No assets loaded.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Asset</th>
+                      <th style={thStyle}>Type</th>
+                      <th style={thStyle}>Health</th>
+                      <th style={thStyle}>Operational</th>
+                      <th style={thStyle}>Mechanic</th>
+                      <th style={thStyle}>Open Requests</th>
+                      <th style={thStyle}>PM Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assetHealthRows.slice(0, 20).map((row) => (
+                      <tr key={`health:${row.assetType}:${row.assetId}`}>
+                        <td style={tdStyle}>
+                          <Link href={row.detailHref} style={{ color: "inherit", fontWeight: 800 }}>
+                            {row.assetName}
+                          </Link>
+                          <div style={{ opacity: 0.72, fontSize: 12 }}>{row.assetId}</div>
+                        </td>
+                        <td style={tdStyle}>{row.assetType}</td>
+                        <td style={tdStyle}>{row.healthScore}%</td>
+                        <td style={tdStyle}>{row.operationalScore}%</td>
+                        <td style={tdStyle}>{row.mechanicScore}%</td>
+                        <td style={tdStyle}>{row.openRequests}</td>
+                        <td style={tdStyle}>{row.pmStatus}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
@@ -1785,8 +2003,8 @@ export default function OpsPage({
                 onClick={() =>
                   downloadCsv(
                     "ops-by-mechanic.csv",
-                    ["created_by", "display_name_or_email", "logs_count"],
-                    performanceByMechanic.map((row) => [row.createdBy, row.display, row.count])
+                    ["created_by", "display_name_or_email", "logs_count", "avg_mechanic_score"],
+                    performanceByMechanic.map((row) => [row.createdBy, row.display, row.count, row.avgQuality])
                   )
                 }
               >
@@ -1806,6 +2024,7 @@ export default function OpsPage({
                       <th style={thStyle}>Mechanic</th>
                       <th style={thStyle}>Created By</th>
                       <th style={thStyle}>Logs</th>
+                      <th style={thStyle}>Mechanic Score</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1814,6 +2033,7 @@ export default function OpsPage({
                         <td style={tdStyle}>{row.display}</td>
                         <td style={tdStyle}>{row.createdBy}</td>
                         <td style={tdStyle}>{row.count}</td>
+                        <td style={tdStyle}>{row.avgQuality}%</td>
                       </tr>
                     ))}
                   </tbody>

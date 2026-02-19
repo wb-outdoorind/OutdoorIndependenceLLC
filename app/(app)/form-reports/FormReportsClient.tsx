@@ -22,6 +22,14 @@ type GradeRow = {
 
 type FormFilter = "all" | "inspection" | "vehicle_maintenance_request" | "equipment_maintenance_request";
 type ScorePeriod = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+type MaintenanceLogScoreRow = {
+  id: string;
+  created_at: string;
+  created_by: string | null;
+  request_id: string | null;
+  notes: string | null;
+  status_update: string | null;
+};
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -89,6 +97,21 @@ function inPeriod(iso: string, period: ScorePeriod) {
   return date >= start;
 }
 
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
+  let score = 100;
+  if (!log.request_id) score -= 12;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+
+  const notesLength = (log.notes ?? "").trim().length;
+  if (notesLength < 20) score -= 8;
+  if (notesLength === 0) score -= 8;
+  return clampPercent(score);
+}
+
 export default function FormReportsClient() {
   const [rows, setRows] = useState<GradeRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,6 +119,8 @@ export default function FormReportsClient() {
   const [filter, setFilter] = useState<FormFilter>("all");
   const [search, setSearch] = useState("");
   const [scorePeriod, setScorePeriod] = useState<ScorePeriod>("daily");
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLogScoreRow[]>([]);
+  const [mechanicNameById, setMechanicNameById] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let alive = true;
@@ -103,20 +128,66 @@ export default function FormReportsClient() {
       setLoading(true);
       setErrorMessage(null);
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("form_submission_grades")
-        .select(
-          "id,form_type,form_id,submitted_at,submitted_by,vehicle_id,equipment_id,score,is_complete,has_na,missing_count,missing_fields,accountability_flag,accountability_reason"
-        )
-        .order("submitted_at", { ascending: false })
-        .limit(1000);
+      const [gradesRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
+        supabase
+          .from("form_submission_grades")
+          .select(
+            "id,form_type,form_id,submitted_at,submitted_by,vehicle_id,equipment_id,score,is_complete,has_na,missing_count,missing_fields,accountability_flag,accountability_reason"
+          )
+          .order("submitted_at", { ascending: false })
+          .limit(1000),
+        supabase
+          .from("maintenance_logs")
+          .select("id,created_at,created_by,request_id,notes,status_update")
+          .order("created_at", { ascending: false })
+          .limit(1000),
+        supabase
+          .from("equipment_maintenance_logs")
+          .select("id,created_at,created_by,request_id,notes,status_update")
+          .order("created_at", { ascending: false })
+          .limit(1000),
+      ]);
 
       if (!alive) return;
-      if (error || !data) {
-        setErrorMessage(error?.message || "Failed to load form reports.");
+      if (gradesRes.error || !gradesRes.data || vehicleLogsRes.error || equipmentLogsRes.error) {
+        setErrorMessage(
+          gradesRes.error?.message ||
+          vehicleLogsRes.error?.message ||
+          equipmentLogsRes.error?.message ||
+          "Failed to load form reports."
+        );
         setRows([]);
+        setMaintenanceLogs([]);
       } else {
-        setRows(data as GradeRow[]);
+        setRows(gradesRes.data as GradeRow[]);
+        const combinedLogs = [
+          ...((vehicleLogsRes.data ?? []) as MaintenanceLogScoreRow[]),
+          ...((equipmentLogsRes.data ?? []) as MaintenanceLogScoreRow[]),
+        ];
+        setMaintenanceLogs(combinedLogs);
+
+        const creatorIds = Array.from(
+          new Set(
+            combinedLogs
+              .map((row) => row.created_by)
+              .filter((id): id is string => typeof id === "string" && id.length > 0)
+          )
+        );
+        if (creatorIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id,full_name,email")
+            .in("id", creatorIds);
+          if (alive && profiles) {
+            const next: Record<string, string> = {};
+            for (const profile of profiles as Array<{ id: string; full_name: string | null; email: string | null }>) {
+              next[profile.id] = profile.full_name?.trim() || profile.email?.trim() || profile.id;
+            }
+            setMechanicNameById(next);
+          }
+        } else {
+          setMechanicNameById({});
+        }
       }
       setLoading(false);
     })();
@@ -209,6 +280,32 @@ export default function FormReportsClient() {
       };
     });
   }, [filtered]);
+
+  const mechanicScoreboard = useMemo(() => {
+    const relevantLogs = maintenanceLogs.filter((row) => inPeriod(row.created_at, scorePeriod));
+    const grouped = new Map<string, { mechanic: string; logs: number; totalScore: number }>();
+
+    for (const row of relevantLogs) {
+      const createdBy = row.created_by || "unknown";
+      const displayName = createdBy === "unknown" ? "Unknown" : mechanicNameById[createdBy] || createdBy;
+      const score = maintenanceLogQualityScore(row);
+      const existing = grouped.get(createdBy);
+      if (existing) {
+        existing.logs += 1;
+        existing.totalScore += score;
+      } else {
+        grouped.set(createdBy, { mechanic: displayName, logs: 1, totalScore: score });
+      }
+    }
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        mechanic: row.mechanic,
+        logs: row.logs,
+        avgScore: row.logs ? Math.round(row.totalScore / row.logs) : 0,
+      }))
+      .sort((a, b) => b.avgScore - a.avgScore || b.logs - a.logs || a.mechanic.localeCompare(b.mechanic));
+  }, [maintenanceLogs, mechanicNameById, scorePeriod]);
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40 }}>
@@ -305,6 +402,36 @@ export default function FormReportsClient() {
                 <MiniStat label="Incomplete" value={String(row.incomplete)} />
                 <MiniStat label="N/A" value={String(row.naForms)} />
                 <MiniStat label="Flags" value={String(row.accountabilityFlags)} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 16, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Mechanic Scoreboard</div>
+        {loading ? (
+          <div style={{ opacity: 0.75 }}>Loading...</div>
+        ) : !mechanicScoreboard.length ? (
+          <div style={{ opacity: 0.75 }}>No maintenance logs found for this period.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {mechanicScoreboard.map((row) => (
+              <div
+                key={row.mechanic}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(160px, 1.4fr) repeat(2, minmax(90px, 1fr))",
+                  gap: 8,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 10,
+                  padding: 10,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>{row.mechanic}</div>
+                <MiniStat label="Logs" value={String(row.logs)} />
+                <MiniStat label="Score" value={`${row.avgScore}%`} />
               </div>
             ))}
           </div>
