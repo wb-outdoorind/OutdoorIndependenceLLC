@@ -22,8 +22,8 @@ export async function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
-  // Allow login page through
-  if (pathname.startsWith("/login")) return res;
+  // Allow auth entry points through
+  if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) return res;
 
   // In Edge middleware, avoid heavy auth client usage.
   // Presence of Supabase auth-token cookies is enough for route gating.

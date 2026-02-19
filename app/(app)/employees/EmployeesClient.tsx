@@ -85,7 +85,9 @@ export default function EmployeesClient({ role }: { role: string }) {
   =============================== */
 
   async function resendInvite(emp: Teammate) {
-    const ok = confirm(`Resend invite email to ${emp.email || "this employee"}?`);
+    const ok = confirm(
+      `Reset login for ${emp.email || "this teammate"} to temporary password Outdoor2026!?`
+    );
     if (!ok) return;
 
     const res = await fetch("/api/employees/resend-invite", {
@@ -100,19 +102,19 @@ export default function EmployeesClient({ role }: { role: string }) {
       : { error: await res.text() };
 
     if (!res.ok) {
-      alert(data?.error || "Failed to resend invite.");
+      alert(data?.error || "Failed to reset teammate login.");
       return;
     }
 
     // ✅ Audit (best-effort; don’t block user flow)
     await writeAudit({
-      action: "resend_invite",
+      action: "reset_temp_password",
       table_name: "profiles",
       record_id: emp.id,
       meta: { email: emp.email ?? null },
     });
 
-    alert("Invite resent successfully.");
+    alert("Temporary password reset to Outdoor2026! User must change it on next login.");
   }
 
   async function auditEditClick(emp: Teammate) {
@@ -251,7 +253,7 @@ export default function EmployeesClient({ role }: { role: string }) {
 
                     {emp.email && (
                       <button type="button" onClick={() => resendInvite(emp)} style={smallButtonStyle}>
-                        Resend Invite
+                        Reset Password
                       </button>
                     )}
                   </div>

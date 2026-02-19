@@ -3,6 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+const TEMP_PASSWORD = "Outdoor2026!";
 
 export async function POST(req: Request) {
   try {
@@ -32,13 +33,19 @@ export async function POST(req: Request) {
     if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
     if (!prof?.email) return NextResponse.json({ error: "Teammate email missing" }, { status: 400 });
 
-    const appOrigin = new URL(req.url).origin;
-    const redirectTo = `${appOrigin}/auth/callback`;
+    const { error: updateErr } = await admin.auth.admin.updateUserById(id, {
+      password: TEMP_PASSWORD,
+      email_confirm: true,
+    });
+    if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 400 });
 
-    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(prof.email, { redirectTo });
-    if (inviteErr) return NextResponse.json({ error: inviteErr.message }, { status: 400 });
+    const { error: profileErr } = await admin
+      .from("profiles")
+      .update({ must_change_password: true })
+      .eq("id", id);
+    if (profileErr) return NextResponse.json({ error: profileErr.message }, { status: 500 });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, temporaryPassword: TEMP_PASSWORD });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Resend invite failed";
     return NextResponse.json({ error: message }, { status: 500 });

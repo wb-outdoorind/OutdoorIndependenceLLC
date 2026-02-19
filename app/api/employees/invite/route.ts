@@ -3,6 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
+const TEMP_PASSWORD = "Outdoor2026!";
 const ALLOWED_ROLES = new Set([
   "owner",
   "operations_manager",
@@ -74,19 +75,61 @@ export async function POST(req: Request) {
 
     const admin = createSupabaseAdmin();
 
-    const appOrigin = new URL(req.url).origin;
-    const redirectTo = `${appOrigin}/auth/callback`;
+    let userId: string | null = null;
 
-    const { data: inviteData, error: inviteErr } =
-      await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
+    const { data: createdUserData, error: createErr } =
+      await admin.auth.admin.createUser({
+        email,
+        password: TEMP_PASSWORD,
+        email_confirm: true,
+      });
 
-    if (inviteErr) {
-      return NextResponse.json({ error: inviteErr.message }, { status: 400 });
+    if (createErr) {
+      const createMessage = createErr.message.toLowerCase();
+      const alreadyExists =
+        createMessage.includes("already been registered") ||
+        createMessage.includes("already registered") ||
+        createMessage.includes("already exists");
+
+      if (!alreadyExists) {
+        return NextResponse.json({ error: createErr.message }, { status: 400 });
+      }
+
+      const { data: usersData, error: usersErr } = await admin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+      if (usersErr) {
+        return NextResponse.json({ error: usersErr.message }, { status: 500 });
+      }
+
+      const existingUser = usersData.users.find(
+        (u) => (u.email || "").toLowerCase() === email
+      );
+      if (!existingUser?.id) {
+        return NextResponse.json(
+          { error: "Existing auth user not found for this email." },
+          { status: 500 }
+        );
+      }
+
+      userId = existingUser.id;
+      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
+        password: TEMP_PASSWORD,
+        email_confirm: true,
+      });
+      if (updateErr) {
+        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      }
+    } else {
+      userId = createdUserData.user?.id ?? null;
     }
 
-    const userId = inviteData?.user?.id;
     if (!userId) {
-      return NextResponse.json({ error: "Invite succeeded but no user id returned" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create or find auth user id" },
+        { status: 500 }
+      );
     }
 
     const { error: upsertErr } = await admin
@@ -100,6 +143,7 @@ export async function POST(req: Request) {
           status: "Active",
           phone,
           department,
+          must_change_password: true,
         },
         { onConflict: "id" }
       );
@@ -111,7 +155,7 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, userId });
+    return NextResponse.json({ ok: true, userId, temporaryPassword: TEMP_PASSWORD });
   } catch (err: unknown) {
     console.error("Invite route crashed:", err);
     const message = err instanceof Error ? err.message : "Invite route crashed (unknown error)";

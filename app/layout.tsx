@@ -1,6 +1,7 @@
 import "./globals.css";
 import BackButton from "@/components/BackButton";
 import AppPreferences from "@/components/AppPreferences";
+import MustChangePasswordGate from "@/components/MustChangePasswordGate";
 import packageJson from "../package.json";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="app-shell">
           <AppPreferences />
+          <MustChangePasswordGate />
           <BackButton />
           <div className="app-content">{children}</div>
           <footer className="app-footer">

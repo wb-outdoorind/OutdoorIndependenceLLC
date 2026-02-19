@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-type ApiResponse = { error?: string };
+type ApiResponse = { error?: string; temporaryPassword?: string };
 const DEPARTMENT_OPTIONS = [
   "Mowing",
   "Administration",
@@ -69,15 +69,17 @@ export default function NewEmployeeClient() {
       }
 
       if (!res.ok) {
-        setMsg(data?.error || "Failed to invite employee.");
+        setMsg(data?.error || "Failed to create teammate account.");
         setSaving(false);
         return;
       }
 
-      setMsg("Invite sent! Teammate will receive an email link to join.");
+      setMsg(
+        `Teammate created. Temporary password: ${data?.temporaryPassword ?? "Outdoor2026!"}. User must change it on first login.`
+      );
       router.push("/employees");
     } catch (err: unknown) {
-      setMsg(err instanceof Error ? err.message : "Failed to invite employee.");
+      setMsg(err instanceof Error ? err.message : "Failed to create teammate account.");
     } finally {
       setSaving(false);
     }
@@ -96,7 +98,7 @@ export default function NewEmployeeClient() {
         <div>
           <h1 style={{ marginBottom: 6 }}>Add Teammate</h1>
           <div style={{ opacity: 0.7, fontSize: 13 }}>
-            This will send an invite email and create the employee profile.
+            This creates the teammate login and profile with a temporary password.
           </div>
         </div>
         <Link href="/employees" style={{ opacity: 0.9 }}>
@@ -165,7 +167,7 @@ export default function NewEmployeeClient() {
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" disabled={saving} style={buttonStyle}>
-            {saving ? "Sending invite..." : "Send Invite"}
+            {saving ? "Creating account..." : "Create Teammate Account"}
           </button>
 
           <button
