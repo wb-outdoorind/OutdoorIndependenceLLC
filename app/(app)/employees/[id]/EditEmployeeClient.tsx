@@ -66,7 +66,13 @@ const PERMISSION_GROUPS: Array<{
 
 function rolePresetAllowed(role: string | null, perm: string) {
   const r = (role ?? "employee").toLowerCase();
-  if (r === "employee" || r === "team_member_1" || r === "team_member_2") {
+  if (
+    r === "employee" ||
+    r === "team_member_1" ||
+    r === "team_member_2" ||
+    r === "team_lead_1" ||
+    r === "team_lead_2"
+  ) {
     return perm === "vehicles.view" || perm === "equipment.view" || perm === "maintenance.view";
   }
   if (r === "mechanic") {
@@ -433,6 +439,8 @@ export default function EditEmployeeClient({ id }: { id: string }) {
               <option value="operations_manager">Operations Manager</option>
               <option value="office_admin">Office Admin</option>
               <option value="mechanic">Mechanic</option>
+              <option value="team_lead_1">Team Lead 1</option>
+              <option value="team_lead_2">Team Lead 2</option>
               <option value="team_member_1">Team Member 1</option>
               <option value="team_member_2">Team Member 2</option>
               <option value="employee">Teammate (Legacy)</option>

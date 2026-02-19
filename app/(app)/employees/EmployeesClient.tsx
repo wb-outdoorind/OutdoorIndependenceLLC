@@ -287,6 +287,8 @@ function prettyRole(role: string) {
   if (r === "operations_manager") return "Operations Manager";
   if (r === "office_admin") return "Office Admin";
   if (r === "mechanic") return "Mechanic";
+  if (r === "team_lead_1") return "Team Lead 1";
+  if (r === "team_lead_2") return "Team Lead 2";
   if (r === "team_member_1") return "Team Member 1";
   if (r === "team_member_2") return "Team Member 2";
   if (r === "employee") return "Teammate (Legacy)";

@@ -78,6 +78,8 @@ type Role =
   | "office_admin"
   | "mechanic"
   | "employee"
+  | "team_lead_1"
+  | "team_lead_2"
   | "team_member_1"
   | "team_member_2";
 
@@ -732,6 +734,11 @@ export default function VehicleDetailPage() {
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
+  const canViewMechanicScore =
+    userRole === "owner" ||
+    userRole === "operations_manager" ||
+    userRole === "office_admin" ||
+    userRole === "mechanic";
 
   function updateDraft<K extends keyof VehicleEditDraft>(key: K, value: VehicleEditDraft[K]) {
     setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -1081,11 +1088,13 @@ export default function VehicleDetailPage() {
             <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
             <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.operationalScore}%</div>
           </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
-            <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.mechanicScore}%</div>
-            <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(vehicleHealthSummary.mechanicScore)}</div>
-          </div>
+          {canViewMechanicScore ? (
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
+              <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.mechanicScore}%</div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(vehicleHealthSummary.mechanicScore)}</div>
+            </div>
+          ) : null}
           <div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
             <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.openRequests}</div>

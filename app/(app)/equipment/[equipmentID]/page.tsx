@@ -49,6 +49,17 @@ type AssetHealthSummary = {
   pmStatus: "On Track" | "Due Soon" | "Overdue";
 };
 
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "employee"
+  | "team_lead_1"
+  | "team_lead_2"
+  | "team_member_1"
+  | "team_member_2";
+
 type HistoryPreviewItem = {
   createdAt: string;
   title: string;
@@ -198,6 +209,7 @@ export default function EquipmentDetailPage() {
   const [openRequestCountForHealth, setOpenRequestCountForHealth] = useState(0);
   const [latestPmHours, setLatestPmHours] = useState<number | null>(null);
   const [hasPmTemplate, setHasPmTemplate] = useState(false);
+  const [userRole, setUserRole] = useState<Role>("employee");
 
   useEffect(() => {
     let alive = true;
@@ -248,6 +260,26 @@ export default function EquipmentDetailPage() {
       alive = false;
     };
   }, [equipmentIdFromRoute]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const supabase = createSupabaseBrowser();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          setUserRole("employee");
+          return;
+        }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+        setUserRole((profile?.role as Role | undefined) ?? "employee");
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -375,6 +407,11 @@ export default function EquipmentDetailPage() {
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
   const canShowPmButton = isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate;
+  const canViewMechanicScore =
+    userRole === "owner" ||
+    userRole === "operations_manager" ||
+    userRole === "office_admin" ||
+    userRole === "mechanic";
 
   const equipmentHealthSummary = useMemo<AssetHealthSummary>(() => {
     const interval = 250;
@@ -519,11 +556,13 @@ export default function EquipmentDetailPage() {
             <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
             <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.operationalScore}%</div>
           </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
-            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
-            <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(equipmentHealthSummary.mechanicScore)}</div>
-          </div>
+          {canViewMechanicScore ? (
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
+              <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(equipmentHealthSummary.mechanicScore)}</div>
+            </div>
+          ) : null}
           <div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
             <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.openRequests}</div>

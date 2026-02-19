@@ -14,6 +14,8 @@ const DEPARTMENT_OPTIONS = [
 ] as const;
 type Department = (typeof DEPARTMENT_OPTIONS)[number];
 type AssignableRole =
+  | "team_lead_1"
+  | "team_lead_2"
   | "team_member_1"
   | "team_member_2"
   | "mechanic"
@@ -134,6 +136,8 @@ export default function NewEmployeeClient() {
               onChange={(e) => setRole(e.target.value as AssignableRole)}
               style={inputStyle}
             >
+              <option value="team_lead_1">Team Lead 1</option>
+              <option value="team_lead_2">Team Lead 2</option>
               <option value="team_member_1">Team Member 1</option>
               <option value="team_member_2">Team Member 2</option>
               <option value="mechanic">Mechanic</option>
