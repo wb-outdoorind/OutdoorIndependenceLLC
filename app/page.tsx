@@ -6,14 +6,15 @@ import { createServerSupabase } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 const tiles = [
-  { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
+  { title: "Scan QR Code", href: "/scan", desc: "Scan an asset QR code to pull it up fast" },
   { title: "Vehicles", href: "/vehicles", desc: "Vehicle info, inspections, and maintenance" },
+  { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
   { title: "Inventory", href: "/inventory?filter=low", desc: "Parts, stock levels, reorder tracking" },
+  { title: "Maintenance Operations", href: "/ops", desc: "Dashboards, inspections, maintenance history" },
+  { title: "Maintenance Center", href: "/maintenance", desc: "Fleet-wide maintenance queue for mechanics" },
   { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
   { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
-  { title: "Maintenance Operations", href: "/ops", desc: "Dashboards, inspections, maintenance history" },
-  { title: "Scan QR Code", href: "/scan", desc: "Scan an asset QR code to pull it up fast" },
-  { title: "Maintenance Center", href: "/maintenance", desc: "Fleet-wide maintenance queue for mechanics" },
+  { title: "Settings", href: "/settings", desc: "Theme, text size, and personal preferences" },
 
 ];
 
@@ -48,8 +49,8 @@ export default async function Home() {
         padding: "calc(40px + env(safe-area-inset-top)) 20px 28px 8px",
         maxWidth: 1100,
         margin: "0 auto",
-        color: "#e9edf3",
-        background: "#06080b",
+        color: "var(--foreground)",
+        background: "var(--background)",
         minHeight: "100vh",
       }}
     >
@@ -59,11 +60,12 @@ export default async function Home() {
           alt="Outdoor Independence logo"
           width={300}
           height={56}
+          className="brand-logo"
           style={{ height: 56, width: "auto", objectFit: "contain" }}
         />
         <LogoutButton />
       </div>
-      <p style={{ opacity: 0.75, marginTop: 0, color: "rgba(233,237,243,0.78)" }}>
+      <p style={{ opacity: 0.75, marginTop: 0 }}>
         Choose a section to manage assets and operations.
       </p>
 
@@ -80,12 +82,12 @@ export default async function Home() {
             key={t.href}
             href={t.href}
             style={{
-              border: "1px solid rgba(255,255,255,0.14)",
+              border: "1px solid var(--surface-border)",
               borderRadius: 16,
               padding: 18,
               textDecoration: "none",
-              color: "#e9edf3",
-              background: "rgba(255,255,255,0.03)",
+              color: "inherit",
+              background: "var(--surface)",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -106,11 +108,11 @@ export default async function Home() {
                 </div>
               ) : null}
             </div>
-            <div style={{ opacity: 0.82, marginTop: 8, lineHeight: 1.35, color: "rgba(233,237,243,0.82)" }}>
+            <div style={{ opacity: 0.82, marginTop: 8, lineHeight: 1.35 }}>
               {t.desc}
             </div>
 
-            <div style={{ marginTop: 14, opacity: 0.85, fontSize: 13, color: "rgba(233,237,243,0.85)" }}>
+            <div style={{ marginTop: 14, opacity: 0.85, fontSize: 13 }}>
               Open →
             </div>
           </Link>

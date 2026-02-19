@@ -358,7 +358,7 @@ export default function VehiclePreventativeMaintenanceForm() {
       localStorage.setItem(vehicleLastOilChangeMileageKey(vehicleId), String(m));
     }
 
-    router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+    router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
   return (
@@ -596,11 +596,9 @@ export default function VehiclePreventativeMaintenanceForm() {
           <button type="submit" style={primaryButtonStyle}>Save Truck PM Inspection</button>
           <button
             type="button"
-            onClick={() => router.push(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
             style={secondaryButtonStyle}
-          >
-            Cancel
-          </button>
+          >Discard & Return</button>
         </div>
       </form>
     </main>

@@ -419,7 +419,7 @@ export default function EquipmentMaintenanceLogPage() {
     }
 
     localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
-    router.push(`/equipment/${encodeURIComponent(equipmentId)}`);
+    router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
   }
 
   return (
@@ -681,9 +681,7 @@ export default function EquipmentMaintenanceLogPage() {
             Save Maintenance Log
           </button>
 
-          <button type="button" onClick={() => router.push(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle}>
-            Cancel
-          </button>
+          <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle}>Discard & Return</button>
         </div>
       </form>
     </main>

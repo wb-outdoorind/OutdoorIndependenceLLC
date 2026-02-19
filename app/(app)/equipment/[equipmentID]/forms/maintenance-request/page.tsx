@@ -168,7 +168,7 @@ export default function EquipmentMaintenanceRequestPage() {
     }
 
     localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
-    router.push(`/equipment/${encodeURIComponent(equipmentId)}`);
+    router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
   }
 
   return (
@@ -318,9 +318,7 @@ export default function EquipmentMaintenanceRequestPage() {
             Submit Maintenance Request
           </button>
 
-          <button type="button" onClick={() => router.push(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>
-            Cancel
-          </button>
+          <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
         </div>
       </form>
     </main>

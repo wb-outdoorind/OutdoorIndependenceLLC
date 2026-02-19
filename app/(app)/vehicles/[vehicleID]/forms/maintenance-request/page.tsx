@@ -183,7 +183,7 @@ export default function MaintenanceRequestPage() {
 
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
 
-    router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+    router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
   return (
@@ -434,11 +434,9 @@ export default function MaintenanceRequestPage() {
 
           <button
             type="button"
-            onClick={() => router.push(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
             style={secondaryButtonStyle()}
-          >
-            Cancel
-          </button>
+          >Discard & Return</button>
         </div>
       </form>
     </main>

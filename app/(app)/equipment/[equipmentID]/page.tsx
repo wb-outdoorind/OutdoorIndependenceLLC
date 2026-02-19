@@ -111,6 +111,19 @@ function actionBtnStyle(): React.CSSProperties {
   };
 }
 
+function isTrailerEquipmentType(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().includes("trailer");
+}
+
+function isMowerEquipmentType(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().includes("mower");
+}
+
+function isApplicatorEquipmentType(value: string | null | undefined) {
+  const v = (value ?? "").toLowerCase();
+  return v.includes("applicator") || (v.includes("turf") && v.includes("application"));
+}
+
 export default function EquipmentDetailPage() {
   const params = useParams<{ equipmentID: string }>();
   const routeEquipmentId = params.equipmentID;
@@ -209,6 +222,9 @@ export default function EquipmentDetailPage() {
 
   const stableEquipmentId = equipment?.id ?? equipmentIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableEquipmentId);
+  const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
+  const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
+  const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     return requestPreviewRows.map((r) => {
@@ -310,7 +326,7 @@ export default function EquipmentDetailPage() {
           </Link>
 
           <Link href={`/equipment/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
-            <span>Preventative Maintenance</span>
+            <span>{isTrailerEquipment ? "Trailer PM Inspection" : isMowerEquipment ? "Mower PM Checklist" : isApplicatorEquipment ? "Applicator PM Inspection" : "Preventative Maintenance"}</span>
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
 

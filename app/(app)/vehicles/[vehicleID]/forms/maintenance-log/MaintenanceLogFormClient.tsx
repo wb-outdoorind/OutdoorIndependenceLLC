@@ -189,7 +189,7 @@ export default function MaintenanceLogPage() {
       // Enforce 1 request → 1 log
       if (req.maintenanceLogId) {
         alert("This request already has a maintenance log. Opening the vehicle instead.");
-        router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+        router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
         return;
       }
 
@@ -494,7 +494,7 @@ export default function MaintenanceLogPage() {
     // update vehicle mileage (only forward)
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
 
-    router.push(`/vehicles/${encodeURIComponent(vehicleId)}`);
+    router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
   return (
@@ -833,11 +833,9 @@ export default function MaintenanceLogPage() {
 
           <button
             type="button"
-            onClick={() => router.push(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
             style={secondaryButtonStyle}
-          >
-            Cancel
-          </button>
+          >Discard & Return</button>
 
           <a href="/maintenance" style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
             Maintenance Center

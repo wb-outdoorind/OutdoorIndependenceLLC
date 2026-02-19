@@ -12,6 +12,7 @@ function TopNav() {
               alt="Outdoor Independence logo"
               width={300}
               height={56}
+              className="brand-logo"
               style={{ height: 56, width: "auto", objectFit: "contain" }}
             />
           </div>
@@ -23,6 +24,7 @@ function TopNav() {
           <Link href="/inventory" className="app-topnav-link">Inventory</Link>
           <Link href="/employees" className="app-topnav-link">Teammates</Link>
           <Link href="/ops" className="app-topnav-link">Maintenance Operations</Link>
+          <Link href="/settings" className="app-topnav-link">Settings</Link>
         </nav>
       </div>
     </header>

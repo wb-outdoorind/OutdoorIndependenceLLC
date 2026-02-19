@@ -1,18 +1,12 @@
 import "./globals.css";
 import BackButton from "@/components/BackButton";
+import AppPreferences from "@/components/AppPreferences";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          background: "#06080b",
-          color: "#e9edf3",
-          fontFamily: "Arial, Helvetica, sans-serif",
-          minHeight: "100vh",
-        }}
-      >
+      <body>
+        <AppPreferences />
         <BackButton />
         {children}
       </body>
