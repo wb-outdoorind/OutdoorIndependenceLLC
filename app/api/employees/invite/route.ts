@@ -74,12 +74,8 @@ export async function POST(req: Request) {
 
     const admin = createSupabaseAdmin();
 
-    const origin =
-      req.headers.get("origin") ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      "http://localhost:3000";
-
-    const redirectTo = `${origin}/auth/callback`;
+    const appOrigin = new URL(req.url).origin;
+    const redirectTo = `${appOrigin}/auth/callback`;
 
     const { data: inviteData, error: inviteErr } =
       await admin.auth.admin.inviteUserByEmail(email, { redirectTo });

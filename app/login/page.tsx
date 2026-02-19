@@ -19,8 +19,10 @@ function LoginPageContent() {
   const sp = useSearchParams();
   const next = sp.get("next") || "/";
 
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -42,19 +44,40 @@ function LoginPageContent() {
     const em = email.trim().toLowerCase();
     if (!em) return setMessage("Please enter your email.");
     if (!password) return setMessage("Please enter your password.");
+    if (mode === "signup" && !confirmPassword) {
+      return setMessage("Please confirm your password.");
+    }
+    if (mode === "signup" && password !== confirmPassword) {
+      return setMessage("Passwords do not match.");
+    }
 
     setBusy(true);
     try {
       const supabase = createSupabaseBrowser();
-      const { error } = await supabase.auth.signInWithPassword({
-        email: em,
-        password,
-      });
-      if (error) {
-        setMessage(error.message);
-        return;
+      if (mode === "signup") {
+        const emailRedirectTo =
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined;
+        const { error } = await supabase.auth.signUp({
+          email: em,
+          password,
+          options: { emailRedirectTo },
+        });
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+        setMessage("Sign-up email sent. Check your inbox to confirm your account.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: em,
+          password,
+        });
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+        router.replace(next);
       }
-      router.replace(next);
     } finally {
       setBusy(false);
     }
@@ -86,9 +109,28 @@ function LoginPageContent() {
 
   return (
     <main style={{ maxWidth: 440, margin: "0 auto", padding: 32 }}>
-      <h1 style={{ marginBottom: 8 }}>Sign in</h1>
+      <h1 style={{ marginBottom: 8 }}>{mode === "signup" ? "Sign up" : "Sign in"}</h1>
       <div style={{ opacity: 0.75, marginBottom: 18 }}>
-        Use your company login to access the app.
+        {mode === "signup"
+          ? "Create your account, then confirm from the email link."
+          : "Use your company login to access the app."}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => setMode("signin")}
+          style={mode === "signin" ? activeModeButtonStyle : modeButtonStyle}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("signup")}
+          style={mode === "signup" ? activeModeButtonStyle : modeButtonStyle}
+        >
+          Sign up
+        </button>
       </div>
 
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
@@ -116,6 +158,20 @@ function LoginPageContent() {
           />
         </div>
 
+        {mode === "signup" ? (
+          <div>
+            <div style={labelStyle}>Confirm Password</div>
+            <input
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm password"
+              type="password"
+              autoComplete="new-password"
+              style={inputStyle}
+            />
+          </div>
+        ) : null}
+
         {message ? (
           <div
             style={{
@@ -132,17 +188,19 @@ function LoginPageContent() {
         ) : null}
 
         <button disabled={busy} type="submit" style={buttonStyle}>
-          {busy ? "Signing in..." : "Sign in"}
+          {busy ? (mode === "signup" ? "Creating account..." : "Signing in...") : mode === "signup" ? "Create account" : "Sign in"}
         </button>
 
-        <button
-          type="button"
-          onClick={onForgotPassword}
-          disabled={resetBusy || busy}
-          style={secondaryButtonStyle}
-        >
-          {resetBusy ? "Sending reset..." : "Forgot password?"}
-        </button>
+        {mode === "signin" ? (
+          <button
+            type="button"
+            onClick={onForgotPassword}
+            disabled={resetBusy || busy}
+            style={secondaryButtonStyle}
+          >
+            {resetBusy ? "Sending reset..." : "Forgot password?"}
+          </button>
+        ) : null}
 
         <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.4 }}>
           Tip: On phones, you should stay signed in unless the browser clears site
@@ -186,4 +244,20 @@ const secondaryButtonStyle: React.CSSProperties = {
   color: "inherit",
   fontWeight: 700,
   cursor: "pointer",
+};
+
+const modeButtonStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.03)",
+  color: "inherit",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const activeModeButtonStyle: React.CSSProperties = {
+  ...modeButtonStyle,
+  background: "rgba(255,255,255,0.1)",
+  border: "1px solid rgba(255,255,255,0.28)",
 };

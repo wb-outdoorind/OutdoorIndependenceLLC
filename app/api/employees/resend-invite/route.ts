@@ -32,8 +32,8 @@ export async function POST(req: Request) {
     if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
     if (!prof?.email) return NextResponse.json({ error: "Teammate email missing" }, { status: 400 });
 
-    const origin = req.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-    const redirectTo = `${origin}/auth/callback`;
+    const appOrigin = new URL(req.url).origin;
+    const redirectTo = `${appOrigin}/auth/callback`;
 
     const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(prof.email, { redirectTo });
     if (inviteErr) return NextResponse.json({ error: inviteErr.message }, { status: 400 });
