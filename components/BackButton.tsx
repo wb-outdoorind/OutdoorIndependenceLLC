@@ -17,7 +17,6 @@ function logicalBackTarget(pathname: string): string | null {
     "/academy",
     "/maintenance",
     "/scan",
-    "/settings",
   ]);
   if (hiddenRoots.has(pathname)) return null;
 

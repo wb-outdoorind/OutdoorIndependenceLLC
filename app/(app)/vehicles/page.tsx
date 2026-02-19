@@ -319,6 +319,12 @@ export default function VehiclesListPage() {
                               </>
                             ) : null}
                           </div>
+                          <div style={{ marginTop: 6, opacity: 0.78, fontSize: 13 }}>
+                            Current mileage:{" "}
+                            <strong>
+                              {typeof v.mileage === "number" ? `${v.mileage.toLocaleString()} mi` : "—"}
+                            </strong>
+                          </div>
                         </div>
 
                         <div

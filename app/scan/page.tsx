@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
@@ -302,73 +303,109 @@ export default function ScanPage() {
   })();
 
   return (
-    <main style={{ padding: 32, maxWidth: 800, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Scan QR Code</h1>
-        <Link href="/" style={{ alignSelf: "center" }}>
-          ← Back to Home
+    <main
+      style={{
+        padding: "calc(40px + env(safe-area-inset-top)) 20px 28px 8px",
+        maxWidth: 920,
+        margin: "0 auto",
+        minHeight: "100vh",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+        <Image
+          src="/App_Logo.png"
+          alt="Outdoor Independence logo"
+          width={300}
+          height={56}
+          className="brand-logo"
+          style={{ height: 56, width: "auto", objectFit: "contain" }}
+        />
+        <Link href="/" style={topLinkStyle}>
+          Back Home
         </Link>
       </div>
 
-      <p style={{ opacity: 0.8 }}>{status}</p>
+      <section style={panelStyle}>
+        <h1 style={{ marginTop: 0, marginBottom: 8 }}>Scan QR Code</h1>
+        <p style={{ opacity: 0.8, marginTop: 0 }}>{status}</p>
 
-      {!supported ? (
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <p style={{ marginTop: 0 }}>Could not start camera on this device/browser.</p>
-          <p style={{ marginBottom: 0 }}>Allow camera permission and reload this page.</p>
-        </div>
-      ) : (
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            overflow: "hidden",
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <video
-            ref={videoRef}
-            playsInline
-            muted
-            style={{ width: "100%", height: "auto", display: "block" }}
-          />
-          <canvas ref={canvasRef} style={{ display: "none" }} />
-        </div>
-      )}
-
-      {result ? (
-        <div
-          style={{
-            marginTop: 16,
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Result</div>
-          <div style={{ wordBreak: "break-word" }}>{result}</div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={() => navigator.clipboard.writeText(result)} style={{ padding: "10px 12px" }}>
-              Copy
-            </button>
-
-            {isUrl ? (
-              <a href={result} style={{ padding: "10px 12px", display: "inline-block" }}>
-                Open Link →
-              </a>
-            ) : null}
+        {!supported ? (
+          <div style={cardStyle}>
+            <p style={{ marginTop: 0 }}>Could not start camera on this device/browser.</p>
+            <p style={{ marginBottom: 0 }}>Allow camera permission and reload this page.</p>
           </div>
-        </div>
-      ) : null}
+        ) : (
+          <div style={cameraFrameStyle}>
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              style={{ width: "100%", height: "auto", display: "block" }}
+            />
+            <canvas ref={canvasRef} style={{ display: "none" }} />
+          </div>
+        )}
+
+        {result ? (
+          <div style={{ ...cardStyle, marginTop: 16 }}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Result</div>
+            <div style={{ wordBreak: "break-word" }}>{result}</div>
+
+            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => navigator.clipboard.writeText(result)} style={actionButtonStyle}>
+                Copy
+              </button>
+
+              {isUrl ? (
+                <a href={result} style={{ ...actionButtonStyle, textDecoration: "none", display: "inline-block" }}>
+                  Open Link →
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </section>
     </main>
   );
 }
+
+const panelStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 16,
+  padding: 16,
+  background: "rgba(255,255,255,0.03)",
+};
+
+const cardStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.15)",
+  borderRadius: 14,
+  padding: 16,
+  background: "rgba(255,255,255,0.03)",
+};
+
+const cameraFrameStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.15)",
+  borderRadius: 14,
+  overflow: "hidden",
+  background: "rgba(255,255,255,0.03)",
+};
+
+const topLinkStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+  color: "inherit",
+  textDecoration: "none",
+  fontWeight: 800,
+};
+
+const actionButtonStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.06)",
+  color: "inherit",
+  fontWeight: 700,
+  cursor: "pointer",
+};

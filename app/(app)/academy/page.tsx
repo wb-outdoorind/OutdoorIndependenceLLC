@@ -576,7 +576,10 @@ function AcademyPageContent() {
       ) : null}
 
       <section style={{ ...cardStyle, marginBottom: 18 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 10 }}>Find Content</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Filter & Sort</h2>
+        <div style={{ opacity: 0.72, marginBottom: 10, fontSize: 13 }}>
+          Use dropdowns to narrow results like an e-commerce catalog.
+        </div>
         <div style={filterGridStyle}>
           <Field label="Search">
             <input
@@ -645,6 +648,7 @@ function AcademyPageContent() {
                 title="SOP PDFs"
                 emptyText="No SOP PDFs match these filters."
                 items={sopPdfs}
+                sortBy={sortBy}
                 assetTypesByContentId={assetTypesByContentId}
                 topicsByContentId={topicsByContentId}
                 onOpen={(item) => setActiveItem({ type: "pdf", title: item.title, url: item.content_url })}
@@ -655,6 +659,7 @@ function AcademyPageContent() {
                 title="Training Videos"
                 emptyText="No training videos match these filters."
                 items={trainingVideos}
+                sortBy={sortBy}
                 assetTypesByContentId={assetTypesByContentId}
                 topicsByContentId={topicsByContentId}
                 onOpen={(item) => setActiveItem({ type: "video", title: item.title, url: item.content_url })}
@@ -717,6 +722,7 @@ function Section({
   title,
   emptyText,
   items,
+  sortBy,
   onOpen,
   assetTypesByContentId,
   topicsByContentId,
@@ -724,13 +730,31 @@ function Section({
   title: string;
   emptyText: string;
   items: AcademyContentRow[];
+  sortBy: "recommended" | "newest" | "oldest" | "title_az" | "title_za";
   onOpen: (item: AcademyContentRow) => void;
   assetTypesByContentId: Record<string, string[]>;
   topicsByContentId: Record<string, string[]>;
 }) {
+  const sortLabel =
+    sortBy === "recommended"
+      ? "Recommended"
+      : sortBy === "newest"
+        ? "Newest"
+        : sortBy === "oldest"
+          ? "Oldest"
+          : sortBy === "title_az"
+            ? "Title A-Z"
+            : "Title Z-A";
+
   return (
-    <section>
-      <h2 style={{ marginBottom: 10 }}>{title}</h2>
+    <section style={sectionWrapStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>{title}</h2>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={sectionMetaChipStyle}>{items.length} item{items.length === 1 ? "" : "s"}</span>
+          <span style={sectionMetaChipStyle}>Sort: {sortLabel}</span>
+        </div>
+      </div>
       {items.length === 0 ? (
         <div style={{ opacity: 0.7 }}>{emptyText}</div>
       ) : (
@@ -941,6 +965,22 @@ const filterGridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 10,
+};
+
+const sectionWrapStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 14,
+  padding: 14,
+  background: "rgba(255,255,255,0.02)",
+};
+
+const sectionMetaChipStyle: React.CSSProperties = {
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(255,255,255,0.04)",
+  padding: "4px 10px",
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 const inputStyle: React.CSSProperties = {
