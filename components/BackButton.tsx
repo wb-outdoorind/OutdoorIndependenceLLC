@@ -23,15 +23,11 @@ function logicalBackTarget(pathname: string): string | null {
   if (/^\/vehicles\/[^/]+\/history$/.test(pathname)) {
     return pathname.replace(/\/history$/, "");
   }
-  if (/^\/vehicles\/[^/]+$/.test(pathname)) {
-    return "/vehicles";
-  }
+  if (/^\/vehicles\/[^/]+$/.test(pathname)) return null;
   if (/^\/equipment\/[^/]+\/history$/.test(pathname)) {
     return pathname.replace(/\/history$/, "");
   }
-  if (/^\/equipment\/[^/]+$/.test(pathname)) {
-    return "/equipment";
-  }
+  if (/^\/equipment\/[^/]+$/.test(pathname)) return null;
   if (/^\/inventory\/[^/]+$/.test(pathname)) return "/inventory";
   if (/^\/employees\/new$/.test(pathname)) return "/employees";
   if (/^\/employees\/[^/]+$/.test(pathname)) return "/employees";

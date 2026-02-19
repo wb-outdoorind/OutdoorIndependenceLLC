@@ -62,6 +62,28 @@ type HistoryPreviewItem = {
 };
 
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "employee"
+  | "team_member_1"
+  | "team_member_2";
+
+type VehicleEditDraft = {
+  name: string;
+  type: string;
+  make: string;
+  model: string;
+  year: string;
+  plate: string;
+  vin: string;
+  fuel: string;
+  mileage: string;
+  status: string;
+  asset: string;
+};
 
 /* =========================
    Local storage keys
@@ -165,6 +187,35 @@ function actionBtnStyle(): React.CSSProperties {
   };
 }
 
+const detailInputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: 10,
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.03)",
+  color: "inherit",
+};
+
+const editPrimaryButtonStyle: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(126,255,167,0.35)",
+  background: "rgba(126,255,167,0.14)",
+  color: "inherit",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const editSecondaryButtonStyle: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "transparent",
+  color: "inherit",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
 function badgeStyle(label: string): React.CSSProperties {
   const base: React.CSSProperties = {
     display: "inline-flex",
@@ -234,8 +285,13 @@ export default function VehicleDetailPage() {
   const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
+  const [editDraft, setEditDraft] = useState<VehicleEditDraft | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(true);
   const [vehicleErr, setVehicleErr] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [userRole, setUserRole] = useState<Role>("employee");
   const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
@@ -259,6 +315,13 @@ export default function VehicleDetailPage() {
         setVehicleLoading(false);
         return;
       }
+
+      const { data: roleProfile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      setUserRole((roleProfile?.role as Role | undefined) ?? "employee");
 
       const hydrateLocal = (row: VehicleRow) => {
         if (typeof window === "undefined") return;
@@ -297,6 +360,19 @@ export default function VehicleDetailPage() {
         const row = byId.data as VehicleRow;
         hydrateLocal(row);
         setVehicle(row);
+        setEditDraft({
+          name: row.name ?? "",
+          type: row.type ?? "",
+          make: row.make ?? "",
+          model: row.model ?? "",
+          year: typeof row.year === "number" ? String(row.year) : "",
+          plate: row.plate ?? "",
+          vin: row.vin ?? "",
+          fuel: row.fuel ?? "",
+          mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
+          status: row.status ?? "",
+          asset: row.asset ?? "",
+        });
         setVehicleLoading(false);
         return;
       }
@@ -328,6 +404,19 @@ export default function VehicleDetailPage() {
           const row = byAsset.data as VehicleRow;
           hydrateLocal(row);
           setVehicle(row);
+          setEditDraft({
+            name: row.name ?? "",
+            type: row.type ?? "",
+            make: row.make ?? "",
+            model: row.model ?? "",
+            year: typeof row.year === "number" ? String(row.year) : "",
+            plate: row.plate ?? "",
+            vin: row.vin ?? "",
+            fuel: row.fuel ?? "",
+            mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
+            status: row.status ?? "",
+            asset: row.asset ?? "",
+          });
           setVehicleLoading(false);
           return;
         }
@@ -355,6 +444,19 @@ export default function VehicleDetailPage() {
           const row = byPlate.data as VehicleRow;
           hydrateLocal(row);
           setVehicle(row);
+          setEditDraft({
+            name: row.name ?? "",
+            type: row.type ?? "",
+            make: row.make ?? "",
+            model: row.model ?? "",
+            year: typeof row.year === "number" ? String(row.year) : "",
+            plate: row.plate ?? "",
+            vin: row.vin ?? "",
+            fuel: row.fuel ?? "",
+            mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
+            status: row.status ?? "",
+            asset: row.asset ?? "",
+          });
           setVehicleLoading(false);
           return;
         }
@@ -522,6 +624,125 @@ export default function VehicleDetailPage() {
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
   const canShowVehiclePmButton = (vehicle?.type ?? "").trim().toLowerCase() === "truck";
+  const canEditVehicle =
+    userRole === "owner" ||
+    userRole === "operations_manager" ||
+    userRole === "office_admin" ||
+    userRole === "mechanic";
+
+  function updateDraft<K extends keyof VehicleEditDraft>(key: K, value: VehicleEditDraft[K]) {
+    setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function resetDraftFromVehicle() {
+    if (!vehicle) return;
+    setEditDraft({
+      name: vehicle.name ?? "",
+      type: vehicle.type ?? "",
+      make: vehicle.make ?? "",
+      model: vehicle.model ?? "",
+      year: typeof vehicle.year === "number" ? String(vehicle.year) : "",
+      plate: vehicle.plate ?? "",
+      vin: vehicle.vin ?? "",
+      fuel: vehicle.fuel ?? "",
+      mileage: typeof vehicle.mileage === "number" ? String(vehicle.mileage) : "",
+      status: vehicle.status ?? "",
+      asset: vehicle.asset ?? "",
+    });
+  }
+
+  async function saveVehicleEdits() {
+    if (!vehicle || !editDraft || !canEditVehicle) return;
+    setEditError(null);
+
+    const nextName = editDraft.name.trim();
+    const nextType = editDraft.type.trim();
+    const nextStatus = editDraft.status.trim();
+    if (!nextName) return setEditError("Vehicle name is required.");
+    if (!nextType) return setEditError("Vehicle type is required.");
+    if (!nextStatus) return setEditError("Vehicle status is required.");
+
+    let parsedYear: number | null = null;
+    if (editDraft.year.trim()) {
+      const y = Number(editDraft.year);
+      if (!Number.isInteger(y) || y < 1900) {
+        return setEditError("Year must be a valid integer.");
+      }
+      parsedYear = y;
+    }
+
+    let parsedMileage: number | null = null;
+    if (editDraft.mileage.trim()) {
+      const m = Number(editDraft.mileage);
+      if (!Number.isFinite(m) || m < 0) {
+        return setEditError("Mileage must be a valid non-negative number.");
+      }
+      parsedMileage = m;
+    }
+
+    setEditSaving(true);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("vehicles")
+      .update({
+        name: nextName,
+        type: nextType,
+        make: editDraft.make.trim() || null,
+        model: editDraft.model.trim() || null,
+        year: parsedYear,
+        plate: editDraft.plate.trim() || null,
+        vin: editDraft.vin.trim() || null,
+        fuel: editDraft.fuel.trim() || null,
+        mileage: parsedMileage,
+        status: nextStatus,
+        asset: editDraft.asset.trim() || null,
+      })
+      .eq("id", vehicle.id);
+    setEditSaving(false);
+
+    if (error) {
+      setEditError(error.message);
+      return;
+    }
+
+    const updatedVehicle: VehicleRow = {
+      ...vehicle,
+      name: nextName,
+      type: nextType,
+      make: editDraft.make.trim() || null,
+      model: editDraft.model.trim() || null,
+      year: parsedYear,
+      plate: editDraft.plate.trim() || null,
+      vin: editDraft.vin.trim() || null,
+      fuel: editDraft.fuel.trim() || null,
+      mileage: parsedMileage,
+      status: nextStatus,
+      asset: editDraft.asset.trim() || null,
+    };
+    setVehicle(updatedVehicle);
+    setIsEditing(false);
+    setEditDraft({
+      name: updatedVehicle.name ?? "",
+      type: updatedVehicle.type ?? "",
+      make: updatedVehicle.make ?? "",
+      model: updatedVehicle.model ?? "",
+      year: typeof updatedVehicle.year === "number" ? String(updatedVehicle.year) : "",
+      plate: updatedVehicle.plate ?? "",
+      vin: updatedVehicle.vin ?? "",
+      fuel: updatedVehicle.fuel ?? "",
+      mileage: typeof updatedVehicle.mileage === "number" ? String(updatedVehicle.mileage) : "",
+      status: updatedVehicle.status ?? "",
+      asset: updatedVehicle.asset ?? "",
+    });
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(vehicleNameKey(updatedVehicle.id), updatedVehicle.name ?? "");
+      localStorage.setItem(vehicleTypeKey(updatedVehicle.id), normalizeVehicleType(updatedVehicle.type));
+      if (typeof updatedVehicle.mileage === "number") {
+        localStorage.setItem(vehicleMileageKey(updatedVehicle.id), String(updatedVehicle.mileage));
+      }
+    }
+  }
 
   return (
     <main style={{ paddingBottom: 40 }}>
@@ -567,54 +788,177 @@ export default function VehicleDetailPage() {
       <div style={{ marginTop: 18, ...cardStyle(), position: "relative" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900, fontSize: 16 }}>General Information</div>
-          <div style={badgeStyle(displayStatus)}>{displayStatus}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {canEditVehicle ? (
+              isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={saveVehicleEdits}
+                    style={editPrimaryButtonStyle}
+                    disabled={editSaving}
+                  >
+                    {editSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditError(null);
+                      resetDraftFromVehicle();
+                    }}
+                    style={editSecondaryButtonStyle}
+                    disabled={editSaving}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(true);
+                    setEditError(null);
+                  }}
+                  style={editSecondaryButtonStyle}
+                >
+                  Edit Vehicle
+                </button>
+              )
+            ) : null}
+            <div style={badgeStyle(displayStatus)}>{displayStatus}</div>
+          </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-            marginTop: 14,
-          }}
-        >
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
-            <div style={{ fontWeight: 900 }}>{displayMake}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
-            <div style={{ fontWeight: 900 }}>{displayModel}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
-            <div style={{ fontWeight: 900 }}>{typeof displayYear === "number" ? displayYear : "—"}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
-            <div style={{ fontWeight: 900 }}>{displayPlate}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>VIN</div>
-            <div style={{ fontWeight: 900, wordBreak: "break-all" }}>{displayVin}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
-            <div style={{ fontWeight: 900 }}>
-              {typeof currentMileage === "number" ? `${currentMileage.toLocaleString()} mi` : "—"}
+        {isEditing && editDraft ? (
+          <>
+            {editError ? (
+              <div style={{ marginTop: 12, color: "#ff9d9d", fontSize: 13 }}>{editError}</div>
+            ) : null}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+                marginTop: 14,
+              }}
+            >
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Vehicle Name *</div>
+                <input
+                  value={editDraft.name}
+                  onChange={(e) => updateDraft("name", e.target.value)}
+                  style={detailInputStyle}
+                />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Vehicle Type *</div>
+                <input
+                  value={editDraft.type}
+                  onChange={(e) => updateDraft("type", e.target.value)}
+                  style={detailInputStyle}
+                />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Status *</div>
+                <select
+                  value={editDraft.status}
+                  onChange={(e) => updateDraft("status", e.target.value)}
+                  style={detailInputStyle}
+                >
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                  <option value="Out of Service">Out of Service</option>
+                  <option value="Retired">Retired</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
+                <input value={editDraft.make} onChange={(e) => updateDraft("make", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
+                <input value={editDraft.model} onChange={(e) => updateDraft("model", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
+                <input value={editDraft.year} onChange={(e) => updateDraft("year", e.target.value)} style={detailInputStyle} inputMode="numeric" />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
+                <input value={editDraft.plate} onChange={(e) => updateDraft("plate", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>VIN</div>
+                <input value={editDraft.vin} onChange={(e) => updateDraft("vin", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
+                <input value={editDraft.mileage} onChange={(e) => updateDraft("mileage", e.target.value)} style={detailInputStyle} inputMode="numeric" />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
+                <input value={editDraft.fuel} onChange={(e) => updateDraft("fuel", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Asset Tag / QR</div>
+                <input value={editDraft.asset} onChange={(e) => updateDraft("asset", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>
+                <div style={{ fontWeight: 900, fontSize: 18, marginTop: 2 }}>
+                  {oilLifePercent === null ? "—" : `${oilLifePercent}%`}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+              marginTop: 14,
+            }}
+          >
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
+              <div style={{ fontWeight: 900 }}>{displayMake}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
+              <div style={{ fontWeight: 900 }}>{displayModel}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
+              <div style={{ fontWeight: 900 }}>{typeof displayYear === "number" ? displayYear : "—"}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
+              <div style={{ fontWeight: 900 }}>{displayPlate}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>VIN</div>
+              <div style={{ fontWeight: 900, wordBreak: "break-all" }}>{displayVin}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
+              <div style={{ fontWeight: 900 }}>
+                {typeof currentMileage === "number" ? `${currentMileage.toLocaleString()} mi` : "—"}
+              </div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
+              <div style={{ fontWeight: 900 }}>{displayFuel}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>
+              <div style={{ fontWeight: 900, fontSize: 18, marginTop: 2 }}>
+                {oilLifePercent === null ? "—" : `${oilLifePercent}%`}
+              </div>
             </div>
           </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
-            <div style={{ fontWeight: 900 }}>{displayFuel}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>
-            <div style={{ fontWeight: 900, fontSize: 18, marginTop: 2 }}>
-              {oilLifePercent === null ? "—" : `${oilLifePercent}%`}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Actions */}
