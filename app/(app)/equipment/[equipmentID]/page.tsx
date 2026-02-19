@@ -92,10 +92,28 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function mechanicScoreBand(score: number) {
+  if (score <= 25) return "Intervention";
+  if (score <= 50) return "Needs Review";
+  if (score <= 75) return "Operational";
+  return "Good";
+}
+
+function legacyAssetAllowance(year: number | null | undefined) {
+  if (!Number.isFinite(Number(year))) return 0;
+  const nowYear = new Date().getFullYear();
+  const age = nowYear - Number(year);
+  if (age >= 18) return 14;
+  if (age >= 12) return 10;
+  if (age >= 8) return 6;
+  return 0;
+}
+
 function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
   let score = 100;
-  if (!log.request_id) score -= 12;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+  if (!log.request_id) score -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
+  if (!(log.status_update ?? "").trim()) score -= 10;
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) score -= 8;
   if (notesLength === 0) score -= 8;
@@ -378,9 +396,10 @@ export default function EquipmentDetailPage() {
     operationalScore -= Math.min(36, openRequestCountForHealth * 12);
     if (pmStatus === "Overdue") operationalScore -= 20;
     if (pmStatus === "Due Soon") operationalScore -= 10;
+    operationalScore += legacyAssetAllowance(equipment?.year);
     operationalScore = clampPercent(operationalScore);
 
-    const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+    const healthScore = clampPercent(operationalScore * 0.8 + mechanicScore * 0.2);
     return {
       healthScore,
       operationalScore,
@@ -388,7 +407,7 @@ export default function EquipmentDetailPage() {
       openRequests: openRequestCountForHealth,
       pmStatus,
     };
-  }, [equipment?.current_hours, equipment?.status, latestPmHours, logPreviewRows, openRequestCountForHealth]);
+  }, [equipment?.current_hours, equipment?.status, equipment?.year, latestPmHours, logPreviewRows, openRequestCountForHealth]);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     return requestPreviewRows.map((r) => {
@@ -495,6 +514,7 @@ export default function EquipmentDetailPage() {
           <div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
             <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
+            <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(equipmentHealthSummary.mechanicScore)}</div>
           </div>
           <div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>

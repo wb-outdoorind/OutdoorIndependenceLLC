@@ -101,10 +101,18 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function mechanicScoreBand(score: number) {
+  if (score <= 25) return "Intervention";
+  if (score <= 50) return "Needs Review";
+  if (score <= 75) return "Operational";
+  return "Good";
+}
+
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
   let score = 100;
-  if (!log.request_id) score -= 12;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+  if (!log.request_id) score -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
+  if (!(log.status_update ?? "").trim()) score -= 10;
 
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) score -= 8;
@@ -432,6 +440,7 @@ export default function FormReportsClient() {
                 <div style={{ fontWeight: 800 }}>{row.mechanic}</div>
                 <MiniStat label="Logs" value={String(row.logs)} />
                 <MiniStat label="Score" value={`${row.avgScore}%`} />
+                <MiniStat label="Band" value={mechanicScoreBand(row.avgScore)} />
               </div>
             ))}
           </div>

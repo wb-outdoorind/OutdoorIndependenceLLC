@@ -12,6 +12,7 @@ type AssetTypeFilter = "All" | "Vehicles" | "Equipment";
 type VehicleRow = {
   id: string;
   name: string;
+  year: number | null;
   status: string | null;
   mileage: number | null;
   updated_at: string;
@@ -20,6 +21,7 @@ type VehicleRow = {
 type EquipmentRow = {
   id: string;
   name: string;
+  year: number | null;
   status: string | null;
   current_hours: number | null;
   updated_at: string;
@@ -163,18 +165,32 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function maintenanceLogQualityScore(log: MaintenanceLogRow, linkedRequestStatus?: string | null) {
+function mechanicScoreBand(score: number) {
+  if (score <= 25) return "Intervention";
+  if (score <= 50) return "Needs Review";
+  if (score <= 75) return "Operational";
+  return "Good";
+}
+
+function legacyAssetAllowance(year: number | null | undefined) {
+  if (!Number.isFinite(Number(year))) return 0;
+  const nowYear = new Date().getFullYear();
+  const age = nowYear - Number(year);
+  if (age >= 18) return 14;
+  if (age >= 12) return 10;
+  if (age >= 8) return 6;
+  return 0;
+}
+
+function maintenanceLogQualityScore(log: MaintenanceLogRow) {
   let score = 100;
-  if (!log.request_id) score -= 12;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+  if (!log.request_id) score -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
+  if (!(log.status_update ?? "").trim()) score -= 10;
 
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) score -= 8;
   if (notesLength === 0) score -= 8;
-
-  const normalizedLinkedStatus = (linkedRequestStatus ?? "").trim();
-  if (normalizedLinkedStatus === "Open") score -= 14;
-  else if (normalizedLinkedStatus === "In Progress") score -= 8;
 
   return clampPercent(score);
 }
@@ -358,8 +374,8 @@ export default function OpsPage({
         };
 
         const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
-          supabase.from("vehicles").select("id,name,status,mileage,updated_at"),
-          supabase.from("equipment").select("id,name,status,current_hours,updated_at"),
+          supabase.from("vehicles").select("id,name,year,status,mileage,updated_at"),
+          supabase.from("equipment").select("id,name,year,status,current_hours,updated_at"),
           fetchRequestsWithOptionalClosedAt("maintenance_requests", "vehicle_id"),
           fetchRequestsWithOptionalClosedAt("equipment_maintenance_requests", "equipment_id"),
           supabase
@@ -793,11 +809,6 @@ export default function OpsPage({
   }, [allRequests, equipment, vehicles]);
 
   const assetHealthRows = useMemo(() => {
-    const requestStatusById = new Map<string, string | null>();
-    for (const req of allRequests) {
-      requestStatusById.set(req.id, req.status ?? null);
-    }
-
     const openRequestCountByAsset = new Map<string, number>();
     for (const req of allRequests) {
       const status = (req.status ?? "").trim();
@@ -825,7 +836,7 @@ export default function OpsPage({
         : null;
       if (!key) continue;
       const current = logQualityByAsset.get(key) ?? [];
-      current.push(maintenanceLogQualityScore(log, log.request_id ? requestStatusById.get(log.request_id) : null));
+      current.push(maintenanceLogQualityScore(log));
       logQualityByAsset.set(key, current);
     }
 
@@ -846,9 +857,10 @@ export default function OpsPage({
       operationalScore -= Math.min(36, openCount * 12);
       if (pmStatus === "Overdue") operationalScore -= 20;
       if (pmStatus === "Due Soon") operationalScore -= 10;
+      operationalScore += legacyAssetAllowance(v.year);
       operationalScore = clampPercent(operationalScore);
 
-      const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+      const healthScore = clampPercent(operationalScore * 0.8 + mechanicScore * 0.2);
       rows.push({
         assetType: "Vehicle",
         assetId: v.id,
@@ -877,9 +889,10 @@ export default function OpsPage({
       operationalScore -= Math.min(36, openCount * 12);
       if (pmStatus === "Overdue") operationalScore -= 20;
       if (pmStatus === "Due Soon") operationalScore -= 10;
+      operationalScore += legacyAssetAllowance(e.year);
       operationalScore = clampPercent(operationalScore);
 
-      const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+      const healthScore = clampPercent(operationalScore * 0.8 + mechanicScore * 0.2);
       rows.push({
         assetType: "Equipment",
         assetId: e.id,
@@ -1128,20 +1141,12 @@ export default function OpsPage({
   }, [performanceRequestsInRange]);
 
   const performanceByMechanic = useMemo(() => {
-    const requestStatusById = new Map<string, string | null>();
-    for (const row of allRequests) {
-      requestStatusById.set(row.id, row.status ?? null);
-    }
-
     const counts = new Map<string, { createdBy: string; display: string; count: number; qualityTotal: number }>();
     for (const log of performanceLogsInRange) {
       const createdBy = log.created_by ?? "Unknown";
       const existing = counts.get(createdBy);
       const display = createdBy === "Unknown" ? "Unknown" : profileNameById[createdBy] || createdBy;
-      const quality = maintenanceLogQualityScore(
-        log,
-        log.request_id ? requestStatusById.get(log.request_id) : null
-      );
+      const quality = maintenanceLogQualityScore(log);
       if (existing) {
         existing.count += 1;
         existing.qualityTotal += quality;
@@ -1155,7 +1160,7 @@ export default function OpsPage({
         avgQuality: row.count ? Math.round(row.qualityTotal / row.count) : 0,
       }))
       .sort((a, b) => b.avgQuality - a.avgQuality || b.count - a.count || a.display.localeCompare(b.display));
-  }, [allRequests, performanceLogsInRange, profileNameById]);
+  }, [performanceLogsInRange, profileNameById]);
 
   return (
     <div style={embedded ? { paddingBottom: 32 } : { maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
@@ -1217,7 +1222,7 @@ export default function OpsPage({
           <div style={{ marginTop: 16, ...cardStyle() }}>
             <div style={{ fontWeight: 900, marginBottom: 10 }}>Asset Health Blend</div>
             <div style={{ opacity: 0.75, marginBottom: 10 }}>
-              Health score blends operational status (65%) and mechanic score (35%).
+              Health score blends operational status (80%) and mechanic score (20%), with a legacy asset allowance by age.
             </div>
             {assetHealthRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No assets loaded.</div>
@@ -1231,6 +1236,7 @@ export default function OpsPage({
                       <th style={thStyle}>Health</th>
                       <th style={thStyle}>Operational</th>
                       <th style={thStyle}>Mechanic</th>
+                      <th style={thStyle}>Mechanic Band</th>
                       <th style={thStyle}>Open Requests</th>
                       <th style={thStyle}>PM Status</th>
                     </tr>
@@ -1248,6 +1254,7 @@ export default function OpsPage({
                         <td style={tdStyle}>{row.healthScore}%</td>
                         <td style={tdStyle}>{row.operationalScore}%</td>
                         <td style={tdStyle}>{row.mechanicScore}%</td>
+                        <td style={tdStyle}>{mechanicScoreBand(row.mechanicScore)}</td>
                         <td style={tdStyle}>{row.openRequests}</td>
                         <td style={tdStyle}>{row.pmStatus}</td>
                       </tr>
@@ -2003,8 +2010,8 @@ export default function OpsPage({
                 onClick={() =>
                   downloadCsv(
                     "ops-by-mechanic.csv",
-                    ["created_by", "display_name_or_email", "logs_count", "avg_mechanic_score"],
-                    performanceByMechanic.map((row) => [row.createdBy, row.display, row.count, row.avgQuality])
+                    ["created_by", "display_name_or_email", "logs_count", "avg_mechanic_score", "mechanic_band"],
+                    performanceByMechanic.map((row) => [row.createdBy, row.display, row.count, row.avgQuality, mechanicScoreBand(row.avgQuality)])
                   )
                 }
               >
@@ -2025,6 +2032,7 @@ export default function OpsPage({
                       <th style={thStyle}>Created By</th>
                       <th style={thStyle}>Logs</th>
                       <th style={thStyle}>Mechanic Score</th>
+                      <th style={thStyle}>Band</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2034,6 +2042,7 @@ export default function OpsPage({
                         <td style={tdStyle}>{row.createdBy}</td>
                         <td style={tdStyle}>{row.count}</td>
                         <td style={tdStyle}>{row.avgQuality}%</td>
+                        <td style={tdStyle}>{mechanicScoreBand(row.avgQuality)}</td>
                       </tr>
                     ))}
                   </tbody>
