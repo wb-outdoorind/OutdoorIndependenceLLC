@@ -30,11 +30,14 @@ function equipmentHoursKey(equipmentId: string) {
 
 function pickCategory(typeValue: string, nameValue: string, idValue: string) {
   const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
+  if (hay.includes("backpack blower")) return "BackpackBlower";
+  if (hay.includes("hand blower") || hay.includes("blower hand")) return "HandBlower";
   if (hay.includes("truck")) return "Truck";
   if (hay.includes("trailer")) return "Trailer";
   if (hay.includes("mower")) return "Mower";
   if (hay.includes("applicator") || hay.includes("sprayer")) return "Applicator";
   if (hay.includes("skid")) return "SkidSteer";
+  if (hay.includes("blower")) return "Blower";
   return "Equipment";
 }
 
@@ -49,13 +52,45 @@ function toPascalToken(value: string) {
     .join("");
 }
 
+function withoutDuplicatePrefix(category: string, typeToken: string) {
+  const lowerCategory = category.toLowerCase();
+  const lowerType = typeToken.toLowerCase();
+  if (lowerType === lowerCategory) return "Unit";
+  if (lowerType.startsWith(lowerCategory)) {
+    const trimmed = typeToken.slice(category.length);
+    return trimmed || "Unit";
+  }
+  return typeToken;
+}
+
+function chooseSubtypeToken(typeValue: string, nameValue: string, idValue: string, category: string) {
+  const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
+
+  if (category === "BackpackBlower") return "BackpackBlower";
+  if (category === "HandBlower") return "HandBlower";
+  if (category === "Blower") {
+    if (hay.includes("backpack")) return "BackpackBlower";
+    if (hay.includes("hand")) return "HandBlower";
+    return "Blower";
+  }
+
+  const base = toPascalToken(typeValue || nameValue || idValue) || "Unit";
+  return withoutDuplicatePrefix(category, base);
+}
+
 function buildConciseEquipmentId(row: EquipmentRow, indexByGroup: Record<string, number>) {
   const category = pickCategory(row.equipment_type ?? "", row.name ?? "", row.id);
-  const rawType = toPascalToken(row.equipment_type ?? row.name ?? row.id) || "Unit";
-  const typeWithoutCategory = rawType.replace(new RegExp(`^${category}`, "i"), "") || rawType;
-  const groupKey = `${category}|${typeWithoutCategory}`;
+  const subtype = chooseSubtypeToken(
+    row.equipment_type ?? "",
+    row.name ?? "",
+    row.id,
+    category
+  );
+  const groupKey = `${category}|${subtype}`;
   indexByGroup[groupKey] = (indexByGroup[groupKey] ?? 0) + 1;
-  return `${category}_${typeWithoutCategory}_${indexByGroup[groupKey]}`;
+  if (subtype === "Unit") return `${category}_${indexByGroup[groupKey]}`;
+  if (subtype === category) return `${category}_${indexByGroup[groupKey]}`;
+  return `${category}_${subtype}_${indexByGroup[groupKey]}`;
 }
 
 function cardStyle(): React.CSSProperties {
