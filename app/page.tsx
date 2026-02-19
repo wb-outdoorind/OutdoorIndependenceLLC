@@ -45,7 +45,7 @@ export default async function Home() {
   return (
     <main
       style={{
-        padding: "12px 20px 28px 8px",
+        padding: "calc(12px + env(safe-area-inset-top)) 20px 28px 8px",
         maxWidth: 1100,
         margin: "0 auto",
         color: "#e9edf3",

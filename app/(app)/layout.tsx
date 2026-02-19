@@ -10,14 +10,10 @@ function TopNav() {
             <Image
               src="/App_Logo.png"
               alt="Outdoor Independence logo"
-              width={32}
-              height={32}
-              style={{ objectFit: "contain", borderRadius: 8 }}
+              width={300}
+              height={56}
+              style={{ height: 56, width: "auto", objectFit: "contain" }}
             />
-            <div>
-              <div style={{ fontWeight: 800, lineHeight: 1.1 }}>Inspection App</div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Operations & Maintenance</div>
-            </div>
           </div>
         </Link>
 
