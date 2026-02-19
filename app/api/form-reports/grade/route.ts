@@ -22,6 +22,42 @@ type GradeResult = {
   metadata: Record<string, unknown>;
 };
 
+async function notifyRoles(
+  admin: ReturnType<typeof createSupabaseAdmin>,
+  roles: string[],
+  payload: {
+    title: string;
+    body: string;
+    severity: "info" | "warning" | "high" | "critical";
+    kind: string;
+    entityType: string;
+    entityId: string;
+    dedupeKeyBase: string;
+  }
+) {
+  const { data: recipients, error: recErr } = await admin
+    .from("profiles")
+    .select("id,role")
+    .in("role", roles)
+    .eq("status", "Active");
+  if (recErr || !recipients?.length) return;
+
+  const rows = recipients.map((recipient) => ({
+    recipient_id: recipient.id,
+    title: payload.title,
+    body: payload.body,
+    severity: payload.severity,
+    kind: payload.kind,
+    entity_type: payload.entityType,
+    entity_id: payload.entityId,
+    dedupe_key: `${payload.dedupeKeyBase}:${recipient.id}`,
+  }));
+
+  await admin
+    .from("user_notifications")
+    .upsert(rows, { onConflict: "recipient_id,dedupe_key" });
+}
+
 function clampScore(score: number) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -405,6 +441,58 @@ export async function POST(req: Request) {
 
     if (upsertError) {
       return NextResponse.json({ error: upsertError.message }, { status: 500 });
+    }
+
+    if (formType === "vehicle_maintenance_request") {
+      const urgency =
+        typeof grade.metadata.urgency === "string" ? grade.metadata.urgency : "";
+      const severity =
+        urgency === "Urgent"
+          ? "critical"
+          : urgency === "High"
+          ? "high"
+          : "warning";
+      await notifyRoles(admin, ["owner", "operations_manager", "office_admin", "mechanic"], {
+        title: "New Vehicle Maintenance Request",
+        body: `Vehicle ${grade.vehicleId ?? "Unknown"} submitted by ${grade.submittedBy ?? "Unknown"}.`,
+        severity,
+        kind: "vehicle_maintenance_request_created",
+        entityType: "vehicle_maintenance_request",
+        entityId: recordId,
+        dedupeKeyBase: `vehicle_request_created:${recordId}`,
+      });
+    }
+
+    if (formType === "equipment_maintenance_request") {
+      const urgency =
+        typeof grade.metadata.urgency === "string" ? grade.metadata.urgency : "";
+      const severity =
+        urgency === "Urgent"
+          ? "critical"
+          : urgency === "High"
+          ? "high"
+          : "warning";
+      await notifyRoles(admin, ["owner", "operations_manager", "office_admin", "mechanic"], {
+        title: "New Equipment Maintenance Request",
+        body: `Equipment ${grade.equipmentId ?? "Unknown"} submitted by ${grade.submittedBy ?? "Unknown"}.`,
+        severity,
+        kind: "equipment_maintenance_request_created",
+        entityType: "equipment_maintenance_request",
+        entityId: recordId,
+        dedupeKeyBase: `equipment_request_created:${recordId}`,
+      });
+    }
+
+    if (grade.accountabilityFlag) {
+      await notifyRoles(admin, ["owner", "operations_manager"], {
+        title: "Accountability Flag Triggered",
+        body: grade.accountabilityReason ?? "Potential missed pre-trip issue requires review.",
+        severity: "high",
+        kind: "form_accountability_flag",
+        entityType: formType,
+        entityId: recordId,
+        dedupeKeyBase: `accountability_flag:${formType}:${recordId}`,
+      });
     }
 
     return NextResponse.json({ ok: true, grade });
