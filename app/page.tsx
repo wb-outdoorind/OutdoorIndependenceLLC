@@ -9,8 +9,7 @@ const tiles = [
   { title: "Vehicles", href: "/vehicles", desc: "Vehicle info, inspections, and maintenance" },
   { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
   { title: "Inventory", href: "/inventory?filter=low", desc: "Parts, stock levels, reorder tracking" },
-  { title: "Maintenance Operations", href: "/ops", desc: "Dashboards, inspections, maintenance history" },
-  { title: "Maintenance Center", href: "/maintenance", desc: "Fleet-wide maintenance queue for mechanics" },
+  { title: "Maintenance Center", href: "/maintenance", desc: "Queue, PM planning, downtime, and maintenance operations" },
   { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
   { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
 

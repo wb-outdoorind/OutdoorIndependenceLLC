@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import OpsClient from "@/app/(app)/ops/OpsClient";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -71,6 +72,8 @@ type EquipmentMetaRow = {
 };
 
 type StatusTab = "Open" | "In Progress" | "Closed";
+type MaintenanceSection = "queue" | "operations";
+type Role = "owner" | "office_admin" | "mechanic" | "employee";
 
 function urgencyRank(u: Urgency): number {
   switch (u) {
@@ -140,6 +143,11 @@ function extractTitleFromDescription(
 }
 
 export default function MaintenanceCenterPage() {
+  const [section, setSection] = useState<MaintenanceSection>(() => {
+    if (typeof window === "undefined") return "queue";
+    const raw = new URLSearchParams(window.location.search).get("section");
+    return raw === "operations" ? "operations" : "queue";
+  });
   const [tab, setTab] = useState<StatusTab>("Open");
   const [entityScope, setEntityScope] = useState<EntityScope>("All");
   const [search, setSearch] = useState("");
@@ -151,6 +159,41 @@ export default function MaintenanceCenterPage() {
   const [equipmentMetaMap, setEquipmentMetaMap] = useState<Record<string, { name?: string; type?: string }>>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [canViewOperations, setCanViewOperations] = useState(false);
+  const [roleResolved, setRoleResolved] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!alive) return;
+
+      if (!authData.user) {
+        setCanViewOperations(false);
+        setRoleResolved(true);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      if (!alive) return;
+      const role = (profile?.role as Role | undefined) ?? "employee";
+      setCanViewOperations(
+        role === "owner" || role === "office_admin" || role === "mechanic"
+      );
+      setRoleResolved(true);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -308,10 +351,63 @@ export default function MaintenanceCenterPage() {
         <div>
           <h1 style={{ marginBottom: 6 }}>Maintenance Center</h1>
           <div style={{ opacity: 0.75 }}>
-            Combined vehicle and equipment queue for mechanics.
+            Queue, analytics, PM planning, downtime, and service performance in one place.
           </div>
         </div>
+      </div>
 
+      <div
+        style={{
+          marginTop: 16,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSection("queue")}
+          style={{
+            ...sectionCardStyle,
+            border: section === "queue" ? "1px solid rgba(126,255,167,0.45)" : sectionCardStyle.border,
+            background: section === "queue" ? "rgba(126,255,167,0.12)" : sectionCardStyle.background,
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Request Queue</div>
+          <div style={{ opacity: 0.78, marginTop: 8 }}>Open, in-progress, and closed requests across vehicles and equipment.</div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSection("operations")}
+          style={{
+            ...sectionCardStyle,
+            border: section === "operations" ? "1px solid rgba(126,255,167,0.45)" : sectionCardStyle.border,
+            background: section === "operations" ? "rgba(126,255,167,0.12)" : sectionCardStyle.background,
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Operations Dashboard</div>
+          <div style={{ opacity: 0.78, marginTop: 8 }}>PM due, downtime, failure trends, and maintenance performance.</div>
+        </button>
+      </div>
+
+      {section === "operations" ? (
+        <div style={{ marginTop: 16 }}>
+          {!roleResolved ? (
+            <div style={cardStyle}>Loading operations access...</div>
+          ) : canViewOperations ? (
+            <OpsClient embedded title="Operations Dashboard" />
+          ) : (
+            <div style={cardStyle}>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Operations Dashboard Access Required</div>
+              <div style={{ opacity: 0.8 }}>
+                This section is available to owner, office admin, and mechanic roles.
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={search}
@@ -348,7 +444,6 @@ export default function MaintenanceCenterPage() {
             Urgent/High only
           </label>
         </div>
-      </div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <TabButton active={tab === "Open"} onClick={() => setTab("Open")}>
@@ -425,6 +520,8 @@ export default function MaintenanceCenterPage() {
       <div style={{ marginTop: 12, fontSize: 12, opacity: 0.65 }}>
         Tip: Work top-to-bottom by urgency for faster turnaround.
       </div>
+        </>
+      )}
     </main>
   );
 }
@@ -512,4 +609,14 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   opacity: 0.9,
   textDecoration: "none",
+};
+
+const sectionCardStyle: React.CSSProperties = {
+  textAlign: "left",
+  borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.03)",
+  color: "inherit",
+  padding: 16,
+  cursor: "pointer",
 };

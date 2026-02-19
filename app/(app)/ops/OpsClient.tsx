@@ -235,7 +235,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export default function OpsPage() {
+export default function OpsPage({
+  embedded = false,
+  title = "Maintenance Operations",
+}: {
+  embedded?: boolean;
+  title?: string;
+} = {}) {
   const [tab, setTab] = useState<OpsTab>("Overview");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -986,8 +992,8 @@ export default function OpsPage() {
   }, [performanceLogsInRange, profileNameById]);
 
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Maintenance Operations</h1>
+    <div style={embedded ? { paddingBottom: 32 } : { maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
+      <h1 style={{ marginBottom: 6 }}>{title}</h1>
       <div style={{ opacity: 0.75 }}>Maintenance operations overview and fleet service signals.</div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1826,7 +1832,7 @@ export default function OpsPage() {
           </div>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }
 

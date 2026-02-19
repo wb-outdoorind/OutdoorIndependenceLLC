@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
-import OpsClient from "./OpsClient";
 
 export default async function OpsPage() {
   const session = await getCurrentUserProfile();
@@ -11,5 +10,5 @@ export default async function OpsPage() {
     redirect("/not-authorized?reason=ops_requires_manager_or_mechanic&next=/");
   }
 
-  return <OpsClient />;
+  redirect("/maintenance?section=operations");
 }
