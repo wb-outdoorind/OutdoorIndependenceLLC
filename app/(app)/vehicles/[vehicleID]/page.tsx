@@ -48,8 +48,17 @@ type MaintenanceLogPreviewRow = {
   id: string;
   vehicle_id: string;
   created_at: string;
+  request_id: string | null;
   status_update: string | null;
   notes: string | null;
+};
+
+type AssetHealthSummary = {
+  healthScore: number;
+  operationalScore: number;
+  mechanicScore: number;
+  openRequests: number;
+  pmStatus: "On Track" | "Due Soon" | "Overdue";
 };
 
 type HistoryPreviewItem = {
@@ -129,6 +138,20 @@ function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
+  let score = 100;
+  if (!log.request_id) score -= 12;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+  const notesLength = (log.notes ?? "").trim().length;
+  if (notesLength < 20) score -= 8;
+  if (notesLength === 0) score -= 8;
+  return clampPercent(score);
 }
 
 function parseTitleAndDescription(raw: string | null) {
@@ -283,6 +306,7 @@ export default function VehicleDetailPage() {
   const [logPreviewRows, setLogPreviewRows] = useState<MaintenanceLogPreviewRow[]>([]);
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
   const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
+  const [openRequestCountForHealth, setOpenRequestCountForHealth] = useState(0);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [editDraft, setEditDraft] = useState<VehicleEditDraft | null>(null);
@@ -507,7 +531,7 @@ export default function VehicleDetailPage() {
       setRequestPreviewError(null);
       setLogPreviewError(null);
 
-      const [requestsRes, logsRes] = await Promise.all([
+      const [requestsRes, logsRes, openRequestsCountRes] = await Promise.all([
         supabase
           .from("maintenance_requests")
           .select("id, created_at, status, urgency, system_affected, description, vehicle_id")
@@ -516,10 +540,15 @@ export default function VehicleDetailPage() {
           .limit(8),
         supabase
           .from("maintenance_logs")
-          .select("id, vehicle_id, created_at, status_update, notes")
+          .select("id, vehicle_id, created_at, request_id, status_update, notes")
           .eq("vehicle_id", params.vehicleID)
           .order("created_at", { ascending: false })
-          .limit(8),
+          .limit(20),
+        supabase
+          .from("maintenance_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("vehicle_id", params.vehicleID)
+          .in("status", ["Open", "In Progress"]),
       ]);
 
       if (!alive) return;
@@ -542,6 +571,13 @@ export default function VehicleDetailPage() {
         setLogPreviewRows([]);
       } else {
         setLogPreviewRows(logsRes.data as MaintenanceLogPreviewRow[]);
+      }
+
+      if (openRequestsCountRes.error) {
+        console.error("Vehicle open request count load error:", openRequestsCountRes.error);
+        setOpenRequestCountForHealth(0);
+      } else {
+        setOpenRequestCountForHealth(openRequestsCountRes.count ?? 0);
       }
     })();
 
@@ -575,6 +611,46 @@ export default function VehicleDetailPage() {
   }, [pmRecords]);
 
   const oilLifePercent = computeOilLifePercent(currentMileage, lastOilChangeMileage);
+
+  const vehicleHealthSummary = useMemo<AssetHealthSummary>(() => {
+    const interval = 5000;
+    const dueSoonWindow = 500;
+    const lastPmMileage = typeof lastOilChangeMileage === "number" ? lastOilChangeMileage : 0;
+    const current = typeof currentMileage === "number" ? currentMileage : null;
+
+    let pmStatus: AssetHealthSummary["pmStatus"] = "On Track";
+    if (current != null) {
+      const dueAt = lastPmMileage + interval;
+      const delta = dueAt - current;
+      if (current >= dueAt) pmStatus = "Overdue";
+      else if (delta <= dueSoonWindow) pmStatus = "Due Soon";
+    }
+
+    const recentLogs = logPreviewRows.slice(0, 6);
+    const mechanicScore = recentLogs.length
+      ? Math.round(
+          recentLogs.reduce((sum, row) => sum + maintenanceLogQualityScore(row), 0) / recentLogs.length
+        )
+      : 75;
+
+    let operationalScore = 100;
+    const status = (vehicle?.status ?? "").trim();
+    if (status === "Red Tagged" || status === "Out of Service") operationalScore -= 30;
+    operationalScore -= Math.min(36, openRequestCountForHealth * 12);
+    if (pmStatus === "Overdue") operationalScore -= 20;
+    if (pmStatus === "Due Soon") operationalScore -= 10;
+    operationalScore = clampPercent(operationalScore);
+
+    const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+
+    return {
+      healthScore,
+      operationalScore,
+      mechanicScore,
+      openRequests: openRequestCountForHealth,
+      pmStatus,
+    };
+  }, [currentMileage, lastOilChangeMileage, logPreviewRows, openRequestCountForHealth, vehicle?.status]);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     const requestItems = requestPreviewRows.map((r) => {
@@ -959,6 +1035,38 @@ export default function VehicleDetailPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 18, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 12 }}>Asset Health Score</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Health Score</div>
+            <div style={{ fontWeight: 900, fontSize: 24 }}>{vehicleHealthSummary.healthScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.operationalScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.mechanicScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.openRequests}</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>PM Status</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.pmStatus}</div>
+          </div>
+        </div>
       </div>
 
       {/* Actions */}

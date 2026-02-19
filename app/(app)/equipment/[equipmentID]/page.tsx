@@ -31,6 +31,23 @@ type MaintenanceRequestPreviewRow = {
   description: string | null;
 };
 
+type MaintenanceLogPreviewRow = {
+  id: string;
+  equipment_id: string;
+  created_at: string;
+  request_id: string | null;
+  status_update: string | null;
+  notes: string | null;
+};
+
+type AssetHealthSummary = {
+  healthScore: number;
+  operationalScore: number;
+  mechanicScore: number;
+  openRequests: number;
+  pmStatus: "On Track" | "Due Soon" | "Overdue";
+};
+
 type HistoryPreviewItem = {
   createdAt: string;
   title: string;
@@ -69,6 +86,20 @@ function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
+  let score = 100;
+  if (!log.request_id) score -= 12;
+  if ((log.status_update ?? "").trim() === "In Progress") score -= 14;
+  const notesLength = (log.notes ?? "").trim().length;
+  if (notesLength < 20) score -= 8;
+  if (notesLength === 0) score -= 8;
+  return clampPercent(score);
 }
 
 function cardStyle(): React.CSSProperties {
@@ -135,7 +166,11 @@ export default function EquipmentDetailPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
+  const [logPreviewRows, setLogPreviewRows] = useState<MaintenanceLogPreviewRow[]>([]);
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
+  const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
+  const [openRequestCountForHealth, setOpenRequestCountForHealth] = useState(0);
+  const [latestPmHours, setLatestPmHours] = useState<number | null>(null);
   const [hasPmTemplate, setHasPmTemplate] = useState(false);
 
   useEffect(() => {
@@ -234,25 +269,71 @@ export default function EquipmentDetailPage() {
     async function loadRequestPreview() {
       const supabase = createSupabaseBrowser();
       setRequestPreviewError(null);
+      setLogPreviewError(null);
 
-      const { data, error } = await supabase
-        .from("equipment_maintenance_requests")
-        .select("id,equipment_id,created_at,status,urgency,system_affected,description")
-        .eq("equipment_id", equipmentIdFromRoute)
-        .order("created_at", { ascending: false })
-        .limit(4);
+      const [requestsRes, logsRes, openCountRes, pmEventRes] = await Promise.all([
+        supabase
+          .from("equipment_maintenance_requests")
+          .select("id,equipment_id,created_at,status,urgency,system_affected,description")
+          .eq("equipment_id", equipmentIdFromRoute)
+          .order("created_at", { ascending: false })
+          .limit(4),
+        supabase
+          .from("equipment_maintenance_logs")
+          .select("id,equipment_id,created_at,request_id,status_update,notes")
+          .eq("equipment_id", equipmentIdFromRoute)
+          .order("created_at", { ascending: false })
+          .limit(20),
+        supabase
+          .from("equipment_maintenance_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("equipment_id", equipmentIdFromRoute)
+          .in("status", ["Open", "In Progress"]),
+        supabase
+          .from("equipment_pm_events")
+          .select("hours")
+          .eq("equipment_id", equipmentIdFromRoute)
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
 
       if (!alive) return;
-      if (error || !data) {
-        if (error) {
-          console.error("[equipment-detail] preview load error:", error);
-          setRequestPreviewError(error.message);
+
+      if (requestsRes.error || !requestsRes.data) {
+        if (requestsRes.error) {
+          console.error("[equipment-detail] preview load error:", requestsRes.error);
+          setRequestPreviewError(requestsRes.error.message);
         }
         setRequestPreviewRows([]);
-        return;
+      } else {
+        setRequestPreviewRows(requestsRes.data as MaintenanceRequestPreviewRow[]);
       }
 
-      setRequestPreviewRows(data as MaintenanceRequestPreviewRow[]);
+      if (logsRes.error || !logsRes.data) {
+        if (logsRes.error) {
+          console.error("[equipment-detail] log preview load error:", logsRes.error);
+          setLogPreviewError(logsRes.error.message);
+        }
+        setLogPreviewRows([]);
+      } else {
+        setLogPreviewRows(logsRes.data as MaintenanceLogPreviewRow[]);
+      }
+
+      if (openCountRes.error) {
+        console.error("[equipment-detail] open request count load error:", openCountRes.error);
+        setOpenRequestCountForHealth(0);
+      } else {
+        setOpenRequestCountForHealth(openCountRes.count ?? 0);
+      }
+
+      if (pmEventRes.error) {
+        console.error("[equipment-detail] latest PM event load error:", pmEventRes.error);
+        setLatestPmHours(null);
+      } else {
+        const row = (pmEventRes.data ?? [])[0] as { hours: number | null } | undefined;
+        const parsed = Number(row?.hours);
+        setLatestPmHours(Number.isFinite(parsed) ? parsed : null);
+      }
     }
 
     loadRequestPreview();
@@ -268,6 +349,46 @@ export default function EquipmentDetailPage() {
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
   const canShowPmButton = isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate;
+
+  const equipmentHealthSummary = useMemo<AssetHealthSummary>(() => {
+    const interval = 250;
+    const dueSoonWindow = 25;
+    const currentHours = Number(equipment?.current_hours ?? 0);
+    const hasCurrentHours = Number.isFinite(currentHours) && currentHours >= 0;
+    const lastPmValue = latestPmHours ?? 0;
+
+    let pmStatus: AssetHealthSummary["pmStatus"] = "On Track";
+    if (hasCurrentHours) {
+      const dueAt = lastPmValue + interval;
+      const delta = dueAt - currentHours;
+      if (currentHours >= dueAt) pmStatus = "Overdue";
+      else if (delta <= dueSoonWindow) pmStatus = "Due Soon";
+    }
+
+    const recentLogs = logPreviewRows.slice(0, 6);
+    const mechanicScore = recentLogs.length
+      ? Math.round(
+          recentLogs.reduce((sum, row) => sum + maintenanceLogQualityScore(row), 0) / recentLogs.length
+        )
+      : 75;
+
+    let operationalScore = 100;
+    const status = (equipment?.status ?? "").trim();
+    if (status === "Red Tagged" || status === "Out of Service") operationalScore -= 30;
+    operationalScore -= Math.min(36, openRequestCountForHealth * 12);
+    if (pmStatus === "Overdue") operationalScore -= 20;
+    if (pmStatus === "Due Soon") operationalScore -= 10;
+    operationalScore = clampPercent(operationalScore);
+
+    const healthScore = clampPercent(operationalScore * 0.65 + mechanicScore * 0.35);
+    return {
+      healthScore,
+      operationalScore,
+      mechanicScore,
+      openRequests: openRequestCountForHealth,
+      pmStatus,
+    };
+  }, [equipment?.current_hours, equipment?.status, latestPmHours, logPreviewRows, openRequestCountForHealth]);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     return requestPreviewRows.map((r) => {
@@ -355,6 +476,38 @@ export default function EquipmentDetailPage() {
       </div>
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 12 }}>Asset Health Score</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Health Score</div>
+            <div style={{ fontWeight: 900, fontSize: 24 }}>{equipmentHealthSummary.healthScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.operationalScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.openRequests}</div>
+          </div>
+          <div>
+            <div style={{ opacity: 0.7, fontSize: 12 }}>PM Status</div>
+            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.pmStatus}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
@@ -391,8 +544,8 @@ export default function EquipmentDetailPage() {
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {requestPreviewError ? (
-            <div style={{ opacity: 0.9, color: "#ff9d9d" }}>Failed to load maintenance requests preview.</div>
+          {requestPreviewError || logPreviewError ? (
+            <div style={{ opacity: 0.9, color: "#ff9d9d" }}>Failed to load all maintenance history preview sources.</div>
           ) : historyPreview.length === 0 ? (
             <div style={{ opacity: 0.75 }}>No maintenance requests yet.</div>
           ) : (
