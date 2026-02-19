@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #06080b;
+  --foreground: #e9edf3;
 }
 
 @theme inline {
@@ -12,15 +12,98 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  min-height: 100vh;
+}
+
+.app-topnav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(5, 8, 12, 0.84);
+  backdrop-filter: blur(10px);
+}
+
+.app-topnav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 14px 10px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-brand {
+  text-decoration: none;
+  color: inherit;
+}
+
+.app-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-topnav-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 66%;
+  padding-bottom: 2px;
+}
+
+.app-topnav-link {
+  text-decoration: none;
+  color: inherit;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.home-shell {
+  padding: 12px 20px 28px 8px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.home-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 860px) {
+  .app-topnav-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .app-topnav-links {
+    max-width: 100%;
+    padding-bottom: 4px;
+  }
+
+  .home-shell {
+    padding: 10px 14px 24px 6px;
+  }
+
+  .home-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 }

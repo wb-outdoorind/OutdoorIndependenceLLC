@@ -43,7 +43,16 @@ export default async function Home() {
   }
 
   return (
-    <main style={{ padding: "16px 32px 32px 6px", maxWidth: 1100, margin: "0 auto" }}>
+    <main
+      style={{
+        padding: "12px 20px 28px 8px",
+        maxWidth: 1100,
+        margin: "0 auto",
+        color: "#e9edf3",
+        background: "#06080b",
+        minHeight: "100vh",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
         <Image
           src="/App_Logo.png"
@@ -54,7 +63,7 @@ export default async function Home() {
         />
         <LogoutButton />
       </div>
-      <p style={{ opacity: 0.75, marginTop: 0 }}>
+      <p style={{ opacity: 0.75, marginTop: 0, color: "rgba(233,237,243,0.78)" }}>
         Choose a section to manage assets and operations.
       </p>
 
@@ -75,7 +84,7 @@ export default async function Home() {
               borderRadius: 16,
               padding: 18,
               textDecoration: "none",
-              color: "inherit",
+              color: "#e9edf3",
               background: "rgba(255,255,255,0.03)",
             }}
           >
@@ -97,11 +106,11 @@ export default async function Home() {
                 </div>
               ) : null}
             </div>
-            <div style={{ opacity: 0.72, marginTop: 8, lineHeight: 1.35 }}>
+            <div style={{ opacity: 0.82, marginTop: 8, lineHeight: 1.35, color: "rgba(233,237,243,0.82)" }}>
               {t.desc}
             </div>
 
-            <div style={{ marginTop: 14, opacity: 0.8, fontSize: 13 }}>
+            <div style={{ marginTop: 14, opacity: 0.85, fontSize: 13, color: "rgba(233,237,243,0.85)" }}>
               Open →
             </div>
           </Link>
