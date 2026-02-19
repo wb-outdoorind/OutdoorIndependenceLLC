@@ -73,7 +73,7 @@ type EquipmentMetaRow = {
 
 type StatusTab = "Open" | "In Progress" | "Closed";
 type MaintenanceSection = "queue" | "operations";
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 function urgencyRank(u: Urgency): number {
   switch (u) {
@@ -185,7 +185,7 @@ export default function MaintenanceCenterPage() {
       if (!alive) return;
       const role = (profile?.role as Role | undefined) ?? "employee";
       setCanViewOperations(
-        role === "owner" || role === "office_admin" || role === "mechanic"
+        role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
       );
       setRoleResolved(true);
     })();
@@ -401,7 +401,7 @@ export default function MaintenanceCenterPage() {
             <div style={cardStyle}>
               <div style={{ fontWeight: 900, marginBottom: 8 }}>Operations Dashboard Access Required</div>
               <div style={{ opacity: 0.8 }}>
-                This section is available to owner, office admin, and mechanic roles.
+                This section is available to owner, operations manager, office admin, and mechanic roles.
               </div>
             </div>
           )}

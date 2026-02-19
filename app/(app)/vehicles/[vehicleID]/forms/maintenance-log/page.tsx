@@ -7,7 +7,7 @@ export default async function Page() {
   const role = session?.profile?.role ?? "employee";
 
   const canCreateLog =
-    role === "owner" || role === "office_admin" || role === "mechanic";
+    role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 
   if (!canCreateLog) {
     redirect("/not-authorized?reason=employees_cannot_create_logs&next=/");

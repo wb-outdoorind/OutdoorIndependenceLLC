@@ -3,6 +3,22 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
+const ALLOWED_ROLES = new Set([
+  "owner",
+  "operations_manager",
+  "office_admin",
+  "mechanic",
+  "team_member_1",
+  "team_member_2",
+  "employee",
+]);
+const ALLOWED_DEPARTMENTS = new Set([
+  "Mowing",
+  "Administration",
+  "Landscaping",
+  "Fertilizing",
+  "Maintenance",
+]);
 
 export async function POST(req: Request) {
   try {
@@ -17,7 +33,11 @@ export async function POST(req: Request) {
     const session = await getCurrentUserProfile();
     const requesterRole = session?.profile?.role ?? "employee";
 
-    if (requesterRole !== "owner" && requesterRole !== "office_admin") {
+    if (
+      requesterRole !== "owner" &&
+      requesterRole !== "operations_manager" &&
+      requesterRole !== "office_admin"
+    ) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
@@ -26,14 +46,30 @@ export async function POST(req: Request) {
     const email = String(body.email || "").trim().toLowerCase();
     const full_name = String(body.full_name || "").trim();
     const role = String(body.role || "").trim();
+    const phone = String(body.phone || "").trim();
+    const department = String(body.department || "").trim();
 
     if (!email) return NextResponse.json({ error: "Email is required" }, { status: 400 });
     if (!full_name) return NextResponse.json({ error: "Full name is required" }, { status: 400 });
     if (!role) return NextResponse.json({ error: "Role is required" }, { status: 400 });
+    if (!phone) return NextResponse.json({ error: "Phone is required" }, { status: 400 });
+    if (!department) return NextResponse.json({ error: "Department is required" }, { status: 400 });
+    if (!ALLOWED_ROLES.has(role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    if (!ALLOWED_DEPARTMENTS.has(department)) {
+      return NextResponse.json({ error: "Invalid department" }, { status: 400 });
+    }
 
     // extra safety
-    if (requesterRole === "office_admin" && role === "owner") {
-      return NextResponse.json({ error: "Only owner can invite another owner" }, { status: 403 });
+    if (
+      requesterRole === "office_admin" &&
+      (role === "owner" || role === "operations_manager")
+    ) {
+      return NextResponse.json(
+        { error: "Only owner or operations manager can invite owner-level roles" },
+        { status: 403 }
+      );
     }
 
     const admin = createSupabaseAdmin();
@@ -66,8 +102,8 @@ export async function POST(req: Request) {
           full_name,
           role,
           status: "Active",
-          phone: body.phone?.trim() || null,
-          department: body.department?.trim() || null,
+          phone,
+          department,
         },
         { onConflict: "id" }
       );

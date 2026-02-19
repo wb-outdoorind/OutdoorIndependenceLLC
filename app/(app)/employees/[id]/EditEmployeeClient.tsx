@@ -15,6 +15,14 @@ type Teammate = {
 };
 
 type PermissionState = "inherit" | "allow" | "deny";
+const DEPARTMENT_OPTIONS = [
+  "Mowing",
+  "Administration",
+  "Landscaping",
+  "Fertilizing",
+  "Maintenance",
+] as const;
+type Department = (typeof DEPARTMENT_OPTIONS)[number];
 
 const PERMISSION_GROUPS: Array<{
   group: string;
@@ -58,7 +66,7 @@ const PERMISSION_GROUPS: Array<{
 
 function rolePresetAllowed(role: string | null, perm: string) {
   const r = (role ?? "employee").toLowerCase();
-  if (r === "employee") {
+  if (r === "employee" || r === "team_member_1" || r === "team_member_2") {
     return perm === "vehicles.view" || perm === "equipment.view" || perm === "maintenance.view";
   }
   if (r === "mechanic") {
@@ -72,7 +80,7 @@ function rolePresetAllowed(role: string | null, perm: string) {
       perm === "inventory.manage"
     );
   }
-  if (r === "office_admin" || r === "owner") {
+  if (r === "office_admin" || r === "owner" || r === "operations_manager") {
     return (
       perm === "vehicles.view" ||
       perm === "equipment.view" ||
@@ -197,6 +205,9 @@ export default function EditEmployeeClient({ id }: { id: string }) {
   const isSelf = !!myUserId && employee?.id === myUserId;
   const isOwner = (employee?.role ?? "").toLowerCase() === "owner";
   const isSelfOwner = isSelf && isOwner;
+  const departmentValue = DEPARTMENT_OPTIONS.includes(employee?.department as Department)
+    ? (employee?.department as Department)
+    : DEPARTMENT_OPTIONS[0];
   const allPermissionKeys = useMemo(
     () => PERMISSION_GROUPS.flatMap((group) => group.items.map((item) => item.key)),
     []
@@ -272,6 +283,15 @@ export default function EditEmployeeClient({ id }: { id: string }) {
       return;
     }
 
+    if (!employee.email?.trim()) {
+      alert("Email is required.");
+      return;
+    }
+    if (!employee.phone?.trim()) {
+      alert("Phone is required.");
+      return;
+    }
+
     setSaving(true);
     setErrMsg(null);
 
@@ -283,7 +303,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
         full_name: employee.full_name,
         role: employee.role,
         status: employee.status,
-        phone: employee.phone,
+        phone: employee.phone?.trim() ?? null,
         department: employee.department,
       })
       .eq("id", employee.id);
@@ -410,9 +430,12 @@ export default function EditEmployeeClient({ id }: { id: string }) {
               disabled={isSelfOwner}
             >
               <option value="owner">Owner</option>
+              <option value="operations_manager">Operations Manager</option>
               <option value="office_admin">Office Admin</option>
               <option value="mechanic">Mechanic</option>
-              <option value="employee">Teammate</option>
+              <option value="team_member_1">Team Member 1</option>
+              <option value="team_member_2">Team Member 2</option>
+              <option value="employee">Teammate (Legacy)</option>
             </select>
             {isSelfOwner ? (
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
@@ -438,22 +461,29 @@ export default function EditEmployeeClient({ id }: { id: string }) {
             ) : null}
           </Field>
 
-          <Field label="Phone">
+          <Field label="Phone *">
             <input
               value={employee.phone ?? ""}
               onChange={(e) => setEmployee({ ...employee, phone: e.target.value })}
               placeholder="Phone"
               style={inputStyle}
+              required
             />
           </Field>
 
-          <Field label="Department">
-            <input
-              value={employee.department ?? ""}
-              onChange={(e) => setEmployee({ ...employee, department: e.target.value })}
-              placeholder="Department"
+          <Field label="Department *">
+            <select
+              value={departmentValue}
+              onChange={(e) => setEmployee({ ...employee, department: e.target.value as Department })}
               style={inputStyle}
-            />
+              required
+            >
+              {DEPARTMENT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field label="Email (read-only)">

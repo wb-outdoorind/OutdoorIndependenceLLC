@@ -8,7 +8,7 @@ import { writeAudit } from "@/lib/audit";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 type EquipmentRequestOption = {
   id: string;
@@ -47,7 +47,7 @@ type PartUsed = {
 };
 
 function canManagePartsUsage(role: Role | null) {
-  return role === "owner" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function equipmentHoursKey(equipmentId: string) {
@@ -527,7 +527,7 @@ export default function EquipmentMaintenanceLogPage() {
           <div style={{ fontWeight: 900, marginBottom: 12 }}>Parts Used</div>
           {!canSubmitPartsUsage ? (
             <div style={{ opacity: 0.75, marginBottom: 10 }}>
-              Parts usage entry is limited to owner, office_admin, or mechanic.
+              Parts usage entry is limited to owner, operations_manager, office_admin, or mechanic.
             </div>
           ) : null}
 

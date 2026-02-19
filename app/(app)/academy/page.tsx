@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 type AcademyContentRow = {
   id: string;
@@ -242,7 +242,7 @@ function AcademyPageContent() {
     })();
   }, [assetTypeParam, reloadKey, vehicleId]);
 
-  const canUpload = role === "owner" || role === "office_admin" || role === "mechanic";
+  const canUpload = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 
   function addUploadAssetTag(value: string) {
     const normalized = normalizeTag(value);
@@ -453,7 +453,7 @@ function AcademyPageContent() {
         <section style={{ ...cardStyle, marginBottom: 18 }}>
           <h2 style={{ marginTop: 0, marginBottom: 8 }}>Upload Academy Content</h2>
           <div style={{ opacity: 0.74, marginBottom: 12 }}>
-            Allowed roles: owner, office admin, and mechanic.
+            Allowed roles: owner, operations manager, office admin, and mechanic.
           </div>
           <div style={uploadGridStyle}>
             <Field label="Title">

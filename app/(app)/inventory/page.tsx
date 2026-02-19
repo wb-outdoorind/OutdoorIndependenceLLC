@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 type InventoryItemRow = {
   id: string;
@@ -22,7 +22,7 @@ type InventoryLocationRow = {
 };
 
 function canManageInventory(role: string | null | undefined) {
-  return role === "owner" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function cardStyle(): React.CSSProperties {

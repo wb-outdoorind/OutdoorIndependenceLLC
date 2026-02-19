@@ -9,7 +9,11 @@ export async function POST(req: Request) {
     const session = await getCurrentUserProfile();
     const requesterRole = session?.profile?.role ?? "employee";
 
-    if (requesterRole !== "owner" && requesterRole !== "office_admin") {
+    if (
+      requesterRole !== "owner" &&
+      requesterRole !== "operations_manager" &&
+      requesterRole !== "office_admin"
+    ) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 

@@ -6,7 +6,7 @@ export default async function InventoryTransfersPage() {
   const session = await getCurrentUserProfile();
   const role = session?.profile?.role ?? "employee";
 
-  const canTransfer = role === "owner" || role === "office_admin" || role === "mechanic";
+  const canTransfer = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canTransfer) {
     redirect("/not-authorized?reason=inventory_transfer_requires_manager_or_mechanic&next=/inventory");
   }

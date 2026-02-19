@@ -4,17 +4,31 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
 type ApiResponse = { error?: string };
+const DEPARTMENT_OPTIONS = [
+  "Mowing",
+  "Administration",
+  "Landscaping",
+  "Fertilizing",
+  "Maintenance",
+] as const;
+type Department = (typeof DEPARTMENT_OPTIONS)[number];
+type AssignableRole =
+  | "team_member_1"
+  | "team_member_2"
+  | "mechanic"
+  | "office_admin"
+  | "operations_manager"
+  | "owner";
 
 export default function NewEmployeeClient() {
   const router = useRouter();
 
   const [full_name, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("employee");
+  const [role, setRole] = useState<AssignableRole>("team_member_1");
   const [phone, setPhone] = useState("");
-  const [department, setDepartment] = useState("");
+  const [department, setDepartment] = useState<Department>("Mowing");
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -27,12 +41,13 @@ export default function NewEmployeeClient() {
       full_name: full_name.trim(),
       email: email.trim().toLowerCase(),
       role,
-      phone: phone.trim() || undefined,
-      department: department.trim() || undefined,
+      phone: phone.trim(),
+      department,
     };
 
     if (!payload.full_name) return setMsg("Full name is required.");
     if (!payload.email) return setMsg("Email is required.");
+    if (!payload.phone) return setMsg("Phone is required.");
 
     setSaving(true);
     try {
@@ -114,26 +129,35 @@ export default function NewEmployeeClient() {
           <Field label="Role *">
             <select
               value={role}
-              onChange={(e) => setRole(e.target.value as Role)}
+              onChange={(e) => setRole(e.target.value as AssignableRole)}
               style={inputStyle}
             >
-              <option value="employee">Teammate</option>
+              <option value="team_member_1">Team Member 1</option>
+              <option value="team_member_2">Team Member 2</option>
               <option value="mechanic">Mechanic</option>
               <option value="office_admin">Office Admin</option>
+              <option value="operations_manager">Operations Manager</option>
               <option value="owner">Owner</option>
             </select>
           </Field>
 
-          <Field label="Phone (optional)">
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
+          <Field label="Phone *">
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} required />
           </Field>
 
-          <Field label="Department (optional)">
-            <input
+          <Field label="Department *">
+            <select
               value={department}
-              onChange={(e) => setDepartment(e.target.value)}
+              onChange={(e) => setDepartment(e.target.value as Department)}
               style={inputStyle}
-            />
+              required
+            >
+              {DEPARTMENT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
 

@@ -5,7 +5,7 @@ export default async function VehiclesPage() {
   const session = await getCurrentUserProfile();
   const role = session?.profile?.role ?? "employee";
   const canCreateVehicle =
-    role === "owner" || role === "office_admin" || role === "mechanic";
+    role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 
   return <VehiclesListClient canCreateVehicle={canCreateVehicle} />;
 }

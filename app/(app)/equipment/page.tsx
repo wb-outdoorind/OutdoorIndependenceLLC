@@ -14,7 +14,7 @@ type EquipmentRow = {
   model: string | null;
   year: number | null;
 };
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 function equipmentNameKey(equipmentId: string) {
   return `equipment:${equipmentId}:name`;
@@ -106,7 +106,7 @@ export default function EquipmentListPage() {
       if (!alive) return;
       const role = (profile?.role as Role | undefined) ?? "employee";
       setCanCreateEquipment(
-        role === "owner" || role === "office_admin" || role === "mechanic"
+        role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
       );
     })();
 

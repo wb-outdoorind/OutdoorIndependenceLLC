@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type Role = "owner" | "office_admin" | "mechanic" | "employee";
+type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
 
 type InventoryItemRow = {
   id: string;
@@ -42,7 +42,7 @@ type InventoryTransactionRow = {
 };
 
 function canManageInventory(role: string | null | undefined) {
-  return role === "owner" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function formatDateTime(iso: string) {
@@ -278,7 +278,7 @@ export default function InventoryItemDetailPage() {
 
             {!canManageInventory(role) ? (
               <div style={{ opacity: 0.8 }}>
-                You do not have permission to adjust inventory. (owner/office_admin/mechanic only)
+                You do not have permission to adjust inventory. (owner/operations_manager/office_admin/mechanic only)
               </div>
             ) : (
               <form onSubmit={onAdjustSubmit}>
