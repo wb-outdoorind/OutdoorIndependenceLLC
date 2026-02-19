@@ -14,6 +14,7 @@ type EquipmentRow = {
   model: string | null;
   year: number | null;
 };
+type Role = "owner" | "office_admin" | "mechanic" | "employee";
 
 function equipmentNameKey(equipmentId: string) {
   return `equipment:${equipmentId}:name`;
@@ -53,6 +54,7 @@ export default function EquipmentListPage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [canCreateEquipment, setCanCreateEquipment] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -81,6 +83,32 @@ export default function EquipmentListPage() {
     }
 
     loadEquipment();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!alive || !authData.user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      if (!alive) return;
+      const role = (profile?.role as Role | undefined) ?? "employee";
+      setCanCreateEquipment(
+        role === "owner" || role === "office_admin" || role === "mechanic"
+      );
+    })();
 
     return () => {
       alive = false;
@@ -159,6 +187,14 @@ export default function EquipmentListPage() {
         </div>
       </div>
 
+      {canCreateEquipment ? (
+        <div style={{ marginTop: 12 }}>
+          <Link href="/equipment/new" style={addButtonStyle}>
+            + Add Equipment
+          </Link>
+        </div>
+      ) : null}
+
       <div style={{ marginTop: 16, ...cardStyle() }}>
         {errorMessage ? (
           <div style={{ opacity: 0.9, color: "#ff9d9d" }}>{errorMessage}</div>
@@ -223,3 +259,15 @@ export default function EquipmentListPage() {
     </main>
   );
 }
+
+const addButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  textDecoration: "none",
+  color: "inherit",
+  fontWeight: 900,
+  border: "1px solid rgba(126,255,167,0.35)",
+  background: "rgba(126,255,167,0.14)",
+  borderRadius: 12,
+  padding: "10px 14px",
+};

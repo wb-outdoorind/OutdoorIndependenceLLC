@@ -34,6 +34,7 @@ type VehicleRecord = {
   type: string | null;
   mileage: number | null;
 };
+type Role = "owner" | "office_admin" | "mechanic" | "employee";
 
 function normalizeVehicleType(
   t: string | null
@@ -88,6 +89,7 @@ export default function VehiclesListPage() {
   const envOk = Boolean(SUPABASE_URL && SUPABASE_ANON);
   const isDev = process.env.NODE_ENV === "development";
   const [showDebug, setShowDebug] = useState(false);
+  const [canCreateVehicle, setCanCreateVehicle] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -125,6 +127,37 @@ export default function VehiclesListPage() {
         setRawCount(null);
       } finally {
         if (alive) setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const supabase = getSupabase();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!alive || !authData.user) return;
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+
+        if (!alive) return;
+        const role = (profile?.role as Role | undefined) ?? "employee";
+        setCanCreateVehicle(
+          role === "owner" || role === "office_admin" || role === "mechanic"
+        );
+      } catch {
+        if (!alive) return;
+        setCanCreateVehicle(false);
       }
     })();
 
@@ -229,6 +262,14 @@ export default function VehiclesListPage() {
           />
         </div>
       </div>
+
+      {canCreateVehicle ? (
+        <div style={{ marginTop: 12 }}>
+          <Link href="/vehicles/new" style={addButtonStyle}>
+            + Add Vehicle
+          </Link>
+        </div>
+      ) : null}
 
       {/* List */}
       <div style={{ marginTop: 16, ...cardStyle() }}>
@@ -348,3 +389,15 @@ export default function VehiclesListPage() {
     </main>
   );
 }
+
+const addButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  textDecoration: "none",
+  color: "inherit",
+  fontWeight: 900,
+  border: "1px solid rgba(126,255,167,0.35)",
+  background: "rgba(126,255,167,0.14)",
+  borderRadius: 12,
+  padding: "10px 14px",
+};
