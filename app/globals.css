@@ -9,6 +9,7 @@
   --topnav-bg: rgba(5, 8, 12, 0.84);
   --logo-filter: none;
   --text-scale: 1;
+  --app-max-width: 1100px;
 }
 
 [data-theme="light"] {
@@ -68,7 +69,7 @@ body {
 }
 
 .app-footer-inner {
-  max-width: 1100px;
+  max-width: var(--app-max-width);
   margin: 0 auto;
   padding: 10px 14px;
 }
@@ -98,7 +99,7 @@ body {
 }
 
 .app-topnav-inner {
-  max-width: 1100px;
+  max-width: var(--app-max-width);
   margin: 0 auto;
   padding: calc(36px + env(safe-area-inset-top)) 14px 10px 8px;
   display: flex;
@@ -165,7 +166,7 @@ body {
 
 .home-shell {
   padding: 12px 20px 28px 8px;
-  max-width: 1100px;
+  max-width: var(--app-max-width);
   margin: 0 auto;
 }
 
@@ -197,5 +198,19 @@ body {
   .home-top {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+}
+
+/* Desktop web: widen the app shell so content is less clumped on large monitors. */
+@media (min-width: 1180px) and (hover: hover) and (pointer: fine) {
+  :root {
+    --app-max-width: min(1600px, calc(100vw - 40px));
+  }
+
+  main[style*="max-width:1100px"],
+  main[style*="max-width: 1100px"],
+  div[style*="max-width:1100px"],
+  div[style*="max-width: 1100px"] {
+    max-width: var(--app-max-width) !important;
   }
 }
