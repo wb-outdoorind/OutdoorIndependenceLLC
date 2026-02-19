@@ -44,6 +44,7 @@ type MaintenanceLogRow = {
   created_at: string;
   created_by?: string | null;
   request_id?: string | null;
+  mechanic_self_score?: number | null;
   notes?: string | null;
   status_update?: string | null;
   vehicle_id?: string | null;
@@ -172,6 +173,12 @@ function mechanicScoreBand(score: number) {
   return "Good";
 }
 
+function combineMechanicScore(objectiveScore: number, mechanicSelfScore?: number | null) {
+  if (!Number.isFinite(Number(mechanicSelfScore))) return objectiveScore;
+  const self = clampPercent(Number(mechanicSelfScore));
+  return clampPercent(objectiveScore * 0.8 + self * 0.2);
+}
+
 function legacyAssetAllowance(year: number | null | undefined) {
   if (!Number.isFinite(Number(year))) return 0;
   const nowYear = new Date().getFullYear();
@@ -183,16 +190,17 @@ function legacyAssetAllowance(year: number | null | undefined) {
 }
 
 function maintenanceLogQualityScore(log: MaintenanceLogRow) {
-  let score = 100;
-  if (!log.request_id) score -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
-  if (!(log.status_update ?? "").trim()) score -= 10;
+  let objectiveScore = 100;
+  if (!log.request_id) objectiveScore -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
 
   const notesLength = (log.notes ?? "").trim().length;
-  if (notesLength < 20) score -= 8;
-  if (notesLength === 0) score -= 8;
+  if (notesLength < 20) objectiveScore -= 8;
+  if (notesLength === 0) objectiveScore -= 8;
 
-  return clampPercent(score);
+  const objective = clampPercent(objectiveScore);
+  return combineMechanicScore(objective, log.mechanic_self_score);
 }
 
 function statusChipStyle(overdue: boolean): React.CSSProperties {
@@ -388,11 +396,11 @@ export default function OpsPage({
             .order("created_at", { ascending: false }),
           supabase
             .from("maintenance_logs")
-            .select("id,vehicle_id,created_at,created_by,request_id,notes,status_update")
+            .select("id,vehicle_id,created_at,created_by,request_id,mechanic_self_score,notes,status_update")
             .order("created_at", { ascending: false }),
           supabase
             .from("equipment_maintenance_logs")
-            .select("id,equipment_id,created_at,created_by,request_id,notes,status_update")
+            .select("id,equipment_id,created_at,created_by,request_id,mechanic_self_score,notes,status_update")
             .order("created_at", { ascending: false }),
         ]);
 
@@ -445,6 +453,7 @@ export default function OpsPage({
             created_at: row.created_at,
             created_by: row.created_by ?? null,
             request_id: row.request_id ?? null,
+            mechanic_self_score: row.mechanic_self_score ?? null,
             notes: row.notes ?? null,
             status_update: row.status_update ?? null,
             vehicle_id: row.vehicle_id ?? null,
@@ -455,6 +464,7 @@ export default function OpsPage({
             created_at: row.created_at,
             created_by: row.created_by ?? null,
             request_id: row.request_id ?? null,
+            mechanic_self_score: row.mechanic_self_score ?? null,
             notes: row.notes ?? null,
             status_update: row.status_update ?? null,
             vehicle_id: null,

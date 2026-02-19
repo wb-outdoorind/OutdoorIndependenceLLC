@@ -96,6 +96,7 @@ export default function EquipmentMaintenanceLogPage() {
     initialStoredHours != null ? String(initialStoredHours) : ""
   );
   const [status, setStatus] = useState<MaintenanceLogStatus | "">("");
+  const [mechanicSelfScore, setMechanicSelfScore] = useState("");
   const [notes, setNotes] = useState("");
   const [serviceDate, setServiceDate] = useState(todayYYYYMMDD());
 
@@ -327,6 +328,14 @@ export default function EquipmentMaintenanceLogPage() {
       return alert(`Hours cannot be less than the current stored hours (${currentHours}).`);
     }
 
+    const parsedMechanicSelfScore = mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
+    if (
+      parsedMechanicSelfScore != null &&
+      (!Number.isFinite(parsedMechanicSelfScore) || parsedMechanicSelfScore < 0 || parsedMechanicSelfScore > 100)
+    ) {
+      return alert("Mechanic Self Score must be a number between 0 and 100.");
+    }
+
     const l = Number(laborCost);
     const p = Number(partsCost);
 
@@ -336,6 +345,7 @@ export default function EquipmentMaintenanceLogPage() {
       .insert({
         equipment_id: equipmentId,
         request_id: selectedRequestId || null,
+        mechanic_self_score: parsedMechanicSelfScore,
         hours: h,
         notes: notes.trim()
           ? notes.trim()
@@ -513,6 +523,16 @@ export default function EquipmentMaintenanceLogPage() {
                 <option value="Closed">Closed</option>
                 <option value="In Progress">In Progress</option>
               </select>
+            </Field>
+
+            <Field label="Mechanic Self Score (0-100, optional)">
+              <input
+                value={mechanicSelfScore}
+                onChange={(e) => setMechanicSelfScore(e.target.value)}
+                inputMode="numeric"
+                placeholder="e.g. 78"
+                style={inputStyle}
+              />
             </Field>
 
             <Field label="Linked Request (optional)">

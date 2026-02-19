@@ -36,6 +36,7 @@ type MaintenanceLogPreviewRow = {
   equipment_id: string;
   created_at: string;
   request_id: string | null;
+  mechanic_self_score: number | null;
   status_update: string | null;
   notes: string | null;
 };
@@ -99,6 +100,12 @@ function mechanicScoreBand(score: number) {
   return "Good";
 }
 
+function combineMechanicScore(objectiveScore: number, mechanicSelfScore?: number | null) {
+  if (!Number.isFinite(Number(mechanicSelfScore))) return objectiveScore;
+  const self = clampPercent(Number(mechanicSelfScore));
+  return clampPercent(objectiveScore * 0.8 + self * 0.2);
+}
+
 function legacyAssetAllowance(year: number | null | undefined) {
   if (!Number.isFinite(Number(year))) return 0;
   const nowYear = new Date().getFullYear();
@@ -110,14 +117,15 @@ function legacyAssetAllowance(year: number | null | undefined) {
 }
 
 function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
-  let score = 100;
-  if (!log.request_id) score -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
-  if (!(log.status_update ?? "").trim()) score -= 10;
+  let objectiveScore = 100;
+  if (!log.request_id) objectiveScore -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
   const notesLength = (log.notes ?? "").trim().length;
-  if (notesLength < 20) score -= 8;
-  if (notesLength === 0) score -= 8;
-  return clampPercent(score);
+  if (notesLength < 20) objectiveScore -= 8;
+  if (notesLength === 0) objectiveScore -= 8;
+  const objective = clampPercent(objectiveScore);
+  return combineMechanicScore(objective, log.mechanic_self_score);
 }
 
 function cardStyle(): React.CSSProperties {
@@ -298,7 +306,7 @@ export default function EquipmentDetailPage() {
           .limit(4),
         supabase
           .from("equipment_maintenance_logs")
-          .select("id,equipment_id,created_at,request_id,status_update,notes")
+          .select("id,equipment_id,created_at,request_id,mechanic_self_score,status_update,notes")
           .eq("equipment_id", equipmentIdFromRoute)
           .order("created_at", { ascending: false })
           .limit(20),

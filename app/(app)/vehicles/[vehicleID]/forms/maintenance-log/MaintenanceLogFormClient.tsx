@@ -135,6 +135,7 @@ export default function MaintenanceLogPage() {
   const [title, setTitle] = useState("");
   const [mileage, setMileage] = useState("");
   const [status, setStatus] = useState<MaintenanceLogStatus | "">("");
+  const [mechanicSelfScore, setMechanicSelfScore] = useState("");
   const [notes, setNotes] = useState("");
   const [serviceDate, setServiceDate] = useState(todayYYYYMMDD());
 
@@ -399,6 +400,14 @@ export default function MaintenanceLogPage() {
       );
     }
 
+    const parsedMechanicSelfScore = mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
+    if (
+      parsedMechanicSelfScore != null &&
+      (!Number.isFinite(parsedMechanicSelfScore) || parsedMechanicSelfScore < 0 || parsedMechanicSelfScore > 100)
+    ) {
+      return alert("Mechanic Self Score must be a number between 0 and 100.");
+    }
+
     const l = Number(laborCost);
     const p = Number(partsCost);
 
@@ -408,6 +417,7 @@ export default function MaintenanceLogPage() {
       .insert({
       vehicle_id: vehicleId,
       request_id: requestId || null,
+      mechanic_self_score: parsedMechanicSelfScore,
       mileage: m,
       notes: notes.trim()
         ? notes.trim()
@@ -612,6 +622,16 @@ export default function MaintenanceLogPage() {
                 <option value="Closed">Closed</option>
                 <option value="In Progress">In Progress</option>
               </select>
+            </Field>
+
+            <Field label="Mechanic Self Score (0-100, optional)">
+              <input
+                value={mechanicSelfScore}
+                onChange={(e) => setMechanicSelfScore(e.target.value)}
+                inputMode="numeric"
+                placeholder="e.g. 78"
+                style={inputStyle}
+              />
             </Field>
 
             <Field label="Reset Oil Life?">

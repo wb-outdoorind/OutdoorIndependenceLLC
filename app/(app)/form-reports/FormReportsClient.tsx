@@ -27,6 +27,7 @@ type MaintenanceLogScoreRow = {
   created_at: string;
   created_by: string | null;
   request_id: string | null;
+  mechanic_self_score: number | null;
   notes: string | null;
   status_update: string | null;
 };
@@ -108,16 +109,23 @@ function mechanicScoreBand(score: number) {
   return "Good";
 }
 
+function combineMechanicScore(objectiveScore: number, mechanicSelfScore?: number | null) {
+  if (!Number.isFinite(Number(mechanicSelfScore))) return objectiveScore;
+  const self = clampPercent(Number(mechanicSelfScore));
+  return clampPercent(objectiveScore * 0.8 + self * 0.2);
+}
+
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
-  let score = 100;
-  if (!log.request_id) score -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") score -= 8;
-  if (!(log.status_update ?? "").trim()) score -= 10;
+  let objectiveScore = 100;
+  if (!log.request_id) objectiveScore -= 6;
+  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
 
   const notesLength = (log.notes ?? "").trim().length;
-  if (notesLength < 20) score -= 8;
-  if (notesLength === 0) score -= 8;
-  return clampPercent(score);
+  if (notesLength < 20) objectiveScore -= 8;
+  if (notesLength === 0) objectiveScore -= 8;
+  const objective = clampPercent(objectiveScore);
+  return combineMechanicScore(objective, log.mechanic_self_score);
 }
 
 export default function FormReportsClient() {
@@ -146,12 +154,12 @@ export default function FormReportsClient() {
           .limit(1000),
         supabase
           .from("maintenance_logs")
-          .select("id,created_at,created_by,request_id,notes,status_update")
+          .select("id,created_at,created_by,request_id,mechanic_self_score,notes,status_update")
           .order("created_at", { ascending: false })
           .limit(1000),
         supabase
           .from("equipment_maintenance_logs")
-          .select("id,created_at,created_by,request_id,notes,status_update")
+          .select("id,created_at,created_by,request_id,mechanic_self_score,notes,status_update")
           .order("created_at", { ascending: false })
           .limit(1000),
       ]);
