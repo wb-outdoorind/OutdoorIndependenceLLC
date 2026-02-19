@@ -48,6 +48,16 @@ function normalizeVehicleType(
   return "truck"; // safe default
 }
 
+function canCreateVehicleRole(role: string | null | undefined) {
+  const normalized = (role ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  return (
+    normalized === "owner" ||
+    normalized === "mechanic" ||
+    normalized === "office_admin" ||
+    normalized === "admin"
+  );
+}
+
 /* ======================
    Styles
 ====================== */
@@ -144,6 +154,14 @@ export default function VehiclesListPage() {
         const { data: authData } = await supabase.auth.getUser();
         if (!alive || !authData.user) return;
 
+        const roleFromMetadata =
+          (authData.user.user_metadata?.role as string | undefined) ??
+          (authData.user.app_metadata?.role as string | undefined);
+        if (canCreateVehicleRole(roleFromMetadata)) {
+          setCanCreateVehicle(true);
+          return;
+        }
+
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -152,9 +170,7 @@ export default function VehiclesListPage() {
 
         if (!alive) return;
         const role = (profile?.role as Role | undefined) ?? "employee";
-        setCanCreateVehicle(
-          role === "owner" || role === "office_admin" || role === "mechanic"
-        );
+        setCanCreateVehicle(canCreateVehicleRole(role));
       } catch {
         if (!alive) return;
         setCanCreateVehicle(false);
