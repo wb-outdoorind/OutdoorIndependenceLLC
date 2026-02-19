@@ -44,8 +44,16 @@ type MaintenanceRequestPreviewRow = {
   description: string | null;
 };
 
+type MaintenanceLogPreviewRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  status_update: string | null;
+  notes: string | null;
+};
+
 type HistoryPreviewItem = {
-  type: "Maintenance Request";
+  type: "Maintenance Request" | "Maintenance Log" | "Vehicle PM";
   createdAt: string;
   title: string;
   status?: string;
@@ -220,7 +228,9 @@ export default function VehicleDetailPage() {
   const assetParam = (searchParams.get("asset") || "").trim();
   const plateParam = (searchParams.get("plate") || "").trim();
   const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
+  const [logPreviewRows, setLogPreviewRows] = useState<MaintenanceLogPreviewRow[]>([]);
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
+  const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [vehicleLoading, setVehicleLoading] = useState(true);
@@ -392,24 +402,44 @@ export default function VehicleDetailPage() {
     (async () => {
       const supabase = createSupabaseBrowser();
       setRequestPreviewError(null);
-      const { data, error } = await supabase
-        .from("maintenance_requests")
-        .select("id, created_at, status, urgency, system_affected, description, vehicle_id")
-        .eq("vehicle_id", params.vehicleID)
-        .order("created_at", { ascending: false })
-        .limit(4);
+      setLogPreviewError(null);
+
+      const [requestsRes, logsRes] = await Promise.all([
+        supabase
+          .from("maintenance_requests")
+          .select("id, created_at, status, urgency, system_affected, description, vehicle_id")
+          .eq("vehicle_id", params.vehicleID)
+          .order("created_at", { ascending: false })
+          .limit(8),
+        supabase
+          .from("maintenance_logs")
+          .select("id, vehicle_id, created_at, status_update, notes")
+          .eq("vehicle_id", params.vehicleID)
+          .order("created_at", { ascending: false })
+          .limit(8),
+      ]);
 
       if (!alive) return;
-      if (error || !data) {
-        if (error) {
-          console.error("Vehicle preview requests load error:", error);
-          setRequestPreviewError(error.message);
+
+      if (requestsRes.error || !requestsRes.data) {
+        if (requestsRes.error) {
+          console.error("Vehicle preview requests load error:", requestsRes.error);
+          setRequestPreviewError(requestsRes.error.message);
         }
         setRequestPreviewRows([]);
-        return;
+      } else {
+        setRequestPreviewRows(requestsRes.data as MaintenanceRequestPreviewRow[]);
       }
 
-      setRequestPreviewRows(data as MaintenanceRequestPreviewRow[]);
+      if (logsRes.error || !logsRes.data) {
+        if (logsRes.error) {
+          console.error("Vehicle preview logs load error:", logsRes.error);
+          setLogPreviewError(logsRes.error.message);
+        }
+        setLogPreviewRows([]);
+      } else {
+        setLogPreviewRows(logsRes.data as MaintenanceLogPreviewRow[]);
+      }
     })();
 
     return () => {
@@ -444,10 +474,10 @@ export default function VehicleDetailPage() {
   const oilLifePercent = computeOilLifePercent(currentMileage, lastOilChangeMileage);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
-    return requestPreviewRows.map((r) => {
+    const requestItems = requestPreviewRows.map((r) => {
       const parsed = parseTitleAndDescription(r.description);
       return {
-        type: "Maintenance Request",
+        type: "Maintenance Request" as const,
         createdAt: r.created_at,
         title:
           parsed.title ||
@@ -456,7 +486,27 @@ export default function VehicleDetailPage() {
         notes: parsed.description || undefined,
       };
     });
-  }, [requestPreviewRows]);
+
+    const logItems = logPreviewRows.map((r) => ({
+      type: "Maintenance Log" as const,
+      createdAt: r.created_at,
+      title: r.status_update?.trim() || "Maintenance Log",
+      status: undefined,
+      notes: r.notes?.trim() || undefined,
+    }));
+
+    const pmItems = pmRecords.map((r) => ({
+      type: "Vehicle PM" as const,
+      createdAt: r.createdAt,
+      title: "Preventative Maintenance",
+      status: r.oilChangePerformed ? "Oil changed" : "Inspection complete",
+      notes: r.notes?.trim() || undefined,
+    }));
+
+    return [...requestItems, ...logItems, ...pmItems]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 4);
+  }, [requestPreviewRows, logPreviewRows, pmRecords]);
 
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
@@ -599,17 +649,17 @@ export default function VehicleDetailPage() {
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>Recent Maintenance History</div>
-          <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance requests</div>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance events</div>
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {requestPreviewError ? (
+          {requestPreviewError || logPreviewError ? (
             <div style={{ opacity: 0.9, color: "#ff9d9d" }}>
-              Failed to load maintenance requests preview.
+              Failed to load all maintenance history preview sources.
             </div>
           ) : historyPreview.length === 0 ? (
             <div style={{ opacity: 0.75 }}>
-              No maintenance requests yet.
+              No maintenance history yet.
             </div>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
