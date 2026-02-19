@@ -253,12 +253,12 @@ export default function VehiclesListPage() {
           </div>
         </div>
 
-        <div style={{ minWidth: 260 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by ID, name, make, model, year..."
-            style={inputStyle()}
+            style={{ ...inputStyle(), width: 320, maxWidth: "100%" }}
           />
         </div>
       </div>
