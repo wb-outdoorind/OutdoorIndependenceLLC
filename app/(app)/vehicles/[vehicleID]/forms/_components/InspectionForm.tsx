@@ -394,13 +394,17 @@ export default function InspectionForm({
     };
 
     const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from("inspections").insert({
-      vehicle_id: vehicleId,
-      inspection_type: type === "pre-trip" ? "Pre-Trip" : "Post-Trip",
-      checklist,
-      overall_status: inspectionStatus,
-      mileage: m,
-    });
+    const { data: insertedInspection, error } = await supabase
+      .from("inspections")
+      .insert({
+        vehicle_id: vehicleId,
+        inspection_type: type === "pre-trip" ? "Pre-Trip" : "Post-Trip",
+        checklist,
+        overall_status: inspectionStatus,
+        mileage: m,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Inspection insert failed:", error);
@@ -409,6 +413,21 @@ export default function InspectionForm({
     }
 
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+
+    if (insertedInspection?.id) {
+      try {
+        await fetch("/api/form-reports/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            formType: "inspection",
+            recordId: insertedInspection.id,
+          }),
+        });
+      } catch (gradeError) {
+        console.error("Auto grading failed for inspection:", gradeError);
+      }
+    }
 
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }

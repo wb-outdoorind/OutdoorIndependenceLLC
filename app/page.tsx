@@ -4,7 +4,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const tiles = [
+const baseTiles = [
   { title: "Scan QR Code", href: "/scan", desc: "Scan an asset QR code to pull it up fast" },
   { title: "Vehicles", href: "/vehicles", desc: "Vehicle info, inspections, and maintenance" },
   { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
@@ -12,7 +12,6 @@ const tiles = [
   { title: "Maintenance Center", href: "/maintenance", desc: "Queue, PM planning, downtime, and maintenance operations" },
   { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
   { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
-
 ];
 
 type InventoryLowStockRow = {
@@ -22,8 +21,20 @@ type InventoryLowStockRow = {
 
 export default async function Home() {
   let lowStockCount = 0;
+  let role: string | null = null;
+  let tiles = [...baseTiles];
   try {
     const supabase = await createServerSupabase();
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData.user?.id) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      role = (profile?.role as string | undefined) ?? null;
+    }
+
     const { data, error } = await supabase
       .from("inventory_items")
       .select("quantity,minimum_quantity")
@@ -35,6 +46,17 @@ export default async function Home() {
       lowStockCount = ((data ?? []) as InventoryLowStockRow[]).filter(
         (item) => Number(item.quantity) <= Number(item.minimum_quantity)
       ).length;
+    }
+
+    if (role === "owner" || role === "operations_manager") {
+      tiles = [
+        ...tiles,
+        {
+          title: "Form Reports",
+          href: "/form-reports",
+          desc: "Auto-graded form quality, teammate scores, and accountability flags",
+        },
+      ];
     }
   } catch (error) {
     console.error("[dashboard] unexpected low stock count error:", error);

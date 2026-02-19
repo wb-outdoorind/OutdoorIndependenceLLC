@@ -180,16 +180,20 @@ export default function MaintenanceRequestPage() {
       .filter(Boolean)
       .join("\n");
 
-    const { error } = await supabase.from("maintenance_requests").insert({
-      vehicle_id: vehicleId,
-      status,
-      urgency,
-      system_affected: systemAffected,
-      drivability: drivabilityStatus,
-      unit_status: unitStatus,
-      issue_identified_during: issueIdentifiedDuring,
-      description: combinedDescription,
-    });
+    const { data: insertedRequest, error } = await supabase
+      .from("maintenance_requests")
+      .insert({
+        vehicle_id: vehicleId,
+        status,
+        urgency,
+        system_affected: systemAffected,
+        drivability: drivabilityStatus,
+        unit_status: unitStatus,
+        issue_identified_during: issueIdentifiedDuring,
+        description: combinedDescription,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       alert(error.message);
@@ -197,6 +201,21 @@ export default function MaintenanceRequestPage() {
     }
 
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+
+    if (insertedRequest?.id) {
+      try {
+        await fetch("/api/form-reports/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            formType: "vehicle_maintenance_request",
+            recordId: insertedRequest.id,
+          }),
+        });
+      } catch (gradeError) {
+        console.error("Auto grading failed for vehicle maintenance request:", gradeError);
+      }
+    }
 
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }

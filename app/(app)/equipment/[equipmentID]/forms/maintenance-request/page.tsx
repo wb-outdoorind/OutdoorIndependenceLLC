@@ -165,16 +165,20 @@ export default function EquipmentMaintenanceRequestPage() {
       .join("\n");
 
     const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from("equipment_maintenance_requests").insert({
-      equipment_id: equipmentId,
-      status,
-      urgency,
-      system_affected: systemAffected,
-      drivability: drivabilityStatus,
-      unit_status: unitStatus,
-      issue_identified_during: issueIdentifiedDuring,
-      description: combinedDescription,
-    });
+    const { data: insertedRequest, error } = await supabase
+      .from("equipment_maintenance_requests")
+      .insert({
+        equipment_id: equipmentId,
+        status,
+        urgency,
+        system_affected: systemAffected,
+        drivability: drivabilityStatus,
+        unit_status: unitStatus,
+        issue_identified_during: issueIdentifiedDuring,
+        description: combinedDescription,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Equipment maintenance request insert failed:", error);
@@ -183,6 +187,22 @@ export default function EquipmentMaintenanceRequestPage() {
     }
 
     localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
+
+    if (insertedRequest?.id) {
+      try {
+        await fetch("/api/form-reports/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            formType: "equipment_maintenance_request",
+            recordId: insertedRequest.id,
+          }),
+        });
+      } catch (gradeError) {
+        console.error("Auto grading failed for equipment maintenance request:", gradeError);
+      }
+    }
+
     router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
   }
 
