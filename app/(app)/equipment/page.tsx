@@ -28,6 +28,36 @@ function equipmentHoursKey(equipmentId: string) {
   return `equipment:${equipmentId}:hours`;
 }
 
+function pickCategory(typeValue: string, nameValue: string, idValue: string) {
+  const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
+  if (hay.includes("truck")) return "Truck";
+  if (hay.includes("trailer")) return "Trailer";
+  if (hay.includes("mower")) return "Mower";
+  if (hay.includes("applicator") || hay.includes("sprayer")) return "Applicator";
+  if (hay.includes("skid")) return "SkidSteer";
+  return "Equipment";
+}
+
+function toPascalToken(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]+/g, " ")
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join("");
+}
+
+function buildConciseEquipmentId(row: EquipmentRow, indexByGroup: Record<string, number>) {
+  const category = pickCategory(row.equipment_type ?? "", row.name ?? "", row.id);
+  const rawType = toPascalToken(row.equipment_type ?? row.name ?? row.id) || "Unit";
+  const typeWithoutCategory = rawType.replace(new RegExp(`^${category}`, "i"), "") || rawType;
+  const groupKey = `${category}|${typeWithoutCategory}`;
+  indexByGroup[groupKey] = (indexByGroup[groupKey] ?? 0) + 1;
+  return `${category}_${typeWithoutCategory}_${indexByGroup[groupKey]}`;
+}
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -147,6 +177,15 @@ export default function EquipmentListPage() {
     });
   }, [rows, search, statusFilter]);
 
+  const conciseIdByEquipmentId = useMemo(() => {
+    const map: Record<string, string> = {};
+    const indexByGroup: Record<string, number> = {};
+    for (const row of rows) {
+      map[row.id] = buildConciseEquipmentId(row, indexByGroup);
+    }
+    return map;
+  }, [rows]);
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <div
@@ -233,8 +272,9 @@ export default function EquipmentListPage() {
                   >
                     <div>
                       <div style={{ fontWeight: 900, fontSize: 16 }}>
-                        {r.id} - {r.name}
+                        {conciseIdByEquipmentId[r.id] ?? r.id} - {r.name}
                       </div>
+                      <div style={{ marginTop: 3, opacity: 0.6, fontSize: 12 }}>Original ID: {r.id}</div>
                       <div style={{ marginTop: 4, opacity: 0.8, fontSize: 13 }}>
                         Type: {r.equipment_type ?? "-"} • Status: {r.status ?? "-"}
                       </div>
