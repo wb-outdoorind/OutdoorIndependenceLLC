@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
+import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
 type Role = "owner" | "office_admin" | "mechanic" | "employee";
@@ -73,6 +74,7 @@ function parseTitle(description: string | null) {
 
 export default function EquipmentMaintenanceLogPage() {
   const router = useRouter();
+  useFormExitGuard();
   const params = useParams<{ equipmentID?: string }>();
   const sp = useSearchParams();
 
@@ -89,7 +91,7 @@ export default function EquipmentMaintenanceLogPage() {
   const [hours, setHours] = useState(() =>
     initialStoredHours != null ? String(initialStoredHours) : ""
   );
-  const [status, setStatus] = useState<MaintenanceLogStatus>("Closed");
+  const [status, setStatus] = useState<MaintenanceLogStatus | "">("");
   const [notes, setNotes] = useState("");
   const [serviceDate, setServiceDate] = useState(todayYYYYMMDD());
 
@@ -307,6 +309,7 @@ export default function EquipmentMaintenanceLogPage() {
     const h = Number(hours);
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(h) || h < 0) return alert("Please enter valid hours.");
+    if (!status) return alert("Please select a status.");
 
     if (currentHours != null && h < currentHours) {
       return alert(`Hours cannot be less than the current stored hours (${currentHours}).`);
@@ -461,6 +464,7 @@ export default function EquipmentMaintenanceLogPage() {
 
             <Field label="Status">
               <select value={status} onChange={(e) => setStatus(e.target.value as MaintenanceLogStatus)} style={inputStyle}>
+                <option value="">Select...</option>
                 <option value="Closed">Closed</option>
                 <option value="In Progress">In Progress</option>
               </select>
@@ -681,7 +685,14 @@ export default function EquipmentMaintenanceLogPage() {
             Save Maintenance Log
           </button>
 
-          <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle}>Discard & Return</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+            }}
+            style={secondaryButtonStyle}
+          >Discard & Return</button>
         </div>
       </form>
     </main>

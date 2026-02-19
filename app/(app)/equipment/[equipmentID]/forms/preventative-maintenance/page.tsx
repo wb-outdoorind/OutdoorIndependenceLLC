@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
-type Choice = "pass" | "fail" | "na";
+type Choice = "" | "pass" | "fail" | "na";
 type TrailerChoice = "" | "pass" | "fail" | "na";
 type MowerChoice = "" | "pass" | "fail" | "na";
-type TrailerPmResult = "pass" | "pass_with_repairs" | "fail_out_of_service";
-type TrailerTypeValue = "dump_trailer" | "chipper_trailer" | "enclosed_trailer" | "flatbed_trailer" | "other_trailer";
-type YesNo = "yes" | "no";
+type TrailerPmResult = "" | "pass" | "pass_with_repairs" | "fail_out_of_service";
+type TrailerTypeValue = "" | "dump_trailer" | "chipper_trailer" | "enclosed_trailer" | "flatbed_trailer" | "other_trailer";
+type YesNo = "" | "yes" | "no";
 
 type EquipmentRow = {
   id: string;
@@ -265,15 +266,6 @@ function trailerSectionsForType(trailerType: TrailerTypeValue): TrailerSection[]
   return sections;
 }
 
-function inferTrailerType(value: string | null | undefined): TrailerTypeValue {
-  const v = (value ?? "").toLowerCase();
-  if (v.includes("dump")) return "dump_trailer";
-  if (v.includes("chipper")) return "chipper_trailer";
-  if (v.includes("enclosed")) return "enclosed_trailer";
-  if (v.includes("flatbed")) return "flatbed_trailer";
-  return "other_trailer";
-}
-
 function isTrailerEquipmentType(value: string | null | undefined) {
   return (value ?? "").toLowerCase().includes("trailer");
 }
@@ -369,6 +361,7 @@ function ChoiceToggle({ value, onChange }: { value: Choice; onChange: (v: Choice
 
 export default function EquipmentPreventativeMaintenancePage() {
   const router = useRouter();
+  useFormExitGuard();
   const params = useParams<{ equipmentID: string }>();
   const equipmentId = decodeURIComponent(params.equipmentID);
 
@@ -382,9 +375,9 @@ export default function EquipmentPreventativeMaintenancePage() {
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const [inspectionDate, setInspectionDate] = useState(todayIso);
-  const [trailerType, setTrailerType] = useState<TrailerTypeValue>("other_trailer");
+  const [trailerType, setTrailerType] = useState<TrailerTypeValue>("");
   const [inspector, setInspector] = useState("");
-  const [trailerPmResult, setTrailerPmResult] = useState<TrailerPmResult>("pass");
+  const [trailerPmResult, setTrailerPmResult] = useState<TrailerPmResult>("");
   const [trailerNotes, setTrailerNotes] = useState("");
   const [signature, setSignature] = useState("");
   const [nextPmDueDate, setNextPmDueDate] = useState(() => addMonthsIso(todayIso, 4));
@@ -398,10 +391,10 @@ export default function EquipmentPreventativeMaintenancePage() {
   const [employee, setEmployee] = useState("");
   const [oilFilterInspectDate, setOilFilterInspectDate] = useState("");
   const [oilFilterInspectHours, setOilFilterInspectHours] = useState("");
-  const [oilChangeNeeded, setOilChangeNeeded] = useState<YesNo>("no");
+  const [oilChangeNeeded, setOilChangeNeeded] = useState<YesNo>("");
   const [newOilFilterDate, setNewOilFilterDate] = useState("");
   const [newOilFilterHours, setNewOilFilterHours] = useState("");
-  const [beltChangeNeeded, setBeltChangeNeeded] = useState<YesNo>("no");
+  const [beltChangeNeeded, setBeltChangeNeeded] = useState<YesNo>("");
   const [mowerNotes, setMowerNotes] = useState("");
   const [employeeSignature, setEmployeeSignature] = useState("");
   const [employeeDate, setEmployeeDate] = useState(todayIso);
@@ -419,7 +412,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       return acc;
     }, {})
   );
-  const [applicatorPmResult, setApplicatorPmResult] = useState<TrailerPmResult>("pass");
+  const [applicatorPmResult, setApplicatorPmResult] = useState<TrailerPmResult>("");
   const [applicatorNotes, setApplicatorNotes] = useState("");
   const [applicatorSignature, setApplicatorSignature] = useState("");
   const [applicatorNextPmDue, setApplicatorNextPmDue] = useState(() => addMonthsIso(todayIso, 4));
@@ -458,7 +451,6 @@ export default function EquipmentPreventativeMaintenancePage() {
       }
 
       setEquipment(eq);
-      setTrailerType(inferTrailerType(eq.equipment_type));
       if (typeof eq.current_hours === "number") setHours(String(eq.current_hours));
 
       if (isTrailerEquipmentType(eq.equipment_type)) {
@@ -513,7 +505,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       setItems(normalized);
       setResultState(
         normalized.reduce<Record<string, Choice>>((acc, item) => {
-          acc[item.key] = "pass";
+          acc[item.key] = "";
           return acc;
         }, {})
       );
@@ -527,6 +519,15 @@ export default function EquipmentPreventativeMaintenancePage() {
       alive = false;
     };
   }, [equipmentId]);
+
+  useEffect(() => {
+    void (async () => {
+      const name = await getSignedInDisplayName();
+      if (!name) return;
+      setInspector((prev) => (prev.trim() ? prev : name));
+      setEmployee((prev) => (prev.trim() ? prev : name));
+    })();
+  }, []);
 
   const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
@@ -577,6 +578,10 @@ export default function EquipmentPreventativeMaintenancePage() {
         alert("Inspection date is required.");
         return;
       }
+      if (!trailerType) {
+        alert("Trailer type is required.");
+        return;
+      }
       if (!inspector.trim()) {
         alert("Inspector is required.");
         return;
@@ -591,6 +596,10 @@ export default function EquipmentPreventativeMaintenancePage() {
       }
       if (!nextPmDueDate) {
         alert("Next PM Due Date is required.");
+        return;
+      }
+      if (!trailerPmResult) {
+        alert("Trailer PM Result is required.");
         return;
       }
 
@@ -664,6 +673,10 @@ export default function EquipmentPreventativeMaintenancePage() {
       }
       if (!leadDate) {
         alert("Lead date is required.");
+        return;
+      }
+      if (!oilChangeNeeded || !beltChangeNeeded) {
+        alert("Please complete all required yes/no selections.");
         return;
       }
 
@@ -753,6 +766,10 @@ export default function EquipmentPreventativeMaintenancePage() {
         alert("Next PM Due is required.");
         return;
       }
+      if (!applicatorPmResult) {
+        alert("Equipment PM Result is required.");
+        return;
+      }
 
       const summary = applicatorFailCount > 0 ? `${applicatorFailCount} failed item(s)` : "All applicator PM checks passed";
       const { error } = await supabase.from("equipment_pm_events").insert({
@@ -791,6 +808,11 @@ export default function EquipmentPreventativeMaintenancePage() {
 
     if (hours.trim() && (!Number.isFinite(parsedHours) || (parsedHours ?? 0) < 0)) {
       alert("Enter valid hours.");
+      return;
+    }
+    const missingResult = items.find((item) => !resultState[item.key]);
+    if (missingResult) {
+      alert("Please complete all required checklist items.");
       return;
     }
 
@@ -872,6 +894,7 @@ export default function EquipmentPreventativeMaintenancePage() {
               </Field>
               <Field label="Trailer Type *">
                 <select value={trailerType} onChange={(e) => setTrailerType(e.target.value as TrailerTypeValue)} style={inputStyle()} required>
+                  <option value="">Select...</option>
                   <option value="dump_trailer">Dump Trailer</option>
                   <option value="chipper_trailer">Chipper Trailer</option>
                   <option value="enclosed_trailer">Enclosed Trailer</option>
@@ -914,6 +937,7 @@ export default function EquipmentPreventativeMaintenancePage() {
             <div style={gridStyle()}>
               <Field label="Trailer PM Result *">
                 <select value={trailerPmResult} onChange={(e) => setTrailerPmResult(e.target.value as TrailerPmResult)} style={inputStyle()} required>
+                  <option value="">Select...</option>
                   <option value="pass">Pass</option>
                   <option value="pass_with_repairs">Pass with repairs needed</option>
                   <option value="fail_out_of_service">Fail - out of service</option>
@@ -967,7 +991,14 @@ export default function EquipmentPreventativeMaintenancePage() {
             <button type="submit" style={buttonStyle()}>
               Save Trailer PM Inspection
             </button>
-            <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmLeaveForm()) return;
+                router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+              }}
+              style={secondaryButtonStyle()}
+            >Discard & Return</button>
           </div>
         </form>
       ) : null}
@@ -1032,6 +1063,7 @@ export default function EquipmentPreventativeMaintenancePage() {
               </Field>
               <Field label="Oil change needed?">
                 <select value={oilChangeNeeded} onChange={(e) => setOilChangeNeeded(e.target.value as YesNo)} style={inputStyle()}>
+                  <option value="">Select...</option>
                   <option value="yes">Yes</option>
                   <option value="no">No</option>
                 </select>
@@ -1088,6 +1120,7 @@ export default function EquipmentPreventativeMaintenancePage() {
               </Field>
               <Field label="Belt change needed?">
                 <select value={beltChangeNeeded} onChange={(e) => setBeltChangeNeeded(e.target.value as YesNo)} style={inputStyle()}>
+                  <option value="">Select...</option>
                   <option value="yes">Yes</option>
                   <option value="no">No</option>
                 </select>
@@ -1167,7 +1200,14 @@ export default function EquipmentPreventativeMaintenancePage() {
             <button type="submit" style={buttonStyle()}>
               Save Mower PM Checklist
             </button>
-            <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmLeaveForm()) return;
+                router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+              }}
+              style={secondaryButtonStyle()}
+            >Discard & Return</button>
           </div>
         </form>
       ) : null}
@@ -1222,7 +1262,8 @@ export default function EquipmentPreventativeMaintenancePage() {
             <h2 style={{ marginTop: 0, marginBottom: 10 }}>Final Assessment</h2>
             <div style={gridStyle()}>
               <Field label="Equipment PM Result">
-                <select value={applicatorPmResult} onChange={(e) => setApplicatorPmResult(e.target.value as TrailerPmResult)} style={inputStyle()}>
+                <select value={applicatorPmResult} onChange={(e) => setApplicatorPmResult(e.target.value as TrailerPmResult)} style={inputStyle()} required>
+                  <option value="">Select...</option>
                   <option value="pass">Pass</option>
                   <option value="pass_with_repairs">Pass with repairs needed</option>
                   <option value="fail_out_of_service">Fail - out of service</option>
@@ -1271,7 +1312,14 @@ export default function EquipmentPreventativeMaintenancePage() {
             <button type="submit" style={buttonStyle()}>
               Save Applicator PM Inspection
             </button>
-            <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmLeaveForm()) return;
+                router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+              }}
+              style={secondaryButtonStyle()}
+            >Discard & Return</button>
           </div>
         </form>
       ) : null}
@@ -1312,7 +1360,7 @@ export default function EquipmentPreventativeMaintenancePage() {
                 >
                   <div style={{ fontWeight: 800, marginBottom: 8 }}>{item.label}</div>
                   <ChoiceToggle
-                    value={resultState[item.key] ?? "pass"}
+                    value={resultState[item.key] ?? ""}
                     onChange={(v) => setResultState((prev) => ({ ...prev, [item.key]: v }))}
                   />
                 </div>
@@ -1344,7 +1392,14 @@ export default function EquipmentPreventativeMaintenancePage() {
             <button type="submit" style={buttonStyle()}>
               Save PM Event
             </button>
-            <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmLeaveForm()) return;
+                router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+              }}
+              style={secondaryButtonStyle()}
+            >Discard & Return</button>
           </div>
         </form>
       ) : null}

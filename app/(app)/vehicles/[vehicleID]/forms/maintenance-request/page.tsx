@@ -3,6 +3,7 @@
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -64,6 +65,7 @@ function todayYYYYMMDD() {
 
 export default function MaintenanceRequestPage() {
   const router = useRouter();
+  useFormExitGuard();
 
   // ✅ folder: app/(app)/vehicles/[vehicleID]/maintenance-request/page.tsx
   const params = useParams<{ vehicleID?: string }>();
@@ -77,16 +79,16 @@ export default function MaintenanceRequestPage() {
   const [employee, setEmployee] = useState("");
 
   const [issueIdentifiedDuring, setIssueIdentifiedDuring] =
-    useState<IssueIdentifiedDuring>("During Operation");
+    useState<IssueIdentifiedDuring | "">("");
 
   const [drivabilityStatus, setDrivabilityStatus] =
-    useState<DrivabilityStatus>("Yes – Drivable");
+    useState<DrivabilityStatus | "">("");
 
-  const [unitStatus, setUnitStatus] = useState<UnitStatus>("Active");
+  const [unitStatus, setUnitStatus] = useState<UnitStatus | "">("");
   const [locationNote, setLocationNote] = useState("");
 
-  const [systemAffected, setSystemAffected] = useState<SystemAffected>("Other");
-  const [urgency, setUrgency] = useState<Urgency>("Medium");
+  const [systemAffected, setSystemAffected] = useState<SystemAffected | "">("");
+  const [urgency, setUrgency] = useState<Urgency | "">("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -95,11 +97,11 @@ export default function MaintenanceRequestPage() {
   const [mileage, setMileage] = useState("");
 
   const [mitigationApplied, setMitigationApplied] =
-    useState<TriState>("Not sure");
+    useState<TriState | "">("");
   const [affectsNextShift, setAffectsNextShift] =
-    useState<TriState>("Not sure");
+    useState<TriState | "">("");
   const [downtimeExpected, setDowntimeExpected] =
-    useState<TriState>("Not sure");
+    useState<TriState | "">("");
 
   // ✅ load transfer data safely
   useEffect(() => {
@@ -128,6 +130,14 @@ export default function MaintenanceRequestPage() {
     };
   }, [vehicleId]);
 
+  useEffect(() => {
+    void (async () => {
+      const name = await getSignedInDisplayName();
+      if (!name) return;
+      setEmployee((prev) => (prev.trim() ? prev : name));
+    })();
+  }, []);
+
   const suggestedTitle = useMemo(() => {
     const base = `${systemAffected}`;
     const end = urgency === "Urgent" ? " (URGENT)" : "";
@@ -143,6 +153,11 @@ export default function MaintenanceRequestPage() {
     if (!requestDate) return alert("Request Date is required.");
     if (!employee.trim()) return alert("Teammate is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
+    if (!issueIdentifiedDuring) return alert("Issue Identified During is required.");
+    if (!drivabilityStatus) return alert("Drivability / Operational Status is required.");
+    if (!unitStatus) return alert("Unit Status is required.");
+    if (!systemAffected) return alert("System Affected / Issue Type is required.");
+    if (!urgency) return alert("Urgency Level is required.");
 
     const finalTitle = title.trim() ? title.trim() : suggestedTitle;
     if (!finalTitle) return alert("Title is required.");
@@ -267,6 +282,7 @@ export default function MaintenanceRequestPage() {
                 }
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Pre-Trip Inspection</option>
                 <option>Post-Trip Inspection</option>
                 <option>During Operation</option>
@@ -283,6 +299,7 @@ export default function MaintenanceRequestPage() {
                 }
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Yes – Drivable</option>
                 <option>Limited – Operate with caution</option>
                 <option>No – Out of Service</option>
@@ -295,6 +312,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) => setUnitStatus(e.target.value as UnitStatus)}
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Active</option>
                 <option>Red Tagged</option>
                 <option>Parked in Yard</option>
@@ -327,6 +345,7 @@ export default function MaintenanceRequestPage() {
                 }
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Engine</option>
                 <option>Electrical</option>
                 <option>Hydraulics</option>
@@ -345,6 +364,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) => setUrgency(e.target.value as Urgency)}
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Low</option>
                 <option>Medium</option>
                 <option>High</option>
@@ -394,6 +414,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) => setMitigationApplied(e.target.value as TriState)}
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -406,6 +427,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) => setAffectsNextShift(e.target.value as TriState)}
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -418,6 +440,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) => setDowntimeExpected(e.target.value as TriState)}
                 style={inputStyle()}
               >
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -434,7 +457,10 @@ export default function MaintenanceRequestPage() {
 
           <button
             type="button"
-            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+            }}
             style={secondaryButtonStyle()}
           >Discard & Return</button>
         </div>

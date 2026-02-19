@@ -3,6 +3,7 @@
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -61,6 +62,7 @@ function todayYYYYMMDD() {
 
 export default function EquipmentMaintenanceRequestPage() {
   const router = useRouter();
+  useFormExitGuard();
   const params = useParams<{ equipmentID?: string }>();
   const equipmentId = params?.equipmentID ? decodeURIComponent(params.equipmentID) : "";
 
@@ -72,22 +74,22 @@ export default function EquipmentMaintenanceRequestPage() {
   const [hours, setHours] = useState("");
 
   const [issueIdentifiedDuring, setIssueIdentifiedDuring] =
-    useState<IssueIdentifiedDuring>("During Operation");
+    useState<IssueIdentifiedDuring | "">("");
   const [drivabilityStatus, setDrivabilityStatus] =
-    useState<DrivabilityStatus>("Yes – Drivable");
-  const [unitStatus, setUnitStatus] = useState<UnitStatus>("Active");
+    useState<DrivabilityStatus | "">("");
+  const [unitStatus, setUnitStatus] = useState<UnitStatus | "">("");
   const [locationNote, setLocationNote] = useState("");
 
-  const [systemAffected, setSystemAffected] = useState<SystemAffected>("Other");
-  const [urgency, setUrgency] = useState<Urgency>("Medium");
+  const [systemAffected, setSystemAffected] = useState<SystemAffected | "">("");
+  const [urgency, setUrgency] = useState<Urgency | "">("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
   const [status] = useState<RequestStatus>("Open");
-  const [mitigationApplied, setMitigationApplied] = useState<TriState>("Not sure");
-  const [affectsNextShift, setAffectsNextShift] = useState<TriState>("Not sure");
-  const [downtimeExpected, setDowntimeExpected] = useState<TriState>("Not sure");
+  const [mitigationApplied, setMitigationApplied] = useState<TriState | "">("");
+  const [affectsNextShift, setAffectsNextShift] = useState<TriState | "">("");
+  const [downtimeExpected, setDowntimeExpected] = useState<TriState | "">("");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -113,6 +115,14 @@ export default function EquipmentMaintenanceRequestPage() {
     };
   }, [equipmentId]);
 
+  useEffect(() => {
+    void (async () => {
+      const name = await getSignedInDisplayName();
+      if (!name) return;
+      setEmployee((prev) => (prev.trim() ? prev : name));
+    })();
+  }, []);
+
   const suggestedTitle = useMemo(() => {
     const base = `${systemAffected}`;
     const end = urgency === "Urgent" ? " (URGENT)" : "";
@@ -129,6 +139,11 @@ export default function EquipmentMaintenanceRequestPage() {
     if (!requestDate) return alert("Request Date is required.");
     if (!employee.trim()) return alert("Teammate is required.");
     if (!Number.isFinite(h) || h < 0) return alert("Enter valid hours.");
+    if (!issueIdentifiedDuring) return alert("Issue Identified During is required.");
+    if (!drivabilityStatus) return alert("Operational Status is required.");
+    if (!unitStatus) return alert("Unit Status is required.");
+    if (!systemAffected) return alert("System Affected is required.");
+    if (!urgency) return alert("Urgency is required.");
 
     const finalTitle = title.trim() ? title.trim() : suggestedTitle;
     if (!description.trim()) return alert("Description of issue is required.");
@@ -218,6 +233,7 @@ export default function EquipmentMaintenanceRequestPage() {
           <div style={gridStyle()}>
             <Field label="Issue Identified During *">
               <select value={issueIdentifiedDuring} onChange={(e) => setIssueIdentifiedDuring(e.target.value as IssueIdentifiedDuring)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Pre-Use Inspection</option>
                 <option>Post-Use Inspection</option>
                 <option>During Operation</option>
@@ -228,6 +244,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Operational Status *">
               <select value={drivabilityStatus} onChange={(e) => setDrivabilityStatus(e.target.value as DrivabilityStatus)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Yes – Drivable</option>
                 <option>Limited – Operate with caution</option>
                 <option>No – Out of Service</option>
@@ -236,6 +253,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Unit Status *">
               <select value={unitStatus} onChange={(e) => setUnitStatus(e.target.value as UnitStatus)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Active</option>
                 <option>Red Tagged</option>
                 <option>Parked in Yard</option>
@@ -256,6 +274,7 @@ export default function EquipmentMaintenanceRequestPage() {
           <div style={gridStyle()}>
             <Field label="System Affected *">
               <select value={systemAffected} onChange={(e) => setSystemAffected(e.target.value as SystemAffected)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Engine</option>
                 <option>Electrical</option>
                 <option>Hydraulics</option>
@@ -270,6 +289,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Urgency *">
               <select value={urgency} onChange={(e) => setUrgency(e.target.value as Urgency)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Low</option>
                 <option>Medium</option>
                 <option>High</option>
@@ -283,6 +303,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Mitigation Applied?">
               <select value={mitigationApplied} onChange={(e) => setMitigationApplied(e.target.value as TriState)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -291,6 +312,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Affects Next Shift?">
               <select value={affectsNextShift} onChange={(e) => setAffectsNextShift(e.target.value as TriState)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -299,6 +321,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
             <Field label="Downtime Expected?">
               <select value={downtimeExpected} onChange={(e) => setDowntimeExpected(e.target.value as TriState)} style={inputStyle()}>
+                <option value="">Select...</option>
                 <option>Yes</option>
                 <option>No</option>
                 <option>Not sure</option>
@@ -318,7 +341,14 @@ export default function EquipmentMaintenanceRequestPage() {
             Submit Maintenance Request
           </button>
 
-          <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle()}>Discard & Return</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+            }}
+            style={secondaryButtonStyle()}
+          >Discard & Return</button>
         </div>
       </form>
     </main>

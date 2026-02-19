@@ -4,6 +4,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
+import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
 
 /* =========================
    Types (aligned with request)
@@ -120,6 +121,7 @@ function todayYYYYMMDD() {
 
 export default function MaintenanceLogPage() {
   const router = useRouter();
+  useFormExitGuard();
   const params = useParams<{ vehicleID?: string }>();
   const sp = useSearchParams();
 
@@ -128,7 +130,7 @@ export default function MaintenanceLogPage() {
 
   const [title, setTitle] = useState("");
   const [mileage, setMileage] = useState("");
-  const [status, setStatus] = useState<MaintenanceLogStatus>("Closed");
+  const [status, setStatus] = useState<MaintenanceLogStatus | "">("");
   const [notes, setNotes] = useState("");
   const [serviceDate, setServiceDate] = useState(todayYYYYMMDD());
 
@@ -376,6 +378,7 @@ export default function MaintenanceLogPage() {
     const m = Number(mileage);
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(m) || m <= 0) return alert("Please enter a valid mileage.");
+    if (!status) return alert("Please select a status.");
 
     // mileage rollback guard
     if (currentVehicleMileage != null && m < currentVehicleMileage) {
@@ -558,6 +561,7 @@ export default function MaintenanceLogPage() {
                 onChange={(e) => setStatus(e.target.value as MaintenanceLogStatus)}
                 style={inputStyle}
               >
+                <option value="">Select...</option>
                 <option value="Closed">Closed</option>
                 <option value="In Progress">In Progress</option>
               </select>
@@ -833,7 +837,10 @@ export default function MaintenanceLogPage() {
 
           <button
             type="button"
-            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+            }}
             style={secondaryButtonStyle}
           >Discard & Return</button>
 

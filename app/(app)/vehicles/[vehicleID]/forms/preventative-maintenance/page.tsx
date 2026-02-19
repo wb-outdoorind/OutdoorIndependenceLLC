@@ -1,11 +1,12 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
-type PMChoice = "pass" | "fail" | "na";
-type YesNo = "yes" | "no";
-type PMResult = "pass" | "pass_with_repairs" | "fail_out_of_service";
+type PMChoice = "" | "pass" | "fail" | "na";
+type YesNo = "" | "yes" | "no";
+type PMResult = "" | "pass" | "pass_with_repairs" | "fail_out_of_service";
 
 type TruckPMRecord = {
   id: string;
@@ -181,6 +182,7 @@ function addMonthsIso(dateIso: string, months: number) {
 
 export default function VehiclePreventativeMaintenanceForm() {
   const router = useRouter();
+  useFormExitGuard();
   const params = useParams<{ vehicleID: string }>();
   const vehicleId = params.vehicleID;
 
@@ -197,14 +199,14 @@ export default function VehiclePreventativeMaintenanceForm() {
   const [mileage, setMileage] = useState(initialSavedMileage != null ? String(initialSavedMileage) : "");
 
   const [oilLifePercentage, setOilLifePercentage] = useState("");
-  const [oilChangePerformed, setOilChangePerformed] = useState<YesNo>("no");
-  const [oilLifeReset, setOilLifeReset] = useState<YesNo>("no");
+  const [oilChangePerformed, setOilChangePerformed] = useState<YesNo>("");
+  const [oilLifeReset, setOilLifeReset] = useState<YesNo>("");
 
   const [checks, setChecks] = useState<Record<string, PMChoice>>(() => {
     const state: Record<string, PMChoice> = {};
     for (const section of CHECK_SECTIONS) {
       for (const item of section.items) {
-        state[item.key] = "" as unknown as PMChoice;
+        state[item.key] = "";
       }
     }
     return state;
@@ -220,13 +222,13 @@ export default function VehiclePreventativeMaintenanceForm() {
   const [rrActual, setRrActual] = useState("");
   const [correctedPsi, setCorrectedPsi] = useState("");
 
-  const [rotationNeeded, setRotationNeeded] = useState<YesNo>("no");
-  const [rotationPerformed, setRotationPerformed] = useState<YesNo>("no");
-  const [alignmentNeeded, setAlignmentNeeded] = useState<YesNo>("no");
-  const [alignmentPerformed, setAlignmentPerformed] = useState<YesNo>("no");
-  const [balanceNeeded, setBalanceNeeded] = useState<YesNo>("no");
+  const [rotationNeeded, setRotationNeeded] = useState<YesNo>("");
+  const [rotationPerformed, setRotationPerformed] = useState<YesNo>("");
+  const [alignmentNeeded, setAlignmentNeeded] = useState<YesNo>("");
+  const [alignmentPerformed, setAlignmentPerformed] = useState<YesNo>("");
+  const [balanceNeeded, setBalanceNeeded] = useState<YesNo>("");
 
-  const [pmResult, setPmResult] = useState<PMResult>("pass");
+  const [pmResult, setPmResult] = useState<PMResult>("");
   const [repairsNotes, setRepairsNotes] = useState("");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
 
@@ -234,6 +236,14 @@ export default function VehiclePreventativeMaintenanceForm() {
   const [nextPmDueDate, setNextPmDueDate] = useState(() => addMonthsIso(todayIso, 4));
 
   const nextPmRecommended = useMemo(() => addMonthsIso(inspectionDate, 4), [inspectionDate]);
+
+  useEffect(() => {
+    void (async () => {
+      const name = await getSignedInDisplayName();
+      if (!name) return;
+      setInspectorName((prev) => (prev.trim() ? prev : name));
+    })();
+  }, []);
 
   function updateCheck(key: string, value: PMChoice) {
     setChecks((prev) => ({ ...prev, [key]: value }));
@@ -268,6 +278,18 @@ export default function VehiclePreventativeMaintenanceForm() {
     const missingCheck = requiredChecks.find(([, value]) => !value);
     if (missingCheck) {
       alert("Please complete all required checklist items.");
+      return;
+    }
+    if (!oilChangePerformed || !oilLifeReset) {
+      alert("Please complete all required yes/no selections.");
+      return;
+    }
+    if (!rotationNeeded || !rotationPerformed || !alignmentNeeded || !alignmentPerformed || !balanceNeeded) {
+      alert("Please complete all required tire action selections.");
+      return;
+    }
+    if (!pmResult) {
+      alert("Vehicle PM Result is required.");
       return;
     }
 
@@ -536,6 +558,7 @@ export default function VehiclePreventativeMaintenanceForm() {
           <div style={gridStyle}>
             <Field label="Vehicle PM Result *">
               <select value={pmResult} onChange={(e) => setPmResult(e.target.value as PMResult)} style={inputStyle} required>
+                <option value="">Select...</option>
                 <option value="pass">Pass</option>
                 <option value="pass_with_repairs">Pass with repairs needed</option>
                 <option value="fail_out_of_service">Fail - out of service</option>
@@ -596,7 +619,10 @@ export default function VehiclePreventativeMaintenanceForm() {
           <button type="submit" style={primaryButtonStyle}>Save Truck PM Inspection</button>
           <button
             type="button"
-            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+            }}
             style={secondaryButtonStyle}
           >Discard & Return</button>
         </div>
@@ -639,6 +665,7 @@ function SectionChecklist({
 function YesNoSelect({ value, onChange }: { value: YesNo; onChange: (value: YesNo) => void }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value as YesNo)} style={inputStyle} required>
+      <option value="">Select...</option>
       <option value="yes">Yes</option>
       <option value="no">No</option>
     </select>

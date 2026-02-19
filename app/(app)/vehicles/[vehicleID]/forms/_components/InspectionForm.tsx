@@ -3,8 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
 export type Choice = "pass" | "fail" | "na";
+type ChoiceOrBlank = Choice | "";
 export type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
 export type InspectionItem = {
@@ -37,11 +39,11 @@ type StoredInspectionRecord = {
     {
       applicable: boolean;
       name?: string;
-      items: Record<string, Choice>;
+      items: Record<string, ChoiceOrBlank>;
     }
   >;
 
-  exiting?: Record<string, Choice>;
+  exiting?: Record<string, ChoiceOrBlank>;
 
   defectsFound: boolean;
   inspectionStatus: "Pass" | "Fail - Maintenance Required" | "Out of Service";
@@ -116,7 +118,7 @@ function ChoiceToggle({
   value,
   onChange,
 }: {
-  value: Choice;
+  value: ChoiceOrBlank;
   onChange: (v: Choice) => void;
 }) {
   const pill = (active: boolean): React.CSSProperties => ({
@@ -167,6 +169,7 @@ export default function InspectionForm({
   acknowledgementText: string;
 }) {
   const router = useRouter();
+  useFormExitGuard();
 
   // ✅ Get vehicle ID from route param (folder is [vehicleID])
   const params = useParams<{ vehicleID?: string }>();
@@ -237,14 +240,14 @@ export default function InspectionForm({
           // Ensure any newly-added items exist
           const items = { ...existing.items };
           for (const it of sec.items) {
-            if (!items[it.key]) items[it.key] = "pass";
+            if (!items[it.key]) items[it.key] = "";
           }
           base[sec.id] = { ...existing, items };
           continue;
         }
 
-        const items: Record<string, Choice> = {};
-        for (const it of sec.items) items[it.key] = "pass";
+        const items: Record<string, ChoiceOrBlank> = {};
+        for (const it of sec.items) items[it.key] = "";
         base[sec.id] = { applicable: true, name: "", items };
       }
 
@@ -257,19 +260,27 @@ export default function InspectionForm({
     });
   }, [vehicleId, vehicleType, visibleSections]);
 
-  const [exiting, setExiting] = useState<Record<string, Choice>>(() => {
-    const m: Record<string, Choice> = {};
-    (exitingItems ?? []).forEach((it) => (m[it.key] = "pass"));
+  const [exiting, setExiting] = useState<Record<string, ChoiceOrBlank>>(() => {
+    const m: Record<string, ChoiceOrBlank> = {};
+    (exitingItems ?? []).forEach((it) => (m[it.key] = ""));
     return m;
   });
 
   const [inspectionStatus, setInspectionStatus] = useState<
-    "Pass" | "Fail - Maintenance Required" | "Out of Service"
-  >("Pass");
+    "Pass" | "Fail - Maintenance Required" | "Out of Service" | ""
+  >("");
   const [notes, setNotes] = useState("");
   const [employeeSignature, setEmployeeSignature] = useState("");
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const name = await getSignedInDisplayName();
+      if (!name) return;
+      setEmployee((prev) => (prev.trim() ? prev : name));
+    })();
+  }, []);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -332,6 +343,7 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
+    if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (defectsFound && !notes.trim())
       return alert("Notes are required when any item is marked Fail.");
@@ -350,6 +362,17 @@ export default function InspectionForm({
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
           );
       }
+      if (st?.applicable) {
+        for (const it of sec.items) {
+          const value = st.items?.[it.key] as ChoiceOrBlank;
+          if (!value) return alert(`Please answer all checklist items before submitting.`);
+        }
+      }
+    }
+
+    for (const it of exitingItems ?? []) {
+      const value = exiting[it.key] as ChoiceOrBlank;
+      if (!value) return alert("Please answer all exiting checklist items before submitting.");
     }
 
     if (!employeeSignature.trim())
@@ -609,11 +632,12 @@ export default function InspectionForm({
                 value={inspectionStatus}
                 onChange={(e) =>
                   setInspectionStatus(
-                    e.target.value as StoredInspectionRecord["inspectionStatus"]
+                    e.target.value as StoredInspectionRecord["inspectionStatus"] | ""
                   )
                 }
                 style={inputStyle()}
               >
+                <option value="">Select status...</option>
                 <option value="Pass">Pass</option>
                 <option value="Fail - Maintenance Required">
                   Fail - Maintenance Required
@@ -697,7 +721,10 @@ export default function InspectionForm({
           </button>
           <button
             type="button"
-            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            onClick={() => {
+              if (!confirmLeaveForm()) return;
+              router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+            }}
             style={secondaryButtonStyle()}
           >Discard & Return</button>
         </div>
