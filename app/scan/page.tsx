@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import jsQR from "jsqr";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type DetectedBarcode = { rawValue?: string };
@@ -15,6 +16,7 @@ type BrowserWithBarcodeDetector = Window & { BarcodeDetector?: BarcodeDetectorCt
 export default function ScanPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [status, setStatus] = useState<string>("Starting camera...");
   const [result, setResult] = useState<string>("");
@@ -174,23 +176,45 @@ export default function ScanPage() {
     let rafId = 0;
     let detector: BarcodeDetectorLike | null = null;
 
+    async function handleScanned(rawValue: string) {
+      const qrTrimmed = rawValue.trim();
+      if (!qrTrimmed) return false;
+
+      setResult(qrTrimmed);
+      setStatus("Scanned. Looking up asset...");
+
+      const route = await findRouteByQr(rawValue);
+      await stopCamera();
+
+      if (route?.kind === "vehicle") {
+        setStatus("Scanned vehicle. Routing...");
+        router.push(`/vehicles/${encodeURIComponent(route.id)}`);
+        return true;
+      }
+
+      if (route?.kind === "equipment") {
+        setStatus("Scanned equipment. Routing...");
+        router.push(`/equipment/${encodeURIComponent(route.id)}`);
+        return true;
+      }
+
+      setStatus("QR scanned, but no matching vehicle/equipment asset was found.");
+      return true;
+    }
+
     async function start() {
       const hasDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
 
-      if (!hasDetector) {
-        setSupported(false);
-        setStatus("QR scanning not supported in this browser.");
-        return;
-      }
-
       try {
-        const detectorCtor = (window as BrowserWithBarcodeDetector).BarcodeDetector;
-        if (!detectorCtor) {
-          setSupported(false);
-          setStatus("QR scanning not supported in this browser.");
-          return;
+        if (hasDetector) {
+          const detectorCtor = (window as BrowserWithBarcodeDetector).BarcodeDetector;
+          if (detectorCtor) {
+            detector = new detectorCtor({ formats: ["qr_code"] });
+            setStatus("Point your camera at a QR code...");
+          }
+        } else {
+          setStatus("Point your camera at a QR code... (fallback scanner)");
         }
-        detector = new detectorCtor({ formats: ["qr_code"] });
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
@@ -203,46 +227,41 @@ export default function ScanPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
 
-        setStatus("Point your camera at a QR code...");
-
         const tick = async () => {
           if (!videoRef.current || result) return;
-          if (!detector) return;
+          if (videoRef.current.readyState < 2) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
 
           try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes?.length) {
-              const rawValue = barcodes[0].rawValue ?? "";
-              const qrTrimmed = rawValue.trim();
-              const qrLower = qrTrimmed.toLowerCase();
-              console.log("[scan] detected barcode.rawValue:", rawValue);
-              console.log("[scan] detected qrTrimmed:", qrTrimmed);
-              console.log("[scan] detected qrLower:", qrLower);
+            let rawValue = "";
 
-              if (!qrTrimmed) {
-                rafId = requestAnimationFrame(tick);
-                return;
+            if (detector) {
+              const barcodes = await detector.detect(videoRef.current);
+              if (barcodes?.length) {
+                rawValue = barcodes[0].rawValue ?? "";
               }
-
-              setResult(qrTrimmed);
-              setStatus("Scanned. Looking up asset...");
-
-              const route = await findRouteByQr(rawValue);
-              await stopCamera();
-
-              if (route?.kind === "vehicle") {
-                setStatus("Scanned vehicle. Routing...");
-                router.push(`/vehicles/${encodeURIComponent(route.id)}`);
-                return;
+            } else {
+              const video = videoRef.current;
+              const canvas = canvasRef.current;
+              if (canvas && video.videoWidth > 0 && video.videoHeight > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext("2d", { willReadFrequently: true });
+                if (ctx) {
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                  const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                  });
+                  rawValue = code?.data ?? "";
+                }
               }
+            }
 
-              if (route?.kind === "equipment") {
-                setStatus("Scanned equipment. Routing...");
-                router.push(`/equipment/${encodeURIComponent(route.id)}`);
-                return;
-              }
-
-              setStatus("QR scanned, but no matching vehicle/equipment asset was found.");
+            if (rawValue.trim()) {
+              await handleScanned(rawValue);
               return;
             }
           } catch {
@@ -254,6 +273,7 @@ export default function ScanPage() {
 
         rafId = requestAnimationFrame(tick);
       } catch (e: unknown) {
+        setSupported(false);
         const errorName = e instanceof Error ? e.name : "";
         setStatus(
           errorName === "NotAllowedError"
@@ -301,8 +321,8 @@ export default function ScanPage() {
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          <p style={{ marginTop: 0 }}>Your browser doesn’t support built-in QR scanning.</p>
-          <p style={{ marginBottom: 0 }}>If needed, we can add a fallback scanning library.</p>
+          <p style={{ marginTop: 0 }}>Could not start camera on this device/browser.</p>
+          <p style={{ marginBottom: 0 }}>Allow camera permission and reload this page.</p>
         </div>
       ) : (
         <div
@@ -319,6 +339,7 @@ export default function ScanPage() {
             muted
             style={{ width: "100%", height: "auto", display: "block" }}
           />
+          <canvas ref={canvasRef} style={{ display: "none" }} />
         </div>
       )}
 
