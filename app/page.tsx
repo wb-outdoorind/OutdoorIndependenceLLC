@@ -13,7 +13,6 @@ const tiles = [
   { title: "Maintenance Center", href: "/maintenance", desc: "Fleet-wide maintenance queue for mechanics" },
   { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
   { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
-  { title: "Settings", href: "/settings", desc: "Theme, text size, and personal preferences" },
 
 ];
 

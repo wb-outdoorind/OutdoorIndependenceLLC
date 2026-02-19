@@ -521,6 +521,7 @@ export default function VehicleDetailPage() {
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
+  const canShowVehiclePmButton = (vehicle?.type ?? "").trim().toLowerCase() === "truck";
 
   return (
     <main style={{ padding: 32, maxWidth: 1100, margin: "0 auto", paddingBottom: 40 }}>
@@ -641,10 +642,12 @@ export default function VehicleDetailPage() {
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
 
-          <Link href={`/vehicles/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
-            <span>Preventative Maintenance</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canShowVehiclePmButton ? (
+            <Link href={`/vehicles/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
+              <span>Preventative Maintenance</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
           <Link href={`/vehicles/${routeIdForLinks}/history`} style={actionBtnStyle()}>
             <span>Full History</span>

@@ -135,6 +135,7 @@ export default function EquipmentDetailPage() {
 
   const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
+  const [hasPmTemplate, setHasPmTemplate] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -189,6 +190,46 @@ export default function EquipmentDetailPage() {
   useEffect(() => {
     let alive = true;
 
+    async function checkTemplate() {
+      if (!equipment?.equipment_type?.trim()) {
+        setHasPmTemplate(false);
+        return;
+      }
+      if (
+        isTrailerEquipmentType(equipment.equipment_type) ||
+        isMowerEquipmentType(equipment.equipment_type) ||
+        isApplicatorEquipmentType(equipment.equipment_type)
+      ) {
+        setHasPmTemplate(false);
+        return;
+      }
+
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment_pm_templates")
+        .select("id")
+        .eq("equipment_type", equipment.equipment_type)
+        .eq("is_active", true)
+        .limit(1);
+
+      if (!alive) return;
+      if (error) {
+        console.error("[equipment-detail] template availability load error:", error);
+        setHasPmTemplate(false);
+        return;
+      }
+      setHasPmTemplate(Array.isArray(data) && data.length > 0);
+    }
+
+    void checkTemplate();
+    return () => {
+      alive = false;
+    };
+  }, [equipment?.equipment_type]);
+
+  useEffect(() => {
+    let alive = true;
+
     async function loadRequestPreview() {
       const supabase = createSupabaseBrowser();
       setRequestPreviewError(null);
@@ -225,6 +266,7 @@ export default function EquipmentDetailPage() {
   const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
+  const canShowPmButton = isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate;
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     return requestPreviewRows.map((r) => {
@@ -325,10 +367,12 @@ export default function EquipmentDetailPage() {
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
 
-          <Link href={`/equipment/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
-            <span>{isTrailerEquipment ? "Trailer PM Inspection" : isMowerEquipment ? "Mower PM Checklist" : isApplicatorEquipment ? "Applicator PM Inspection" : "Preventative Maintenance"}</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canShowPmButton ? (
+            <Link href={`/equipment/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
+              <span>{isTrailerEquipment ? "Trailer PM Inspection" : isMowerEquipment ? "Mower PM Checklist" : isApplicatorEquipment ? "Applicator PM Inspection" : "Preventative Maintenance"}</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
           <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
             <span>Full History</span>
