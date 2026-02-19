@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import AppTopNavLinks from "@/components/AppTopNavLinks";
 
 function TopNav() {
   return (
@@ -18,14 +19,7 @@ function TopNav() {
           </div>
         </Link>
 
-        <nav className="app-topnav-links">
-          <Link href="/equipment" className="app-topnav-link">Equipment</Link>
-          <Link href="/vehicles" className="app-topnav-link">Vehicles</Link>
-          <Link href="/inventory" className="app-topnav-link">Inventory</Link>
-          <Link href="/employees" className="app-topnav-link">Teammates</Link>
-          <Link href="/ops" className="app-topnav-link">Maintenance Operations</Link>
-          <Link href="/settings" className="app-topnav-link">Settings</Link>
-        </nav>
+        <AppTopNavLinks />
       </div>
     </header>
   );

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 
 type EquipmentRow = {
   id: string;
@@ -380,6 +381,8 @@ export default function EquipmentDetailPage() {
           </Link>
         </div>
       </div>
+
+      <AcademyAssetSection vehicleId={stableEquipmentId} assetType={equipment?.equipment_type ?? ""} />
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
