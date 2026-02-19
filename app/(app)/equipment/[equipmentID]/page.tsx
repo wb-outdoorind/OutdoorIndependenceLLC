@@ -284,7 +284,7 @@ export default function EquipmentDetailPage() {
   }, [requestPreviewRows]);
 
   return (
-    <main style={{ padding: 32, maxWidth: 1100, margin: "0 auto", paddingBottom: 40 }}>
+    <main style={{ paddingBottom: 40 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>{equipment?.name ?? "Equipment"}</h1>

@@ -524,7 +524,7 @@ export default function VehicleDetailPage() {
   const canShowVehiclePmButton = (vehicle?.type ?? "").trim().toLowerCase() === "truck";
 
   return (
-    <main style={{ padding: 32, maxWidth: 1100, margin: "0 auto", paddingBottom: 40 }}>
+    <main style={{ paddingBottom: 40 }}>
       {/* Top row */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>

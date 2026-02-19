@@ -248,7 +248,7 @@ export default function InspectionForm({
 
         const items: Record<string, ChoiceOrBlank> = {};
         for (const it of sec.items) items[it.key] = "";
-        base[sec.id] = { applicable: true, name: "", items };
+        base[sec.id] = { applicable: false, name: "", items };
       }
 
       // Drop sections that are not visible for this vehicle type
