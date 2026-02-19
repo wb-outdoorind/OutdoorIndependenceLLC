@@ -81,8 +81,8 @@ function AcademyPageContent() {
   const [query, setQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
-  const [kindFilter, setKindFilter] = useState<"all" | "pdf" | "video">("all");
   const [sortBy, setSortBy] = useState<"recommended" | "newest" | "oldest" | "title_az" | "title_za">("recommended");
+  const [showFilters, setShowFilters] = useState(false);
 
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
@@ -401,8 +401,6 @@ function AcademyPageContent() {
     const q = query.trim().toLowerCase();
 
     return items.filter((item) => {
-      if (kindFilter !== "all" && item.content_type !== kindFilter) return false;
-
       const itemAssets = assetTypesByContentId[item.id] ?? [];
       const itemTopics = topicsByContentId[item.id] ?? [];
 
@@ -415,7 +413,7 @@ function AcademyPageContent() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [assetFilter, assetTypesByContentId, items, kindFilter, query, topicFilter, topicsByContentId]);
+  }, [assetFilter, assetTypesByContentId, items, query, topicFilter, topicsByContentId]);
 
   const sortedItems = useMemo(() => {
     if (sortBy === "recommended") return filteredItems;
@@ -576,64 +574,65 @@ function AcademyPageContent() {
       ) : null}
 
       <section style={{ ...cardStyle, marginBottom: 18 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Filter & Sort</h2>
-        <div style={{ opacity: 0.72, marginBottom: 10, fontSize: 13 }}>
-          Use dropdowns to narrow results like an e-commerce catalog.
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>Filter</h2>
+          <button type="button" style={compactFilterButtonStyle} onClick={() => setShowFilters((prev) => !prev)}>
+            {showFilters ? "Hide Filter" : "Show Filter"}
+          </button>
         </div>
-        <div style={filterGridStyle}>
-          <Field label="Search">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              style={inputStyle}
-              placeholder="Search title, description, asset, topic"
-            />
-          </Field>
+        {showFilters ? (
+          <div>
+            <div style={{ opacity: 0.72, marginTop: 8, marginBottom: 10, fontSize: 13 }}>
+              Narrow results by search, asset, topic, and sort.
+            </div>
+            <div style={filterGridStyle}>
+              <Field label="Search">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Search title, description, asset, topic"
+                />
+              </Field>
 
-          <Field label="Asset">
-            <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} style={inputStyle}>
-              <option value="all">All assets</option>
-              {allAssetTypes.map((asset) => (
-                <option key={asset} value={asset}>
-                  {asset}
-                </option>
-              ))}
-            </select>
-          </Field>
+              <Field label="Asset">
+                <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} style={inputStyle}>
+                  <option value="all">All assets</option>
+                  {allAssetTypes.map((asset) => (
+                    <option key={asset} value={asset}>
+                      {asset}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-          <Field label="Topic">
-            <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} style={inputStyle}>
-              <option value="all">All topics</option>
-              {allTopics.map((topic) => (
-                <option key={topic} value={topic}>
-                  {topic}
-                </option>
-              ))}
-            </select>
-          </Field>
+              <Field label="Topic">
+                <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} style={inputStyle}>
+                  <option value="all">All topics</option>
+                  {allTopics.map((topic) => (
+                    <option key={topic} value={topic}>
+                      {topic}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-          <Field label="Kind">
-            <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as "all" | "pdf" | "video")} style={inputStyle}>
-              <option value="all">PDF + Video</option>
-              <option value="pdf">PDF only</option>
-              <option value="video">Video only</option>
-            </select>
-          </Field>
-
-          <Field label="Sort">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as "recommended" | "newest" | "oldest" | "title_az" | "title_za")}
-              style={inputStyle}
-            >
-              <option value="recommended">Recommended</option>
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="title_az">Title A-Z</option>
-              <option value="title_za">Title Z-A</option>
-            </select>
-          </Field>
-        </div>
+              <Field label="Sort">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "recommended" | "newest" | "oldest" | "title_az" | "title_za")}
+                  style={inputStyle}
+                >
+                  <option value="recommended">Recommended</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="title_az">Title A-Z</option>
+                  <option value="title_za">Title Z-A</option>
+                </select>
+              </Field>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {loading ? <div style={{ opacity: 0.75 }}>Loading academy content...</div> : null}
@@ -1009,6 +1008,16 @@ const miniActionButtonStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.06)",
   color: "inherit",
   fontWeight: 700,
+  cursor: "pointer",
+};
+
+const compactFilterButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.2)",
+  borderRadius: 10,
+  padding: "8px 12px",
+  background: "rgba(255,255,255,0.06)",
+  color: "inherit",
+  fontWeight: 800,
   cursor: "pointer",
 };
 
