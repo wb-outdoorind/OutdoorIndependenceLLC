@@ -21,6 +21,7 @@ type GradeRow = {
 };
 
 type FormFilter = "all" | "inspection" | "vehicle_maintenance_request" | "equipment_maintenance_request";
+type ScorePeriod = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -55,12 +56,46 @@ function formatDateTime(iso: string) {
   return d.toLocaleString();
 }
 
+function getPeriodStart(period: ScorePeriod) {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+
+  if (period === "daily") return start;
+  if (period === "weekly") {
+    const day = start.getDay();
+    const diffToMonday = (day + 6) % 7;
+    start.setDate(start.getDate() - diffToMonday);
+    return start;
+  }
+  if (period === "monthly") {
+    start.setDate(1);
+    return start;
+  }
+  if (period === "quarterly") {
+    const month = start.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3;
+    start.setMonth(quarterStartMonth, 1);
+    return start;
+  }
+  start.setMonth(0, 1);
+  return start;
+}
+
+function inPeriod(iso: string, period: ScorePeriod) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return false;
+  const start = getPeriodStart(period);
+  return date >= start;
+}
+
 export default function FormReportsClient() {
   const [rows, setRows] = useState<GradeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<FormFilter>("all");
   const [search, setSearch] = useState("");
+  const [scorePeriod, setScorePeriod] = useState<ScorePeriod>("daily");
 
   useEffect(() => {
     let alive = true;
@@ -130,11 +165,12 @@ export default function FormReportsClient() {
   }, [filtered]);
 
   const teammateStats = useMemo(() => {
+    const periodFiltered = filtered.filter((row) => inPeriod(row.submitted_at, scorePeriod));
     const stats: Record<
       string,
       { submissions: number; totalScore: number; incomplete: number; naForms: number; accountabilityFlags: number }
     > = {};
-    for (const row of filtered) {
+    for (const row of periodFiltered) {
       const name = (row.submitted_by || "Unknown").trim() || "Unknown";
       if (!stats[name]) {
         stats[name] = { submissions: 0, totalScore: 0, incomplete: 0, naForms: 0, accountabilityFlags: 0 };
@@ -159,6 +195,19 @@ export default function FormReportsClient() {
         if (a.avgScore !== b.avgScore) return a.avgScore - b.avgScore;
         return b.submissions - a.submissions;
       });
+  }, [filtered, scorePeriod]);
+
+  const scorePeriodSummary = useMemo(() => {
+    const periods: ScorePeriod[] = ["daily", "weekly", "monthly", "quarterly", "yearly"];
+    return periods.map((period) => {
+      const subset = filtered.filter((row) => inPeriod(row.submitted_at, period));
+      const totalScore = subset.reduce((sum, row) => sum + (row.score ?? 0), 0);
+      return {
+        period,
+        submissions: subset.length,
+        avgScore: subset.length ? Math.round(totalScore / subset.length) : 0,
+      };
+    });
   }, [filtered]);
 
   return (
@@ -194,13 +243,47 @@ export default function FormReportsClient() {
       </div>
 
       <div style={{ marginTop: 16, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Score Periods</div>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+          {scorePeriodSummary.map((row) => (
+            <div
+              key={row.period}
+              style={{
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 10,
+                padding: 10,
+                background: "rgba(255,255,255,0.02)",
+              }}
+            >
+              <div style={{ opacity: 0.72, fontSize: 12 }}>{row.period[0].toUpperCase() + row.period.slice(1)}</div>
+              <div style={{ fontWeight: 900, marginTop: 4 }}>{row.avgScore}%</div>
+              <div style={{ opacity: 0.72, fontSize: 12, marginTop: 2 }}>{row.submissions} submissions</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Teammate Scoreboard</div>
+        <div style={{ marginBottom: 10, maxWidth: 260 }}>
+          <select
+            value={scorePeriod}
+            onChange={(e) => setScorePeriod(e.target.value as ScorePeriod)}
+            style={inputStyle()}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading...</div>
         ) : errorMessage ? (
           <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
         ) : !teammateStats.length ? (
-          <div style={{ opacity: 0.75 }}>No graded forms found.</div>
+          <div style={{ opacity: 0.75 }}>No graded forms found for this period.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {teammateStats.map((row) => (
