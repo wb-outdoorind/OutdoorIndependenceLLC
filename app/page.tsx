@@ -64,6 +64,7 @@ export default async function Home() {
           Settings
         </Link>
       </div>
+      <h1 style={{ margin: "6px 0 10px", textAlign: "center" }}>Home</h1>
       <p style={{ opacity: 0.75, marginTop: 0 }}>
         Choose a section to manage assets and operations.
       </p>
