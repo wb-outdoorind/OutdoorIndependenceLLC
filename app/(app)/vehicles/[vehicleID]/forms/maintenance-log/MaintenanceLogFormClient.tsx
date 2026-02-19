@@ -88,6 +88,10 @@ function canManagePartsUsage(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
+function canQuickLogOverride(role: Role | null) {
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
+
 /* =========================
    Keys
 ========================= */
@@ -155,10 +159,12 @@ export default function MaintenanceLogPage() {
   const [selectedPartQty, setSelectedPartQty] = useState("1");
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
   const [userRole, setUserRole] = useState<Role | null>(null);
+  const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
+  const canUseQuickOverride = canQuickLogOverride(userRole);
 
   // load current vehicle mileage + request (if requestId present)
   useEffect(() => {
@@ -379,6 +385,12 @@ export default function MaintenanceLogPage() {
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(m) || m <= 0) return alert("Please enter a valid mileage.");
     if (!status) return alert("Please select a status.");
+    if (!requestId && !useQuickLogOverride) {
+      return alert("Link this log to a maintenance request, or enable Quick Maintenance Log Override.");
+    }
+    if (!requestId && useQuickLogOverride && !canUseQuickOverride) {
+      return alert("You do not have permission to create a quick maintenance log.");
+    }
 
     // mileage rollback guard
     if (currentVehicleMileage != null && m < currentVehicleMileage) {
@@ -421,6 +433,19 @@ export default function MaintenanceLogPage() {
       console.error("Maintenance log insert failed:", error);
       setSubmitError(error.message);
       return;
+    }
+
+    if (requestId) {
+      const { error: requestUpdateError } = await supabase
+        .from("maintenance_requests")
+        .update({
+          status: status === "Closed" ? "Closed" : "In Progress",
+        })
+        .eq("id", requestId);
+
+      if (requestUpdateError) {
+        console.error("Maintenance request status update failed:", requestUpdateError);
+      }
     }
 
     if (partsUsed.length > 0) {
@@ -516,6 +541,28 @@ export default function MaintenanceLogPage() {
       {requestId && !linkedRequest ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.9 }}>
           Could not find the request in localStorage for this vehicle. You can still log manually.
+        </div>
+      ) : null}
+
+      {!requestId ? (
+        <div style={{ marginTop: 12, ...cardStyle, opacity: 0.92 }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>
+            No linked maintenance request
+          </div>
+          <div style={{ opacity: 0.75, marginBottom: 10 }}>
+            Standard workflow links logs to a maintenance request first.
+          </div>
+          <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={useQuickLogOverride}
+              disabled={!canUseQuickOverride}
+              onChange={(e) => setUseQuickLogOverride(e.target.checked)}
+            />
+            <span style={{ opacity: canUseQuickOverride ? 0.9 : 0.7 }}>
+              Quick Maintenance Log Override (mechanic/admin only)
+            </span>
+          </label>
         </div>
       ) : null}
 

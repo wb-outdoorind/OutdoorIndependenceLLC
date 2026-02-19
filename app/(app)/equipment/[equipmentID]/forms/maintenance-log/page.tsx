@@ -50,6 +50,10 @@ function canManagePartsUsage(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
+function canQuickLogOverride(role: Role | null) {
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
+
 function equipmentHoursKey(equipmentId: string) {
   return `equipment:${equipmentId}:hours`;
 }
@@ -116,7 +120,9 @@ export default function EquipmentMaintenanceLogPage() {
   const [selectedPartQty, setSelectedPartQty] = useState("1");
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
   const [currentHours] = useState<number | null>(initialStoredHours);
+  const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
+  const canUseQuickOverride = canQuickLogOverride(userRole);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -310,6 +316,12 @@ export default function EquipmentMaintenanceLogPage() {
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(h) || h < 0) return alert("Please enter valid hours.");
     if (!status) return alert("Please select a status.");
+    if (!selectedRequestId && !useQuickLogOverride) {
+      return alert("Link this log to a maintenance request, or enable Quick Maintenance Log Override.");
+    }
+    if (!selectedRequestId && useQuickLogOverride && !canUseQuickOverride) {
+      return alert("You do not have permission to create a quick maintenance log.");
+    }
 
     if (currentHours != null && h < currentHours) {
       return alert(`Hours cannot be less than the current stored hours (${currentHours}).`);
@@ -348,6 +360,19 @@ export default function EquipmentMaintenanceLogPage() {
       console.error("Equipment maintenance log insert failed:", error);
       setSubmitError(error.message);
       return;
+    }
+
+    if (selectedRequestId) {
+      const { error: requestUpdateError } = await supabase
+        .from("equipment_maintenance_requests")
+        .update({
+          status: status === "Closed" ? "Closed" : "In Progress",
+        })
+        .eq("id", selectedRequestId);
+
+      if (requestUpdateError) {
+        console.error("Equipment maintenance request status update failed:", requestUpdateError);
+      }
     }
 
     if (partsUsed.length > 0) {
@@ -432,6 +457,26 @@ export default function EquipmentMaintenanceLogPage() {
         Equipment ID: <strong>{equipmentId || "(missing)"}</strong>
       </div>
 
+      <div style={{ marginTop: 12, ...cardStyle, opacity: 0.92 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>
+          Workflow
+        </div>
+        <div style={{ opacity: 0.75, marginBottom: 10 }}>
+          Standard workflow links logs to a maintenance request first.
+        </div>
+        <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={useQuickLogOverride}
+            disabled={!canUseQuickOverride}
+            onChange={(e) => setUseQuickLogOverride(e.target.checked)}
+          />
+          <span style={{ opacity: canUseQuickOverride ? 0.9 : 0.7 }}>
+            Quick Maintenance Log Override (mechanic/admin only)
+          </span>
+        </label>
+      </div>
+
       {loadError ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.95, color: "#ff9d9d" }}>
           Failed to load request links: {loadError}
@@ -471,6 +516,9 @@ export default function EquipmentMaintenanceLogPage() {
             </Field>
 
             <Field label="Linked Request (optional)">
+              <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.7 }}>
+                Required unless Quick Maintenance Log Override is enabled.
+              </div>
               <select value={selectedRequestId} onChange={(e) => setSelectedRequestId(e.target.value)} style={inputStyle}>
                 <option value="">None</option>
                 {requestOptions.map((r) => (
