@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
@@ -145,6 +145,16 @@ function vehiclePmKey(vehicleId: string) {
   return `vehicle:${vehicleId}:vehicle_pm`;
 }
 
+function isTimelineType(value: string | null): value is TimelineType {
+  return (
+    value === "Pre-Trip" ||
+    value === "Post-Trip" ||
+    value === "Vehicle PM" ||
+    value === "Maintenance Log" ||
+    value === "Maintenance Request"
+  );
+}
+
 /* =========================
    Helpers
 ========================= */
@@ -265,9 +275,13 @@ function parseChecklist(value: unknown): Partial<TripInspectionRecord> {
 
 export default function VehicleHistoryPage() {
   const params = useParams<{ vehicleID: string }>();
+  const searchParams = useSearchParams();
   const vehicleId = decodeURIComponent(params.vehicleID);
+  const focusId = (searchParams.get("focusId") || "").trim();
+  const focusTypeRaw = (searchParams.get("focusType") || "").trim();
+  const focusType: TimelineType | null = isTimelineType(focusTypeRaw) ? focusTypeRaw : null;
 
-  const [filter, setFilter] = useState<FilterValue>("All");
+  const [filter, setFilter] = useState<FilterValue>(focusType ?? "All");
   const [inspectionRows, setInspectionRows] = useState<TripInspectionRecord[]>([]);
   const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
   const [logRows, setLogRows] = useState<MaintenanceLogRecord[]>([]);
@@ -548,6 +562,16 @@ export default function VehicleHistoryPage() {
     return items.filter((x) => x.type === filter);
   }, [items, filter]);
 
+  useEffect(() => {
+    if (!focusId) return;
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById(`timeline-item-${focusId}`);
+      if (!node) return;
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [focusId, filtered.length]);
+
   return (
     <main style={{ paddingBottom: 32 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -630,11 +654,18 @@ export default function VehicleHistoryPage() {
             {filtered.map((x) => (
               <div
                 key={`${x.type}:${x.id}`}
+                id={`timeline-item-${x.id}`}
                 style={{
-                  border: "1px solid rgba(255,255,255,0.12)",
+                  border:
+                    focusId === x.id && (!focusType || focusType === x.type)
+                      ? "1px solid rgba(126,255,167,0.45)"
+                      : "1px solid rgba(255,255,255,0.12)",
                   borderRadius: 14,
                   padding: 12,
-                  background: "rgba(255,255,255,0.02)",
+                  background:
+                    focusId === x.id && (!focusType || focusType === x.type)
+                      ? "rgba(126,255,167,0.10)"
+                      : "rgba(255,255,255,0.02)",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>

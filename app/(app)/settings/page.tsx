@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import LogoutButton from "@/app/logout-button";
 import {
   AppTextSize,
   AppTheme,
@@ -60,6 +61,14 @@ export default function SettingsPage() {
           </Field>
         </div>
         {savedMessage ? <div style={{ marginTop: 10, opacity: 0.8 }}>{savedMessage}</div> : null}
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 12 }}>Account</h2>
+        <div style={{ opacity: 0.78, marginBottom: 10 }}>
+          Sign out from this device.
+        </div>
+        <LogoutButton />
       </section>
     </main>
   );

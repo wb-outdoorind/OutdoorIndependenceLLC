@@ -53,6 +53,7 @@ type MaintenanceLogPreviewRow = {
 };
 
 type HistoryPreviewItem = {
+  id: string;
   type: "Maintenance Request" | "Maintenance Log" | "Vehicle PM";
   createdAt: string;
   title: string;
@@ -477,6 +478,7 @@ export default function VehicleDetailPage() {
     const requestItems = requestPreviewRows.map((r) => {
       const parsed = parseTitleAndDescription(r.description);
       return {
+        id: r.id,
         type: "Maintenance Request" as const,
         createdAt: r.created_at,
         title:
@@ -488,6 +490,7 @@ export default function VehicleDetailPage() {
     });
 
     const logItems = logPreviewRows.map((r) => ({
+      id: r.id,
       type: "Maintenance Log" as const,
       createdAt: r.created_at,
       title: r.status_update?.trim() || "Maintenance Log",
@@ -496,6 +499,7 @@ export default function VehicleDetailPage() {
     }));
 
     const pmItems = pmRecords.map((r) => ({
+      id: r.id,
       type: "Vehicle PM" as const,
       createdAt: r.createdAt,
       title: "Preventative Maintenance",
@@ -507,6 +511,12 @@ export default function VehicleDetailPage() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 4);
   }, [requestPreviewRows, logPreviewRows, pmRecords]);
+
+  function historyItemHref(item: HistoryPreviewItem) {
+    const type = encodeURIComponent(item.type);
+    const id = encodeURIComponent(item.id);
+    return `/vehicles/${routeIdForLinks}/history?focusType=${type}&focusId=${id}`;
+  }
 
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
@@ -664,9 +674,13 @@ export default function VehicleDetailPage() {
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
               {historyPreview.map((r, idx) => (
-                <div
+                <Link
                   key={`${r.type}:${r.createdAt}:${idx}`}
+                  href={historyItemHref(r)}
                   style={{
+                    display: "block",
+                    textDecoration: "none",
+                    color: "inherit",
                     border: "1px solid rgba(255,255,255,0.12)",
                     borderRadius: 14,
                     padding: 12,
@@ -690,7 +704,7 @@ export default function VehicleDetailPage() {
                   {r.notes?.trim() ? (
                     <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{r.notes}</div>
                   ) : null}
-                </div>
+                </Link>
               ))}
             </div>
           )}

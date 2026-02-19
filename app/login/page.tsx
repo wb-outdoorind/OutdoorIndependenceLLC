@@ -23,6 +23,7 @@ function LoginPageContent() {
   const [password, setPassword] = useState("");
 
   const [busy, setBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // If already logged in, bounce to next
@@ -56,6 +57,30 @@ function LoginPageContent() {
       router.replace(next);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    setMessage(null);
+    const em = email.trim().toLowerCase();
+    if (!em) {
+      setMessage("Enter your email first, then click Forgot password.");
+      return;
+    }
+
+    setResetBusy(true);
+    try {
+      const supabase = createSupabaseBrowser();
+      const redirectTo =
+        typeof window !== "undefined" ? `${window.location.origin}/login` : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(em, { redirectTo });
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+      setMessage("Password reset email sent. Check your inbox.");
+    } finally {
+      setResetBusy(false);
     }
   }
 
@@ -110,6 +135,15 @@ function LoginPageContent() {
           {busy ? "Signing in..." : "Sign in"}
         </button>
 
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={resetBusy || busy}
+          style={secondaryButtonStyle}
+        >
+          {resetBusy ? "Sending reset..." : "Forgot password?"}
+        </button>
+
         <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.4 }}>
           Tip: On phones, you should stay signed in unless the browser clears site
           data or you log out.
@@ -141,5 +175,15 @@ const buttonStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.06)",
   color: "inherit",
   fontWeight: 900,
+  cursor: "pointer",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "transparent",
+  color: "inherit",
+  fontWeight: 700,
   cursor: "pointer",
 };

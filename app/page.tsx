@@ -1,6 +1,5 @@
 import Link from "next/link";
 import Image from "next/image";
-import LogoutButton from "./logout-button";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +62,9 @@ export default async function Home() {
           className="brand-logo"
           style={{ height: 56, width: "auto", objectFit: "contain" }}
         />
-        <LogoutButton />
+        <Link href="/settings" style={headerButtonStyle}>
+          Settings
+        </Link>
       </div>
       <p style={{ opacity: 0.75, marginTop: 0 }}>
         Choose a section to manage assets and operations.
@@ -121,3 +122,13 @@ export default async function Home() {
     </main>
   );
 }
+
+const headerButtonStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid var(--surface-border)",
+  background: "var(--surface)",
+  color: "inherit",
+  textDecoration: "none",
+  fontWeight: 800,
+};
