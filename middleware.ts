@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 
 const PROTECTED_PREFIXES = [
   "/",
@@ -21,33 +20,23 @@ function isProtected(pathname: string) {
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return req.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            res.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-
   const { pathname } = req.nextUrl;
 
   // Allow login page through
   if (pathname.startsWith("/login")) return res;
 
+  // In Edge middleware, avoid heavy auth client usage.
+  // Presence of Supabase auth-token cookies is enough for route gating.
+  const hasAuthCookie = req.cookies
+    .getAll()
+    .some(
+      (c) =>
+        c.name.includes("-auth-token") &&
+        (c.name.startsWith("sb-") || c.name.startsWith("__Secure-sb-"))
+    );
+
   // Redirect if protected and not authenticated
-  if (isProtected(pathname) && !user) {
+  if (isProtected(pathname) && !hasAuthCookie) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
@@ -58,5 +47,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|favicon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };
