@@ -35,6 +35,7 @@ type MaintenanceLogPreviewRow = {
   id: string;
   equipment_id: string;
   created_at: string;
+  created_by: string | null;
   request_id: string | null;
   mechanic_self_score: number | null;
   status_update: string | null;
@@ -210,6 +211,10 @@ export default function EquipmentDetailPage() {
   const [latestPmHours, setLatestPmHours] = useState<number | null>(null);
   const [hasPmTemplate, setHasPmTemplate] = useState(false);
   const [userRole, setUserRole] = useState<Role>("employee");
+  const [isEditingMechanicScore, setIsEditingMechanicScore] = useState(false);
+  const [mechanicScoreDraft, setMechanicScoreDraft] = useState("");
+  const [mechanicScoreSaving, setMechanicScoreSaving] = useState(false);
+  const [mechanicScoreError, setMechanicScoreError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -338,7 +343,7 @@ export default function EquipmentDetailPage() {
           .limit(4),
         supabase
           .from("equipment_maintenance_logs")
-          .select("id,equipment_id,created_at,request_id,mechanic_self_score,status_update,notes")
+          .select("id,equipment_id,created_at,created_by,request_id,mechanic_self_score,status_update,notes")
           .eq("equipment_id", equipmentIdFromRoute)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -412,6 +417,42 @@ export default function EquipmentDetailPage() {
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
+  const canEditMechanicScore = userRole === "mechanic";
+
+  async function saveMechanicScore() {
+    const latestLog = logPreviewRows[0];
+    if (!latestLog) {
+      setMechanicScoreError("No maintenance log found for this asset yet.");
+      return;
+    }
+    const parsed = Number(mechanicScoreDraft);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+      setMechanicScoreError("Score must be a number between 0 and 100.");
+      return;
+    }
+
+    setMechanicScoreSaving(true);
+    setMechanicScoreError(null);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("equipment_maintenance_logs")
+      .update({ mechanic_self_score: Math.round(parsed) })
+      .eq("id", latestLog.id)
+      .eq("equipment_id", stableEquipmentId);
+    setMechanicScoreSaving(false);
+
+    if (error) {
+      setMechanicScoreError(error.message);
+      return;
+    }
+
+    setLogPreviewRows((prev) =>
+      prev.map((row, idx) =>
+        idx === 0 ? { ...row, mechanic_self_score: Math.round(parsed) } : row
+      )
+    );
+    setIsEditingMechanicScore(false);
+  }
 
   const equipmentHealthSummary = useMemo<AssetHealthSummary>(() => {
     const interval = 250;
@@ -559,8 +600,79 @@ export default function EquipmentDetailPage() {
           {canViewMechanicScore ? (
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
-              <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
-              <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(equipmentHealthSummary.mechanicScore)}</div>
+              <div style={{ fontWeight: 900, fontSize: 20 }}>
+                {canEditMechanicScore ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMechanicScoreError(null);
+                      setMechanicScoreDraft(String(equipmentHealthSummary.mechanicScore));
+                      setIsEditingMechanicScore((prev) => !prev);
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      padding: 0,
+                      textDecoration: "underline",
+                    }}
+                  >
+                    {equipmentHealthSummary.mechanicScore}%
+                  </button>
+                ) : (
+                  `${equipmentHealthSummary.mechanicScore}%`
+                )}
+              </div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>
+                {mechanicScoreBand(equipmentHealthSummary.mechanicScore)}
+                {canEditMechanicScore ? " · click score to edit" : ""}
+              </div>
+              {canEditMechanicScore && isEditingMechanicScore ? (
+                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    value={mechanicScoreDraft}
+                    onChange={(e) => setMechanicScoreDraft(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="0-100"
+                    style={{
+                      width: "100%",
+                      maxWidth: 120,
+                      padding: 8,
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.03)",
+                      color: "inherit",
+                    }}
+                  />
+                  <button type="button" onClick={saveMechanicScore} style={actionBtnStyle()} disabled={mechanicScoreSaving}>
+                    {mechanicScoreSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingMechanicScore(false);
+                      setMechanicScoreError(null);
+                    }}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: "inherit",
+                      padding: "8px 10px",
+                      cursor: "pointer",
+                    }}
+                    disabled={mechanicScoreSaving}
+                  >
+                    Cancel
+                  </button>
+                  {mechanicScoreError ? (
+                    <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div>

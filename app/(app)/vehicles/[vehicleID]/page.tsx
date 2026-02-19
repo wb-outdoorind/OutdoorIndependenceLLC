@@ -48,6 +48,7 @@ type MaintenanceLogPreviewRow = {
   id: string;
   vehicle_id: string;
   created_at: string;
+  created_by: string | null;
   request_id: string | null;
   mechanic_self_score: number | null;
   status_update: string | null;
@@ -335,6 +336,10 @@ export default function VehicleDetailPage() {
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
   const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
   const [openRequestCountForHealth, setOpenRequestCountForHealth] = useState(0);
+  const [isEditingMechanicScore, setIsEditingMechanicScore] = useState(false);
+  const [mechanicScoreDraft, setMechanicScoreDraft] = useState("");
+  const [mechanicScoreSaving, setMechanicScoreSaving] = useState(false);
+  const [mechanicScoreError, setMechanicScoreError] = useState<string | null>(null);
 
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [editDraft, setEditDraft] = useState<VehicleEditDraft | null>(null);
@@ -568,7 +573,7 @@ export default function VehicleDetailPage() {
           .limit(8),
         supabase
           .from("maintenance_logs")
-          .select("id, vehicle_id, created_at, request_id, mechanic_self_score, status_update, notes")
+          .select("id, vehicle_id, created_at, created_by, request_id, mechanic_self_score, status_update, notes")
           .eq("vehicle_id", params.vehicleID)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -739,6 +744,42 @@ export default function VehicleDetailPage() {
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
+  const canEditMechanicScore = userRole === "mechanic";
+
+  async function saveMechanicScore() {
+    const latestLog = logPreviewRows[0];
+    if (!latestLog) {
+      setMechanicScoreError("No maintenance log found for this asset yet.");
+      return;
+    }
+    const parsed = Number(mechanicScoreDraft);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+      setMechanicScoreError("Score must be a number between 0 and 100.");
+      return;
+    }
+
+    setMechanicScoreSaving(true);
+    setMechanicScoreError(null);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("maintenance_logs")
+      .update({ mechanic_self_score: Math.round(parsed) })
+      .eq("id", latestLog.id)
+      .eq("vehicle_id", stableVehicleId);
+    setMechanicScoreSaving(false);
+
+    if (error) {
+      setMechanicScoreError(error.message);
+      return;
+    }
+
+    setLogPreviewRows((prev) =>
+      prev.map((row, idx) =>
+        idx === 0 ? { ...row, mechanic_self_score: Math.round(parsed) } : row
+      )
+    );
+    setIsEditingMechanicScore(false);
+  }
 
   function updateDraft<K extends keyof VehicleEditDraft>(key: K, value: VehicleEditDraft[K]) {
     setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -1091,8 +1132,64 @@ export default function VehicleDetailPage() {
           {canViewMechanicScore ? (
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
-              <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.mechanicScore}%</div>
-              <div style={{ opacity: 0.75, fontSize: 12 }}>{mechanicScoreBand(vehicleHealthSummary.mechanicScore)}</div>
+              <div style={{ fontWeight: 900, fontSize: 20 }}>
+                {canEditMechanicScore ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMechanicScoreError(null);
+                      setMechanicScoreDraft(String(vehicleHealthSummary.mechanicScore));
+                      setIsEditingMechanicScore((prev) => !prev);
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      padding: 0,
+                      textDecoration: "underline",
+                    }}
+                  >
+                    {vehicleHealthSummary.mechanicScore}%
+                  </button>
+                ) : (
+                  `${vehicleHealthSummary.mechanicScore}%`
+                )}
+              </div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>
+                {mechanicScoreBand(vehicleHealthSummary.mechanicScore)}
+                {canEditMechanicScore ? " · click score to edit" : ""}
+              </div>
+              {canEditMechanicScore && isEditingMechanicScore ? (
+                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    value={mechanicScoreDraft}
+                    onChange={(e) => setMechanicScoreDraft(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="0-100"
+                    style={{ ...detailInputStyle, maxWidth: 120, padding: 8 }}
+                  />
+                  <button type="button" onClick={saveMechanicScore} style={editPrimaryButtonStyle} disabled={mechanicScoreSaving}>
+                    {mechanicScoreSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingMechanicScore(false);
+                      setMechanicScoreError(null);
+                    }}
+                    style={editSecondaryButtonStyle}
+                    disabled={mechanicScoreSaving}
+                  >
+                    Cancel
+                  </button>
+                  {mechanicScoreError ? (
+                    <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div>
