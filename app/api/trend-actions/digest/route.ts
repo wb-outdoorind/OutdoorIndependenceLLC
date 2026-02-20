@@ -40,7 +40,8 @@ function todayInChicagoParts() {
 
 function isAllowedNowForDigest() {
   const t = todayInChicagoParts();
-  return t.hour === 15 && t.minute === 0;
+  // Hobby plan allows one daily cron in UTC; 21:00 UTC maps to 15:00 CST / 16:00 CDT.
+  return (t.hour === 15 || t.hour === 16) && t.minute === 0;
 }
 
 function chicagoDateKey() {
