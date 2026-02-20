@@ -5,5 +5,5 @@ import NotificationsClient from "./NotificationsClient";
 export default async function NotificationsPage() {
   const session = await getCurrentUserProfile();
   if (!session?.user) redirect("/login");
-  return <NotificationsClient />;
+  return <NotificationsClient role={session.profile?.role ?? null} />;
 }

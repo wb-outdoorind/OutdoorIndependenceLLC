@@ -120,7 +120,7 @@ function severityColor(severity: NotificationRow["severity"]) {
   return "rgba(120,180,255,0.18)";
 }
 
-export default function NotificationsClient() {
+export default function NotificationsClient({ role }: { role: string | null }) {
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,6 +136,8 @@ export default function NotificationsClient() {
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  const [runNowBusy, setRunNowBusy] = useState(false);
+  const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -257,6 +259,24 @@ export default function NotificationsClient() {
     setPrefsSaving(false);
   }
 
+  async function runDigestNow() {
+    setRunNowBusy(true);
+    setRunNowMessage(null);
+    const res = await fetch("/api/trend-actions/digest", { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setRunNowMessage(json?.error || "Failed to run digest.");
+      setRunNowBusy(false);
+      return;
+    }
+    const sentTo = Number(json?.sentTo ?? 0);
+    const sent = Number(json?.email?.sent ?? 0);
+    const failed = Number(json?.email?.failed ?? 0);
+    setRunNowMessage(`Digest queued: in-app ${sentTo}, email sent ${sent}, failed ${failed}.`);
+    setRunNowBusy(false);
+    await loadAll();
+  }
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Notifications</h1>
@@ -270,10 +290,25 @@ export default function NotificationsClient() {
             <div style={{ fontSize: 12, opacity: 0.75 }}>Unread</div>
             <div style={{ fontWeight: 900, fontSize: 24 }}>{unreadCount}</div>
           </div>
-          <button type="button" onClick={() => void markAllRead()} style={buttonStyle()}>
-            Mark All Read
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={() => void markAllRead()} style={buttonStyle()}>
+              Mark All Read
+            </button>
+            {role === "owner" ? (
+              <button
+                type="button"
+                onClick={() => void runDigestNow()}
+                style={buttonStyle()}
+                disabled={runNowBusy}
+              >
+                {runNowBusy ? "Running..." : "Run Digest Now"}
+              </button>
+            ) : null}
+          </div>
         </div>
+        {runNowMessage ? (
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{runNowMessage}</div>
+        ) : null}
       </div>
 
       <div style={{ marginTop: 12, ...cardStyle() }}>

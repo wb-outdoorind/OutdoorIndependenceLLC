@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { getCurrentUserProfile } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -98,17 +99,9 @@ async function sendDigestEmail(params: {
   }
 }
 
-export async function GET(req: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (expected) {
-    const auth = req.headers.get("authorization") || "";
-    if (auth !== `Bearer ${expected}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
-  if (!isAllowedNowForDigest()) {
-    return NextResponse.json({ ok: true, skipped: "Not 3:00 PM America/Chicago." });
+async function runDigest(params: { source: "cron" | "manual"; ignoreTimeGate: boolean }) {
+  if (!params.ignoreTimeGate && !isAllowedNowForDigest()) {
+    return { ok: true, skipped: "Not 3:00 PM America/Chicago." } as const;
   }
 
   const admin = createSupabaseAdmin();
@@ -127,12 +120,7 @@ export async function GET(req: Request) {
       .limit(500),
   ]);
 
-  if (recipientsError || actionsError) {
-    return NextResponse.json(
-      { error: recipientsError?.message || actionsError?.message || "Failed to load digest data." },
-      { status: 500 }
-    );
-  }
+  if (recipientsError || actionsError) throw new Error(recipientsError?.message || actionsError?.message || "Failed to load digest data.");
 
   const rows = ((actions ?? []) as TrendActionRow[]);
   const openCount = rows.filter((r) => r.status === "Open").length;
@@ -171,9 +159,7 @@ export async function GET(req: Request) {
     const { error: insertError } = await admin
       .from("user_notifications")
       .upsert(inserts, { onConflict: "recipient_id,dedupe_key", ignoreDuplicates: true });
-    if (insertError) {
-      return NextResponse.json({ error: insertError.message }, { status: 500 });
-    }
+    if (insertError) throw new Error(insertError.message);
   }
 
   const prefsByUser = new Map<string, boolean>();
@@ -229,8 +215,9 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({
+  return {
     ok: true,
+    source: params.source,
     sentTo: inserts.length,
     openCount,
     inReviewCount,
@@ -243,5 +230,43 @@ export async function GET(req: Request) {
       sent: emailSent,
       failed: emailFailed,
     },
-  });
+  };
+}
+
+export async function GET(req: Request) {
+  const expected = process.env.CRON_SECRET;
+  if (expected) {
+    const auth = req.headers.get("authorization") || "";
+    if (auth !== `Bearer ${expected}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
+  if (!isAllowedNowForDigest()) {
+    return NextResponse.json({ ok: true, skipped: "Not 3:00 PM America/Chicago." });
+  }
+
+  try {
+    const payload = await runDigest({ source: "cron", ignoreTimeGate: false });
+    return NextResponse.json(payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to run digest.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function POST() {
+  const session = await getCurrentUserProfile();
+  const role = session?.profile?.role ?? null;
+  if (role !== "owner") {
+    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  }
+
+  try {
+    const payload = await runDigest({ source: "manual", ignoreTimeGate: true });
+    return NextResponse.json(payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to run digest.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
