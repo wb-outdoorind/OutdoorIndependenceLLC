@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/trend-actions/digest",
+      "schedule": "0 * * * *"
+    }
+  ]
+}
