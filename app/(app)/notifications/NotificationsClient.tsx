@@ -129,7 +129,7 @@ export default function NotificationsClient() {
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [range, setRange] = useState<RangeKey>(() => {
     const fromQuery = searchParams.get("range");
-    return isRangeKey(fromQuery) ? fromQuery : "all";
+    return isRangeKey(fromQuery) ? fromQuery : "today";
   });
   const [customFrom, setCustomFrom] = useState(() => toDateInputValue(new Date()));
   const [customTo, setCustomTo] = useState(() => toDateInputValue(new Date()));
