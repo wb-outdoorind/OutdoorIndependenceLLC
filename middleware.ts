@@ -22,6 +22,9 @@ export async function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
+  // API routes should not be auth-gated by browser middleware.
+  if (pathname.startsWith("/api")) return res;
+
   // Allow auth entry points through
   if (pathname.startsWith("/login") || pathname.startsWith("/auth/callback")) return res;
 
@@ -48,6 +51,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|favicon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
