@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
+import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 
 /* =========================
    Types
@@ -1274,6 +1275,14 @@ export default function VehicleDetailPage() {
           )}
         </div>
       ) : null}
+
+      <TrendActionsPanel
+        assetType="vehicle"
+        assetId={stableVehicleId}
+        canView={canViewScoreTrends}
+        healthPoints={scoreTrend.healthPoints}
+        mechanicPoints={scoreTrend.mechanicPoints}
+      />
 
       {/* Actions */}
       <div style={{ marginTop: 18, ...cardStyle() }}>

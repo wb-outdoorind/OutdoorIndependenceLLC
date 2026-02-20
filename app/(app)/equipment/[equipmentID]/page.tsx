@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
+import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 
 type EquipmentRow = {
   id: string;
@@ -757,6 +758,14 @@ export default function EquipmentDetailPage() {
           )}
         </div>
       ) : null}
+
+      <TrendActionsPanel
+        assetType="equipment"
+        assetId={stableEquipmentId}
+        canView={canViewScoreTrends}
+        healthPoints={scoreTrend.healthPoints}
+        mechanicPoints={scoreTrend.mechanicPoints}
+      />
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
