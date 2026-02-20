@@ -20,6 +20,22 @@ type DigestRecipient = {
   full_name: string | null;
 };
 
+type VehicleDigestRow = {
+  id: string;
+  name: string | null;
+  type: string | null;
+  status: string | null;
+  mileage: number | null;
+};
+
+type EquipmentDigestRow = {
+  id: string;
+  name: string | null;
+  equipment_type: string | null;
+  status: string | null;
+  current_hours: number | null;
+};
+
 function todayInChicagoParts() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -57,15 +73,43 @@ function chicagoDateKey() {
   return `${t.year}-${t.month}-${t.day}`;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function ageDaysFromIso(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return 0;
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
 function buildDigestEmailHtml(params: {
   title: string;
   body: string;
+  detailLines: string[];
+  topAssets: string[];
   appUrl: string;
 }) {
+  const detailItems = params.detailLines
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join("");
+  const topAssetItems = params.topAssets.length
+    ? params.topAssets.map((asset) => `<li>${escapeHtml(asset)}</li>`).join("")
+    : `<li>None</li>`;
+
   return [
     `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">`,
     `<h2 style="margin:0 0 12px 0;">${params.title}</h2>`,
-    `<p style="margin:0 0 16px 0;">${params.body}</p>`,
+    `<p style="margin:0 0 12px 0;">${escapeHtml(params.body)}</p>`,
+    `<div style="margin:0 0 12px 0;font-weight:700;">Digest Details</div>`,
+    `<ul style="margin:0 0 16px 20px;padding:0;">${detailItems}</ul>`,
+    `<div style="margin:0 0 8px 0;font-weight:700;">Top Affected Assets</div>`,
+    `<ul style="margin:0 0 16px 20px;padding:0;">${topAssetItems}</ul>`,
     `<p style="margin:0 0 16px 0;">Open the app to review trend actions and assign follow-ups.</p>`,
     `<a href="${params.appUrl}" style="display:inline-block;padding:10px 14px;background:#0f766e;color:#fff;text-decoration:none;border-radius:8px;">Open Operations App</a>`,
     `</div>`,
@@ -125,22 +169,76 @@ async function runDigest(params: { source: "cron" | "manual"; ignoreTimeGate: bo
   const rows = ((actions ?? []) as TrendActionRow[]);
   const openCount = rows.filter((r) => r.status === "Open").length;
   const inReviewCount = rows.filter((r) => r.status === "In Review").length;
+  const assetHealthDeclineCount = rows.filter((r) => r.action_type === "asset_health_decline").length;
+  const mechanicDeclineCount = rows.filter((r) => r.action_type === "mechanic_decline").length;
+
+  const vehicleIds = Array.from(
+    new Set(rows.filter((r) => r.asset_type === "vehicle").map((r) => r.asset_id))
+  );
+  const equipmentIds = Array.from(
+    new Set(rows.filter((r) => r.asset_type === "equipment").map((r) => r.asset_id))
+  );
+  const [vehiclesRes, equipmentRes] = await Promise.all([
+    vehicleIds.length
+      ? admin
+          .from("vehicles")
+          .select("id,name,type,status,mileage")
+          .in("id", vehicleIds)
+      : Promise.resolve({ data: [], error: null }),
+    equipmentIds.length
+      ? admin
+          .from("equipment")
+          .select("id,name,equipment_type,status,current_hours")
+          .in("id", equipmentIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (vehiclesRes.error) throw new Error(vehiclesRes.error.message);
+  if (equipmentRes.error) throw new Error(equipmentRes.error.message);
+
+  const labelByAssetKey = new Map<string, string>();
+  for (const vehicle of (vehiclesRes.data ?? []) as VehicleDigestRow[]) {
+    const label = vehicle.name?.trim() || vehicle.id;
+    const suffix = vehicle.status?.trim() ? ` [${vehicle.status}]` : "";
+    labelByAssetKey.set(`vehicle:${vehicle.id}`, `Vehicle: ${label}${suffix}`);
+  }
+  for (const equipment of (equipmentRes.data ?? []) as EquipmentDigestRow[]) {
+    const label = equipment.name?.trim() || equipment.id;
+    const suffix = equipment.status?.trim() ? ` [${equipment.status}]` : "";
+    labelByAssetKey.set(`equipment:${equipment.id}`, `Equipment: ${label}${suffix}`);
+  }
+
   const byAsset = new Map<string, number>();
   for (const row of rows) {
     const key = `${row.asset_type}:${row.asset_id}`;
     byAsset.set(key, (byAsset.get(key) ?? 0) + 1);
   }
+  const oldestAgeDays = rows.length ? Math.max(...rows.map((row) => ageDaysFromIso(row.created_at))) : 0;
+  const over7DaysCount = rows.filter((row) => ageDaysFromIso(row.created_at) >= 7).length;
+  const over14DaysCount = rows.filter((row) => ageDaysFromIso(row.created_at) >= 14).length;
+  const vehicleAffectedCount = new Set(rows.filter((r) => r.asset_type === "vehicle").map((r) => r.asset_id)).size;
+  const equipmentAffectedCount = new Set(rows.filter((r) => r.asset_type === "equipment").map((r) => r.asset_id)).size;
+
   const topAssets = Array.from(byAsset.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([k, count]) => `${k} (${count})`);
+    .map(([k, count]) => `${labelByAssetKey.get(k) || k} (${count})`);
 
-  const title = `Trend Actions Digest (${dateKey})`;
-  const body = [
+  const detailLines = [
     `Open: ${openCount}`,
     `In Review: ${inReviewCount}`,
-    topAssets.length ? `Top assets: ${topAssets.join(", ")}` : "Top assets: none",
-  ].join(" · ");
+    `Asset Health Declines: ${assetHealthDeclineCount}`,
+    `Mechanic Declines: ${mechanicDeclineCount}`,
+    `Affected Vehicles: ${vehicleAffectedCount}`,
+    `Affected Equipment: ${equipmentAffectedCount}`,
+    `Aging 7+ days: ${over7DaysCount}`,
+    `Aging 14+ days: ${over14DaysCount}`,
+    `Oldest unresolved age: ${oldestAgeDays} day(s)`,
+  ];
+
+  const title = `Trend Actions Digest (${dateKey})`;
+  const body = `${detailLines.join(" | ")} | ${
+    topAssets.length ? `Top assets: ${topAssets.join(", ")}` : "Top assets: none"
+  }`;
 
   const recipientRows = (recipients ?? []) as DigestRecipient[];
   const inserts = recipientRows.map((r) => ({
@@ -186,7 +284,7 @@ async function runDigest(params: { source: "cron" | "manual"; ignoreTimeGate: bo
     process.env.APP_URL?.trim() ||
     "https://outdoor-independence-llc-app.vercel.app";
   const emailSubject = title;
-  const emailHtml = buildDigestEmailHtml({ title, body, appUrl });
+  const emailHtml = buildDigestEmailHtml({ title, body, detailLines, topAssets, appUrl });
 
   let emailAttempted = 0;
   let emailSent = 0;
@@ -222,6 +320,7 @@ async function runDigest(params: { source: "cron" | "manual"; ignoreTimeGate: bo
     openCount,
     inReviewCount,
     topAssets,
+    detailLines,
     dateKey,
     email: {
       configured: Boolean(resendApiKey),
