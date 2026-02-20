@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type NotificationRow = {
@@ -14,6 +15,61 @@ type NotificationRow = {
   created_at: string;
   read_at: string | null;
 };
+
+type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
+
+function isRangeKey(value: string | null): value is RangeKey {
+  return (
+    value === "all" ||
+    value === "today" ||
+    value === "week" ||
+    value === "month" ||
+    value === "quarter" ||
+    value === "year" ||
+    value === "custom"
+  );
+}
+
+function startOfDay(date: Date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfWeek(date: Date) {
+  const d = startOfDay(date);
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  return d;
+}
+
+function startOfMonth(date: Date) {
+  const d = startOfDay(date);
+  d.setDate(1);
+  return d;
+}
+
+function startOfQuarter(date: Date) {
+  const d = startOfDay(date);
+  const month = d.getMonth();
+  const quarterStart = Math.floor(month / 3) * 3;
+  d.setMonth(quarterStart, 1);
+  return d;
+}
+
+function startOfYear(date: Date) {
+  const d = startOfDay(date);
+  d.setMonth(0, 1);
+  return d;
+}
+
+function toDateInputValue(date: Date) {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, "0");
+  const d = `${date.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -33,6 +89,10 @@ function buttonStyle(): React.CSSProperties {
     color: "inherit",
     fontWeight: 800,
     cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
   };
 }
 
@@ -61,11 +121,18 @@ function severityColor(severity: NotificationRow["severity"]) {
 }
 
 export default function NotificationsClient() {
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [range, setRange] = useState<RangeKey>(() => {
+    const fromQuery = searchParams.get("range");
+    return isRangeKey(fromQuery) ? fromQuery : "all";
+  });
+  const [customFrom, setCustomFrom] = useState(() => toDateInputValue(new Date()));
+  const [customTo, setCustomTo] = useState(() => toDateInputValue(new Date()));
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
@@ -75,7 +142,11 @@ export default function NotificationsClient() {
     setErrorMessage(null);
     const [notificationsRes, prefsRes] = await Promise.all([
       fetch("/api/notifications", { method: "GET" }),
-      fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_prefs" }) }),
+      fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_prefs" }),
+      }),
     ]);
 
     const notificationsJson = await notificationsRes.json().catch(() => ({}));
@@ -110,15 +181,39 @@ export default function NotificationsClient() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const now = new Date();
+    const startToday = startOfDay(now).getTime();
+    const startWeek = startOfWeek(now).getTime();
+    const startMonth = startOfMonth(now).getTime();
+    const startQuarter = startOfQuarter(now).getTime();
+    const startYear = startOfYear(now).getTime();
+    const customFromDate = new Date(`${customFrom}T00:00:00`);
+    const customToDate = new Date(`${customTo}T23:59:59.999`);
+    const customFromMs = Number.isNaN(customFromDate.getTime()) ? null : customFromDate.getTime();
+    const customToMs = Number.isNaN(customToDate.getTime()) ? null : customToDate.getTime();
+
     return rows.filter((row) => {
       if (showUnreadOnly && row.is_read) return false;
+      const createdMs = new Date(row.created_at).getTime();
+      if (Number.isNaN(createdMs)) return false;
+
+      if (range === "today" && createdMs < startToday) return false;
+      if (range === "week" && createdMs < startWeek) return false;
+      if (range === "month" && createdMs < startMonth) return false;
+      if (range === "quarter" && createdMs < startQuarter) return false;
+      if (range === "year" && createdMs < startYear) return false;
+      if (range === "custom") {
+        if (customFromMs !== null && createdMs < customFromMs) return false;
+        if (customToMs !== null && createdMs > customToMs) return false;
+      }
+
       if (!q) return true;
       const hay = [row.title, row.body, row.kind, row.entity_type ?? "", row.entity_id ?? ""]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [rows, search, showUnreadOnly]);
+  }, [rows, search, showUnreadOnly, range, customFrom, customTo]);
 
   const unreadCount = useMemo(() => rows.filter((row) => !row.is_read).length, [rows]);
 
@@ -205,21 +300,55 @@ export default function NotificationsClient() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inputStyle(), minWidth: 240, flex: "1 1 240px" }}
-          placeholder="Search notifications..."
-        />
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <input
-            type="checkbox"
-            checked={showUnreadOnly}
-            onChange={(e) => setShowUnreadOnly(e.target.checked)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ ...inputStyle(), minWidth: 240, flex: "1 1 240px" }}
+            placeholder="Search notifications..."
           />
-          Unread only
-        </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={showUnreadOnly}
+              onChange={(e) => setShowUnreadOnly(e.target.checked)}
+            />
+            Unread only
+          </label>
+          <select value={range} onChange={(e) => setRange(e.target.value as RangeKey)} style={inputStyle()}>
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="quarter">This quarter</option>
+            <option value="year">This year</option>
+            <option value="custom">Custom range</option>
+          </select>
+        </div>
+
+        {range === "custom" ? (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>From</span>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                style={inputStyle()}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>To</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                style={inputStyle()}
+              />
+            </label>
+          </div>
+        ) : null}
       </div>
 
       <div style={{ marginTop: 12, ...cardStyle() }}>
@@ -228,7 +357,7 @@ export default function NotificationsClient() {
         ) : errorMessage ? (
           <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
         ) : filtered.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>No notifications found.</div>
+          <div style={{ opacity: 0.75 }}>No notifications found for the selected filters.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {filtered.map((row) => (

@@ -49,6 +49,15 @@ type InspectionRow = {
   checklist: unknown;
 };
 
+type HomeNotificationRow = {
+  id: number;
+  title: string;
+  body: string;
+  severity: "info" | "warning" | "high" | "critical";
+  is_read: boolean;
+  created_at: string;
+};
+
 type DashboardData = {
   title: string;
   subtitle: string;
@@ -67,11 +76,19 @@ function todayDateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
+function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
 export default async function Home() {
   let lowStockCount = 0;
   let role: string | null = null;
   let tiles = [...baseTiles];
   let dashboard: DashboardData | null = null;
+  let recentNotifications: HomeNotificationRow[] = [];
+  let unreadNotificationCount = 0;
 
   try {
     const supabase = await createServerSupabase();
@@ -86,6 +103,21 @@ export default async function Home() {
         .maybeSingle();
       profile = (data as ProfileRow | null) ?? null;
       role = profile?.role ?? null;
+
+      const { data: notificationsData, error: notificationsError } = await supabase
+        .from("user_notifications")
+        .select("id,title,body,severity,is_read,created_at")
+        .eq("recipient_id", authData.user.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (notificationsError) {
+        console.error("[dashboard] failed to load notifications:", notificationsError);
+      } else {
+        recentNotifications = ((notificationsData ?? []) as HomeNotificationRow[]).slice(0, 5);
+        unreadNotificationCount = ((notificationsData ?? []) as HomeNotificationRow[]).filter(
+          (row) => row.is_read !== true
+        ).length;
+      }
     }
 
     const { data: inventoryRows, error: inventoryError } = await supabase
@@ -352,6 +384,67 @@ export default async function Home() {
           </div>
         </section>
       ) : null}
+
+      <section style={{ ...dashboardCardStyle, marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Notifications Inbox</div>
+            <div style={{ opacity: 0.75, marginTop: 4 }}>
+              Alerts stay here for later review if one is missed.
+            </div>
+          </div>
+          <Link href="/notifications" style={dashboardActionStyle}>
+            Open Full Inbox
+          </Link>
+        </div>
+
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={statCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Unread</div>
+            <div style={{ fontWeight: 900, fontSize: 22, marginTop: 2 }}>{unreadNotificationCount}</div>
+          </div>
+          <Link href="/notifications?range=today" style={dashboardActionStyle}>
+            Today
+          </Link>
+          <Link href="/notifications?range=week" style={dashboardActionStyle}>
+            This Week
+          </Link>
+          <Link href="/notifications?range=month" style={dashboardActionStyle}>
+            This Month
+          </Link>
+          <Link href="/notifications?range=quarter" style={dashboardActionStyle}>
+            This Quarter
+          </Link>
+          <Link href="/notifications?range=year" style={dashboardActionStyle}>
+            This Year
+          </Link>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {recentNotifications.length === 0 ? (
+            <div style={{ opacity: 0.7 }}>No alerts yet.</div>
+          ) : (
+            recentNotifications.map((row) => (
+              <Link
+                key={row.id}
+                href="/notifications"
+                style={{
+                  border: "1px solid var(--surface-border)",
+                  borderRadius: 12,
+                  padding: 10,
+                  color: "inherit",
+                  textDecoration: "none",
+                  background: row.is_read ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>{row.title}</div>
+                <div style={{ opacity: 0.84, marginTop: 4 }}>{row.body}</div>
+                <div style={{ opacity: 0.65, fontSize: 12, marginTop: 6 }}>{formatDateTime(row.created_at)}</div>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
 
       <div
         style={{
