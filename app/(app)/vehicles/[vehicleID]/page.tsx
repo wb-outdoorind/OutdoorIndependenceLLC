@@ -183,6 +183,14 @@ function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
   return combineMechanicScore(objective, log.mechanic_self_score);
 }
 
+function trendDirection(points: number[]) {
+  if (points.length < 2) return "Flat";
+  const delta = points[points.length - 1] - points[0];
+  if (delta >= 4) return "Improving";
+  if (delta <= -4) return "Declining";
+  return "Stable";
+}
+
 function parseTitleAndDescription(raw: string | null) {
   if (!raw) return { title: "", description: "" };
   const lines = raw.split("\n");
@@ -266,6 +274,17 @@ const editSecondaryButtonStyle: React.CSSProperties = {
   color: "inherit",
   fontWeight: 800,
   cursor: "pointer",
+};
+
+const trendPillStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 8px",
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.05)",
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 function badgeStyle(label: string): React.CSSProperties {
@@ -745,6 +764,23 @@ export default function VehicleDetailPage() {
     userRole === "office_admin" ||
     userRole === "mechanic";
   const canEditMechanicScore = userRole === "mechanic";
+  const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
+
+  const scoreTrend = useMemo(() => {
+    const chronological = [...logPreviewRows]
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .slice(-8);
+    const mechanicPoints = chronological.map((row) => maintenanceLogQualityScore(row));
+    const healthPoints = mechanicPoints.map((mechanic) =>
+      clampPercent(vehicleHealthSummary.operationalScore * 0.8 + mechanic * 0.2)
+    );
+    return {
+      mechanicPoints,
+      healthPoints,
+      mechanicTrend: trendDirection(mechanicPoints),
+      healthTrend: trendDirection(healthPoints),
+    };
+  }, [logPreviewRows, vehicleHealthSummary.operationalScore]);
 
   async function saveMechanicScore() {
     const latestLog = logPreviewRows[0];
@@ -1202,6 +1238,42 @@ export default function VehicleDetailPage() {
           </div>
         </div>
       </div>
+
+      {canViewScoreTrends ? (
+        <div style={{ marginTop: 18, ...cardStyle() }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Score Trend (Last Logs)</div>
+          {scoreTrend.mechanicPoints.length < 2 ? (
+            <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {scoreTrend.healthPoints.map((point, idx) => (
+                    <span key={`health-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {scoreTrend.mechanicPoints.map((point, idx) => (
+                    <span key={`mechanic-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Actions */}
       <div style={{ marginTop: 18, ...cardStyle() }}>

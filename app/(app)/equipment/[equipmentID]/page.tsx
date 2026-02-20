@@ -140,6 +140,14 @@ function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
   return combineMechanicScore(objective, log.mechanic_self_score);
 }
 
+function trendDirection(points: number[]) {
+  if (points.length < 2) return "Flat";
+  const delta = points[points.length - 1] - points[0];
+  if (delta >= 4) return "Improving";
+  if (delta <= -4) return "Declining";
+  return "Stable";
+}
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -180,6 +188,17 @@ function actionBtnStyle(): React.CSSProperties {
     gap: 12,
   };
 }
+
+const trendPillStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 8px",
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.05)",
+  fontSize: 12,
+  fontWeight: 700,
+};
 
 function isTrailerEquipmentType(value: string | null | undefined) {
   return (value ?? "").toLowerCase().includes("trailer");
@@ -418,6 +437,7 @@ export default function EquipmentDetailPage() {
     userRole === "office_admin" ||
     userRole === "mechanic";
   const canEditMechanicScore = userRole === "mechanic";
+  const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
 
   async function saveMechanicScore() {
     const latestLog = logPreviewRows[0];
@@ -494,6 +514,22 @@ export default function EquipmentDetailPage() {
       pmStatus,
     };
   }, [equipment?.current_hours, equipment?.status, equipment?.year, latestPmHours, logPreviewRows, openRequestCountForHealth]);
+
+  const scoreTrend = useMemo(() => {
+    const chronological = [...logPreviewRows]
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .slice(-8);
+    const mechanicPoints = chronological.map((row) => maintenanceLogQualityScore(row));
+    const healthPoints = mechanicPoints.map((mechanic) =>
+      clampPercent(equipmentHealthSummary.operationalScore * 0.8 + mechanic * 0.2)
+    );
+    return {
+      mechanicPoints,
+      healthPoints,
+      mechanicTrend: trendDirection(mechanicPoints),
+      healthTrend: trendDirection(healthPoints),
+    };
+  }, [equipmentHealthSummary.operationalScore, logPreviewRows]);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     return requestPreviewRows.map((r) => {
@@ -685,6 +721,42 @@ export default function EquipmentDetailPage() {
           </div>
         </div>
       </div>
+
+      {canViewScoreTrends ? (
+        <div style={{ marginTop: 18, ...cardStyle() }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Score Trend (Last Logs)</div>
+          {scoreTrend.mechanicPoints.length < 2 ? (
+            <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {scoreTrend.healthPoints.map((point, idx) => (
+                    <span key={`health-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {scoreTrend.mechanicPoints.map((point, idx) => (
+                    <span key={`mechanic-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
