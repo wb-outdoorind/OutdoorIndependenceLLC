@@ -12,6 +12,13 @@ type TrendActionRow = {
   created_at: string;
 };
 
+type DigestRecipient = {
+  id: string;
+  role: string | null;
+  email: string | null;
+  full_name: string | null;
+};
+
 function todayInChicagoParts() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -49,6 +56,48 @@ function chicagoDateKey() {
   return `${t.year}-${t.month}-${t.day}`;
 }
 
+function buildDigestEmailHtml(params: {
+  title: string;
+  body: string;
+  appUrl: string;
+}) {
+  return [
+    `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">`,
+    `<h2 style="margin:0 0 12px 0;">${params.title}</h2>`,
+    `<p style="margin:0 0 16px 0;">${params.body}</p>`,
+    `<p style="margin:0 0 16px 0;">Open the app to review trend actions and assign follow-ups.</p>`,
+    `<a href="${params.appUrl}" style="display:inline-block;padding:10px 14px;background:#0f766e;color:#fff;text-decoration:none;border-radius:8px;">Open Operations App</a>`,
+    `</div>`,
+  ].join("");
+}
+
+async function sendDigestEmail(params: {
+  resendApiKey: string;
+  fromEmail: string;
+  toEmail: string;
+  subject: string;
+  html: string;
+}) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: params.fromEmail,
+      to: [params.toEmail],
+      subject: params.subject,
+      html: params.html,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Resend ${response.status}: ${text}`);
+  }
+}
+
 export async function GET(req: Request) {
   const expected = process.env.CRON_SECRET;
   if (expected) {
@@ -68,7 +117,7 @@ export async function GET(req: Request) {
   const [{ data: recipients, error: recipientsError }, { data: actions, error: actionsError }] = await Promise.all([
     admin
       .from("profiles")
-      .select("id,role")
+      .select("id,role,email,full_name")
       .in("role", ["owner", "mechanic"]),
     admin
       .from("trend_actions")
@@ -105,7 +154,7 @@ export async function GET(req: Request) {
     topAssets.length ? `Top assets: ${topAssets.join(", ")}` : "Top assets: none",
   ].join(" · ");
 
-  const recipientRows = (recipients ?? []) as Array<{ id: string; role: string | null }>;
+  const recipientRows = (recipients ?? []) as DigestRecipient[];
   const inserts = recipientRows.map((r) => ({
     recipient_id: r.id,
     title,
@@ -127,6 +176,59 @@ export async function GET(req: Request) {
     }
   }
 
+  const prefsByUser = new Map<string, boolean>();
+  if (recipientRows.length > 0) {
+    const { data: prefsRows } = await admin
+      .from("user_notification_prefs")
+      .select("user_id,email_enabled")
+      .in(
+        "user_id",
+        recipientRows.map((r) => r.id)
+      );
+    for (const row of (prefsRows ?? []) as Array<{ user_id: string; email_enabled: boolean | null }>) {
+      prefsByUser.set(row.user_id, row.email_enabled !== false);
+    }
+  }
+
+  const resendApiKey = process.env.RESEND_API_KEY?.trim() || "";
+  const fromEmail =
+    process.env.TREND_DIGEST_FROM_EMAIL?.trim() ||
+    process.env.ALERT_FROM_EMAIL?.trim() ||
+    "onboarding@resend.dev";
+  const appUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.APP_URL?.trim() ||
+    "https://outdoor-independence-llc-app.vercel.app";
+  const emailSubject = title;
+  const emailHtml = buildDigestEmailHtml({ title, body, appUrl });
+
+  let emailAttempted = 0;
+  let emailSent = 0;
+  let emailFailed = 0;
+  if (resendApiKey) {
+    const emailRecipients = recipientRows.filter((r) => {
+      const em = (r.email || "").trim();
+      if (!em) return false;
+      return prefsByUser.get(r.id) !== false;
+    });
+    emailAttempted = emailRecipients.length;
+    const emailResults = await Promise.allSettled(
+      emailRecipients.map((r) =>
+        sendDigestEmail({
+          resendApiKey,
+          fromEmail,
+          toEmail: (r.email || "").trim(),
+          subject: emailSubject,
+          html: emailHtml,
+        })
+      )
+    );
+    for (const result of emailResults) {
+      if (result.status === "fulfilled") emailSent += 1;
+      else emailFailed += 1;
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     sentTo: inserts.length,
@@ -134,5 +236,12 @@ export async function GET(req: Request) {
     inReviewCount,
     topAssets,
     dateKey,
+    email: {
+      configured: Boolean(resendApiKey),
+      from: fromEmail,
+      attempted: emailAttempted,
+      sent: emailSent,
+      failed: emailFailed,
+    },
   });
 }
