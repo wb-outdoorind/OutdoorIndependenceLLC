@@ -21,6 +21,7 @@ type VehicleRow = {
   vin: string | null;
   plate: string | null;
   fuel: string | null;
+  oil_type: string | null;
   mileage: number | null;
   status: string | null;
   asset: string | null;
@@ -94,6 +95,7 @@ type VehicleEditDraft = {
   plate: string;
   vin: string;
   fuel: string;
+  oil_type: string;
   mileage: string;
   status: string;
   asset: string;
@@ -419,7 +421,7 @@ export default function VehicleDetailPage() {
       // 1) Try lookup by id
       const byId = await supabase
         .from("vehicles")
-        .select("id,name,type,make,model,year,vin,plate,fuel,mileage,status,asset")
+        .select("id,name,type,make,model,year,vin,plate,fuel,oil_type,mileage,status,asset")
         .eq("id", vehicleIdFromRoute)
         .maybeSingle();
 
@@ -446,6 +448,7 @@ export default function VehicleDetailPage() {
           plate: row.plate ?? "",
           vin: row.vin ?? "",
           fuel: row.fuel ?? "",
+          oil_type: row.oil_type ?? "",
           mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
           status: row.status ?? "",
           asset: row.asset ?? "",
@@ -463,7 +466,7 @@ export default function VehicleDetailPage() {
       if (assetParam) {
         const byAsset = await supabase
           .from("vehicles")
-          .select("id,name,type,make,model,year,vin,plate,fuel,mileage,status,asset")
+          .select("id,name,type,make,model,year,vin,plate,fuel,oil_type,mileage,status,asset")
           .eq("asset", assetParam)
           .maybeSingle();
 
@@ -490,6 +493,7 @@ export default function VehicleDetailPage() {
             plate: row.plate ?? "",
             vin: row.vin ?? "",
             fuel: row.fuel ?? "",
+            oil_type: row.oil_type ?? "",
             mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
             status: row.status ?? "",
             asset: row.asset ?? "",
@@ -503,7 +507,7 @@ export default function VehicleDetailPage() {
       if (plateParam) {
         const byPlate = await supabase
           .from("vehicles")
-          .select("id,name,type,make,model,year,vin,plate,fuel,mileage,status,asset")
+          .select("id,name,type,make,model,year,vin,plate,fuel,oil_type,mileage,status,asset")
           .eq("plate", plateParam)
           .maybeSingle();
 
@@ -530,6 +534,7 @@ export default function VehicleDetailPage() {
             plate: row.plate ?? "",
             vin: row.vin ?? "",
             fuel: row.fuel ?? "",
+            oil_type: row.oil_type ?? "",
             mileage: typeof row.mileage === "number" ? String(row.mileage) : "",
             status: row.status ?? "",
             asset: row.asset ?? "",
@@ -647,6 +652,7 @@ export default function VehicleDetailPage() {
   const displayPlate = vehicle?.plate ?? "—";
   const displayVin = vehicle?.vin ?? "—";
   const displayFuel = vehicle?.fuel ?? "—";
+  const displayOilType = vehicle?.oil_type ?? "—";
   const displayStatus = vehicle?.status ?? "—";
 
   const currentMileage = useMemo(() => {
@@ -833,6 +839,7 @@ export default function VehicleDetailPage() {
       plate: vehicle.plate ?? "",
       vin: vehicle.vin ?? "",
       fuel: vehicle.fuel ?? "",
+      oil_type: vehicle.oil_type ?? "",
       mileage: typeof vehicle.mileage === "number" ? String(vehicle.mileage) : "",
       status: vehicle.status ?? "",
       asset: vehicle.asset ?? "",
@@ -881,6 +888,7 @@ export default function VehicleDetailPage() {
         plate: editDraft.plate.trim() || null,
         vin: editDraft.vin.trim() || null,
         fuel: editDraft.fuel.trim() || null,
+        oil_type: editDraft.oil_type.trim() || null,
         mileage: parsedMileage,
         status: nextStatus,
         asset: editDraft.asset.trim() || null,
@@ -903,6 +911,7 @@ export default function VehicleDetailPage() {
       plate: editDraft.plate.trim() || null,
       vin: editDraft.vin.trim() || null,
       fuel: editDraft.fuel.trim() || null,
+      oil_type: editDraft.oil_type.trim() || null,
       mileage: parsedMileage,
       status: nextStatus,
       asset: editDraft.asset.trim() || null,
@@ -918,6 +927,7 @@ export default function VehicleDetailPage() {
       plate: updatedVehicle.plate ?? "",
       vin: updatedVehicle.vin ?? "",
       fuel: updatedVehicle.fuel ?? "",
+      oil_type: updatedVehicle.oil_type ?? "",
       mileage: typeof updatedVehicle.mileage === "number" ? String(updatedVehicle.mileage) : "",
       status: updatedVehicle.status ?? "",
       asset: updatedVehicle.asset ?? "",
@@ -1089,6 +1099,14 @@ export default function VehicleDetailPage() {
                 <input value={editDraft.fuel} onChange={(e) => updateDraft("fuel", e.target.value)} style={detailInputStyle} />
               </div>
               <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
+                <input
+                  value={editDraft.oil_type}
+                  onChange={(e) => updateDraft("oil_type", e.target.value)}
+                  style={detailInputStyle}
+                />
+              </div>
+              <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Asset Tag / QR</div>
                 <input value={editDraft.asset} onChange={(e) => updateDraft("asset", e.target.value)} style={detailInputStyle} />
               </div>
@@ -1138,6 +1156,10 @@ export default function VehicleDetailPage() {
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
               <div style={{ fontWeight: 900 }}>{displayFuel}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
+              <div style={{ fontWeight: 900 }}>{displayOilType}</div>
             </div>
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>

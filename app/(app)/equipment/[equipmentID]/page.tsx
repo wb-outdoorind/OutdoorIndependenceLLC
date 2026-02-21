@@ -17,6 +17,7 @@ type EquipmentRow = {
   serial_number: string | null;
   license_plate: string | null;
   fuel_type: string | null;
+  oil_type: string | null;
   current_hours: number | null;
   status: string | null;
   external_id: string | null;
@@ -247,7 +248,7 @@ export default function EquipmentDetailPage() {
       const { data, error } = await supabase
         .from("equipment")
         .select(
-          "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,current_hours,status,external_id"
+          "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,current_hours,status,external_id"
         )
         .eq("id", equipmentIdFromRoute)
         .maybeSingle();
@@ -605,6 +606,7 @@ export default function EquipmentDetailPage() {
           <Spec label="Serial Number" value={equipment?.serial_number ?? "-"} />
           <Spec label="License Plate" value={equipment?.license_plate ?? "-"} />
           <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
+          <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
           <Spec
             label="Current Hours"
             value={
