@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
@@ -65,7 +65,14 @@ function todayYYYYMMDD() {
 
 export default function MaintenanceRequestPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   useFormExitGuard();
+
+  const prefillIssue = (searchParams.get("issue") || "").trim();
+  const prefillIdentifiedDuring = (searchParams.get("identifiedDuring") || "").trim();
+  const prefillSystem = (searchParams.get("systemAffected") || "").trim();
+  const prefillUrgency = (searchParams.get("urgency") || "").trim();
+  const prefillDetails = (searchParams.get("details") || "").trim();
 
   // ✅ folder: app/(app)/vehicles/[vehicleID]/maintenance-request/page.tsx
   const params = useParams<{ vehicleID?: string }>();
@@ -79,7 +86,9 @@ export default function MaintenanceRequestPage() {
   const [employee, setEmployee] = useState("");
 
   const [issueIdentifiedDuring, setIssueIdentifiedDuring] =
-    useState<IssueIdentifiedDuring | "">("");
+    useState<IssueIdentifiedDuring | "">(
+      () => (prefillIdentifiedDuring as IssueIdentifiedDuring) || ""
+    );
 
   const [drivabilityStatus, setDrivabilityStatus] =
     useState<DrivabilityStatus | "">("");
@@ -87,11 +96,26 @@ export default function MaintenanceRequestPage() {
   const [unitStatus, setUnitStatus] = useState<UnitStatus | "">("");
   const [locationNote, setLocationNote] = useState("");
 
-  const [systemAffected, setSystemAffected] = useState<SystemAffected | "">("");
-  const [urgency, setUrgency] = useState<Urgency | "">("");
+  const [systemAffected, setSystemAffected] = useState<SystemAffected | "">(
+    () => (prefillSystem as SystemAffected) || ""
+  );
+  const [urgency, setUrgency] = useState<Urgency | "">(
+    () => (prefillUrgency as Urgency) || ""
+  );
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState(
+    () => (prefillIssue ? `${prefillSystem || "Maintenance"} issue: ${prefillIssue}` : "")
+  );
+  const [description, setDescription] = useState(() =>
+    prefillIssue
+      ? [
+          `Reported from inspection failed item: ${prefillIssue}`,
+          prefillDetails ? `Additional details: ${prefillDetails}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : ""
+  );
 
   const [status] = useState<RequestStatus>("Open");
   const [mileage, setMileage] = useState("");

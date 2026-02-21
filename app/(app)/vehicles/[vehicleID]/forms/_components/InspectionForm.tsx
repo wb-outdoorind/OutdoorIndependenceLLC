@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
-export type Choice = "pass" | "fail" | "na";
+export type Choice = "pass" | "fail";
 type ChoiceOrBlank = Choice | "";
 export type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
@@ -52,6 +52,73 @@ type StoredInspectionRecord = {
   employeeSignature: string;
   managerSignature?: string;
 };
+
+type OpenMaintenanceRequest = {
+  id: string;
+  status: string | null;
+  urgency: string | null;
+  system_affected: string | null;
+  description: string | null;
+  created_at: string;
+};
+
+type ExtraFieldConfig = {
+  label: string;
+  placeholder: string;
+  inputMode: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  required: boolean;
+};
+
+const DASH_LIGHT_OPTIONS = [
+  "None",
+  "Check Engine",
+  "ABS",
+  "Oil Pressure",
+  "Battery / Charging",
+  "Coolant Temp",
+  "Brake",
+  "Traction Control",
+  "Airbag / SRS",
+  "TPMS",
+  "DEF / Emissions",
+  "Other",
+] as const;
+
+function failLinkKey(sectionId: string, itemKey: string) {
+  return `${sectionId}::${itemKey}`;
+}
+
+function getIssueIdentifiedDuring(type: InspectionType) {
+  return type === "pre-trip" ? "Pre-Trip Inspection" : "Post-Trip Inspection";
+}
+
+function mapSystemAffected(label: string): string {
+  const l = label.toLowerCase();
+  if (l.includes("brake")) return "Brakes";
+  if (l.includes("steer")) return "Steering";
+  if (l.includes("tire") || l.includes("wheel") || l.includes("lug")) return "Tires / Wheels";
+  if (l.includes("elect") || l.includes("light") || l.includes("battery") || l.includes("strobe")) return "Electrical";
+  if (l.includes("hydraulic") || l.includes("hose") || l.includes("coupler")) return "Hydraulics";
+  if (l.includes("engine") || l.includes("coolant") || l.includes("oil") || l.includes("belt") || l.includes("fuel")) return "Engine";
+  if (l.includes("frame") || l.includes("body") || l.includes("door") || l.includes("gate")) return "Body / Frame";
+  if (l.includes("attachment") || l.includes("plow") || l.includes("salter") || l.includes("bucket")) return "Attachment / Implement";
+  return "Other";
+}
+
+function extraFieldConfig(itemKey: string, label: string): ExtraFieldConfig | null {
+  const k = itemKey.toLowerCase();
+  const l = label.toLowerCase();
+  if (k.includes("tire") || l.includes("psi")) {
+    return { label: "Measured PSI", placeholder: "e.g. 42.5", inputMode: "decimal", required: true };
+  }
+  if (k === "fuel_level" || k === "def_level") {
+    return { label: "Recorded Level", placeholder: "e.g. 75%", inputMode: "text", required: true };
+  }
+  if (k === "diag_codes_list") {
+    return { label: "Diagnostic Codes", placeholder: "Enter displayed code(s)", inputMode: "text", required: false };
+  }
+  return null;
+}
 
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
@@ -142,9 +209,6 @@ function ChoiceToggle({
       <span style={pill(value === "fail")} onClick={() => onChange("fail")}>
         Fail
       </span>
-      <span style={pill(value === "na")} onClick={() => onChange("na")}>
-        N/A
-      </span>
     </div>
   );
 }
@@ -214,10 +278,15 @@ export default function InspectionForm({
   const [inspectionDate, setInspectionDate] = useState(todayYYYYMMDD());
   const [mileage, setMileage] = useState("");
   const [employee, setEmployee] = useState("");
+  const [dashLightsOn, setDashLightsOn] = useState<string[]>([]);
 
   // ✅ sectionState must rebuild when vehicleType/visibleSections changes
   const [sectionState, setSectionState] =
     useState<StoredInspectionRecord["sections"]>({});
+  const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
+  const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
+  const [openRequests, setOpenRequests] = useState<OpenMaintenanceRequest[]>([]);
+  const [creatingFailLinkKey, setCreatingFailLinkKey] = useState<string | null>(null);
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -282,6 +351,31 @@ export default function InspectionForm({
     })();
   }, []);
 
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select("id,status,urgency,system_affected,description,created_at")
+        .eq("vehicle_id", vehicleId)
+        .in("status", ["Open", "In Progress"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading open maintenance requests:", error);
+        setOpenRequests([]);
+        return;
+      }
+      setOpenRequests((data ?? []) as OpenMaintenanceRequest[]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [vehicleId]);
+
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
       const st = sectionState[sec.id];
@@ -333,6 +427,51 @@ export default function InspectionForm({
     setExiting((prev) => ({ ...prev, [itemKey]: value }));
   }
 
+  function setItemExtraValue(sectionId: string, itemKey: string, value: string) {
+    setItemExtraValues((prev) => ({
+      ...prev,
+      [failLinkKey(sectionId, itemKey)]: value,
+    }));
+  }
+
+  async function quickCreateRequest(sectionTitle: string, itemLabel: string, linkKey: string) {
+    if (!vehicleId) return;
+    const supabase = createSupabaseBrowser();
+    setCreatingFailLinkKey(linkKey);
+    const description = [
+      `Auto-created from ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} failure`,
+      `Section: ${sectionTitle}`,
+      `Failed Item: ${itemLabel}`,
+      `Teammate: ${employee.trim() || "Unknown"}`,
+      notes.trim() ? `Inspection Notes: ${notes.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const { data, error } = await supabase
+      .from("maintenance_requests")
+      .insert({
+        vehicle_id: vehicleId,
+        status: "Open",
+        urgency: "High",
+        system_affected: mapSystemAffected(itemLabel),
+        drivability: "Limited – Operate with caution",
+        unit_status: "Active",
+        issue_identified_during: getIssueIdentifiedDuring(type),
+        description,
+      })
+      .select("id,status,urgency,system_affected,description,created_at")
+      .single();
+    setCreatingFailLinkKey(null);
+    if (error || !data) {
+      alert(error?.message || "Failed to create maintenance request.");
+      return;
+    }
+
+    setOpenRequests((prev) => [data as OpenMaintenanceRequest, ...prev]);
+    setFailRequestLinks((prev) => ({ ...prev, [linkKey]: data.id }));
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -343,6 +482,7 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
+    if (dashLightsOn.length === 0) return alert("Please select dash light status.");
     if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (defectsFound && !notes.trim())
@@ -366,6 +506,19 @@ export default function InspectionForm({
         for (const it of sec.items) {
           const value = st.items?.[it.key] as ChoiceOrBlank;
           if (!value) return alert(`Please answer all checklist items before submitting.`);
+          const extraCfg = extraFieldConfig(it.key, it.label);
+          if (extraCfg?.required) {
+            const extraVal = (itemExtraValues[failLinkKey(sec.id, it.key)] || "").trim();
+            if (!extraVal) {
+              return alert(`${extraCfg.label} is required for "${it.label}".`);
+            }
+          }
+          if (value === "fail") {
+            const link = (failRequestLinks[failLinkKey(sec.id, it.key)] || "").trim();
+            if (!link) {
+              return alert(`Link or create a maintenance request for failed item: "${it.label}".`);
+            }
+          }
         }
       }
     }
@@ -373,6 +526,12 @@ export default function InspectionForm({
     for (const it of exitingItems ?? []) {
       const value = exiting[it.key] as ChoiceOrBlank;
       if (!value) return alert("Please answer all exiting checklist items before submitting.");
+      if (value === "fail") {
+        const link = (failRequestLinks[failLinkKey("exiting", it.key)] || "").trim();
+        if (!link) {
+          return alert(`Link or create a maintenance request for failed item: "${it.label}".`);
+        }
+      }
     }
 
     if (!employeeSignature.trim())
@@ -390,6 +549,9 @@ export default function InspectionForm({
       managerSignature: managerSignature.trim()
         ? managerSignature.trim()
         : undefined,
+      dashLightsOn,
+      itemExtraValues,
+      failRequestLinks,
       type,
     };
 
@@ -505,6 +667,54 @@ export default function InspectionForm({
                 style={inputStyle()}
               />
             </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                Dash Lights On? * (Select all that apply)
+              </div>
+              <select
+                multiple
+                value={dashLightsOn}
+                onChange={(e) => {
+                  const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                  if (values.includes("None") && values.length > 1) {
+                    setDashLightsOn(values.filter((v) => v !== "None"));
+                  } else {
+                    setDashLightsOn(values);
+                  }
+                }}
+                style={{ ...inputStyle(), minHeight: 120 }}
+              >
+                {DASH_LIGHT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setDashLightsOn(DASH_LIGHT_OPTIONS.filter((o) => o !== "None"))}
+                  style={secondaryButtonStyle()}
+                >
+                  Select All Lights
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDashLightsOn(["None"])}
+                  style={secondaryButtonStyle()}
+                >
+                  No Dash Lights On
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDashLightsOn([])}
+                  style={secondaryButtonStyle()}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -583,10 +793,97 @@ export default function InspectionForm({
                         }}
                       >
                         <div style={{ fontWeight: 700 }}>{it.label}</div>
-                        <ChoiceToggle
-                          value={st.items[it.key]}
-                          onChange={(v) => setItem(sec.id, it.key, v)}
-                        />
+                        <div style={{ display: "grid", gap: 8 }}>
+                          <ChoiceToggle
+                            value={st.items[it.key]}
+                            onChange={(v) => setItem(sec.id, it.key, v)}
+                          />
+                          {(() => {
+                            const cfg = extraFieldConfig(it.key, it.label);
+                            if (!cfg) return null;
+                            const detailKey = failLinkKey(sec.id, it.key);
+                            return (
+                              <div>
+                                <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 6 }}>
+                                  {cfg.label}
+                                  {cfg.required ? " *" : ""}
+                                </div>
+                                <input
+                                  value={itemExtraValues[detailKey] || ""}
+                                  onChange={(e) => setItemExtraValue(sec.id, it.key, e.target.value)}
+                                  inputMode={cfg.inputMode}
+                                  placeholder={cfg.placeholder}
+                                  style={inputStyle()}
+                                />
+                              </div>
+                            );
+                          })()}
+                          {st.items[it.key] === "fail" ? (
+                            <div
+                              style={{
+                                border: "1px dashed rgba(255,255,255,0.2)",
+                                borderRadius: 10,
+                                padding: 10,
+                                background: "rgba(255,120,120,0.06)",
+                              }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>
+                                Maintenance Request Link Required
+                              </div>
+                              <select
+                                value={failRequestLinks[failLinkKey(sec.id, it.key)] || ""}
+                                onChange={(e) =>
+                                  setFailRequestLinks((prev) => ({
+                                    ...prev,
+                                    [failLinkKey(sec.id, it.key)]: e.target.value,
+                                  }))
+                                }
+                                style={inputStyle()}
+                              >
+                                <option value="">Select existing open request...</option>
+                                {openRequests.map((req) => (
+                                  <option key={req.id} value={req.id}>
+                                    {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
+                                    {new Date(req.created_at).toLocaleDateString()}
+                                  </option>
+                                ))}
+                              </select>
+                              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void quickCreateRequest(sec.title, it.label, failLinkKey(sec.id, it.key))
+                                  }
+                                  style={buttonStyle()}
+                                  disabled={creatingFailLinkKey === failLinkKey(sec.id, it.key)}
+                                >
+                                  {creatingFailLinkKey === failLinkKey(sec.id, it.key)
+                                    ? "Creating..."
+                                    : "Create & Link Request"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    window.open(
+                                      `/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-request?issue=${encodeURIComponent(
+                                        it.label
+                                      )}&identifiedDuring=${encodeURIComponent(getIssueIdentifiedDuring(type))}&systemAffected=${encodeURIComponent(
+                                        mapSystemAffected(it.label)
+                                      )}&urgency=High&details=${encodeURIComponent(
+                                        itemExtraValues[failLinkKey(sec.id, it.key)] || ""
+                                      )}`,
+                                      "_blank",
+                                      "noopener,noreferrer"
+                                    )
+                                  }
+                                  style={secondaryButtonStyle()}
+                                >
+                                  Open Full Request Form
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -622,10 +919,58 @@ export default function InspectionForm({
                   }}
                 >
                   <div style={{ fontWeight: 700 }}>{it.label}</div>
-                  <ChoiceToggle
-                    value={exiting[it.key]}
-                    onChange={(v) => setExitItem(it.key, v)}
-                  />
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <ChoiceToggle
+                      value={exiting[it.key]}
+                      onChange={(v) => setExitItem(it.key, v)}
+                    />
+                    {exiting[it.key] === "fail" ? (
+                      <div
+                        style={{
+                          border: "1px dashed rgba(255,255,255,0.2)",
+                          borderRadius: 10,
+                          padding: 10,
+                          background: "rgba(255,120,120,0.06)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>
+                          Maintenance Request Link Required
+                        </div>
+                        <select
+                          value={failRequestLinks[failLinkKey("exiting", it.key)] || ""}
+                          onChange={(e) =>
+                            setFailRequestLinks((prev) => ({
+                              ...prev,
+                              [failLinkKey("exiting", it.key)]: e.target.value,
+                            }))
+                          }
+                          style={inputStyle()}
+                        >
+                          <option value="">Select existing open request...</option>
+                          {openRequests.map((req) => (
+                            <option key={req.id} value={req.id}>
+                              {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
+                              {new Date(req.created_at).toLocaleDateString()}
+                            </option>
+                          ))}
+                        </select>
+                        <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void quickCreateRequest("Exiting / Securing", it.label, failLinkKey("exiting", it.key))
+                            }
+                            style={buttonStyle()}
+                            disabled={creatingFailLinkKey === failLinkKey("exiting", it.key)}
+                          >
+                            {creatingFailLinkKey === failLinkKey("exiting", it.key)
+                              ? "Creating..."
+                              : "Create & Link Request"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
