@@ -516,7 +516,6 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
-    if (dashLightsOn.length === 0) return alert("Please select dash light status.");
     if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (defectsFound && !notes.trim())
@@ -535,6 +534,9 @@ export default function InspectionForm({
           return alert(
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
           );
+      }
+      if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
+        return alert("Please select all dash lights on for Truck Inspection.");
       }
       if (st?.applicable) {
         for (const it of sec.items) {
@@ -729,53 +731,6 @@ export default function InspectionForm({
               />
             </div>
 
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Dash Lights On? * (Select all that apply)
-              </div>
-              <select
-                multiple
-                value={dashLightsOn}
-                onChange={(e) => {
-                  const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                  if (values.includes("None") && values.length > 1) {
-                    setDashLightsOn(values.filter((v) => v !== "None"));
-                  } else {
-                    setDashLightsOn(values);
-                  }
-                }}
-                style={{ ...inputStyle(), minHeight: 120 }}
-              >
-                {DASH_LIGHT_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => setDashLightsOn(DASH_LIGHT_OPTIONS.filter((o) => o !== "None"))}
-                  style={secondaryButtonStyle()}
-                >
-                  Select All Lights
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDashLightsOn(["None"])}
-                  style={secondaryButtonStyle()}
-                >
-                  No Dash Lights On
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDashLightsOn([])}
-                  style={secondaryButtonStyle()}
-                >
-                  Clear Selection
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -833,6 +788,33 @@ export default function InspectionForm({
                       placeholder={sec.nameFieldLabel}
                       style={inputStyle()}
                     />
+                  </div>
+                ) : null}
+
+                {st.applicable && sec.id === "truck" ? (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                      Dash Lights On? * (Select all that apply)
+                    </div>
+                    <select
+                      multiple
+                      value={dashLightsOn}
+                      onChange={(e) => {
+                        const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                        if (values.includes("None") && values.length > 1) {
+                          setDashLightsOn(values.filter((v) => v !== "None"));
+                        } else {
+                          setDashLightsOn(values);
+                        }
+                      }}
+                      style={{ ...inputStyle(), minHeight: 120 }}
+                    >
+                      {DASH_LIGHT_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 ) : null}
 
