@@ -53,15 +53,6 @@ type StoredInspectionRecord = {
   managerSignature?: string;
 };
 
-type OpenMaintenanceRequest = {
-  id: string;
-  status: string | null;
-  urgency: string | null;
-  system_affected: string | null;
-  description: string | null;
-  created_at: string;
-};
-
 type ExtraFieldConfig = {
   label: string;
   placeholder: string;
@@ -265,7 +256,6 @@ export default function InspectionForm({
     useState<StoredInspectionRecord["sections"]>({});
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
-  const [openRequests, setOpenRequests] = useState<OpenMaintenanceRequest[]>([]);
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -406,31 +396,6 @@ export default function InspectionForm({
       [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
     }));
   }, [searchParams]);
-
-  useEffect(() => {
-    if (!vehicleId) return;
-    let active = true;
-    void (async () => {
-      const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("maintenance_requests")
-        .select("id,status,urgency,system_affected,description,created_at")
-        .eq("vehicle_id", vehicleId)
-        .in("status", ["Open", "In Progress"])
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (!active) return;
-      if (error) {
-        console.error("Failed loading open maintenance requests:", error);
-        setOpenRequests([]);
-        return;
-      }
-      setOpenRequests((data ?? []) as OpenMaintenanceRequest[]);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [vehicleId]);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -895,24 +860,6 @@ export default function InspectionForm({
                               <div style={{ fontSize: 12, opacity: 0.8 }}>
                                 Complete the full maintenance request for this failed item, then return to continue this inspection.
                               </div>
-                              <select
-                                value={failRequestLinks[failLinkKey(sec.id, it.key)] || ""}
-                                onChange={(e) =>
-                                  setFailRequestLinks((prev) => ({
-                                    ...prev,
-                                    [failLinkKey(sec.id, it.key)]: e.target.value,
-                                  }))
-                                }
-                                style={{ ...inputStyle(), marginTop: 8 }}
-                              >
-                                <option value="">Select existing open request...</option>
-                                {openRequests.map((req) => (
-                                  <option key={req.id} value={req.id}>
-                                    {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
-                                    {new Date(req.created_at).toLocaleDateString()}
-                                  </option>
-                                ))}
-                              </select>
                               {failRequestLinks[failLinkKey(sec.id, it.key)] ? (
                                 <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                                   Linked Request:{" "}
@@ -1022,24 +969,6 @@ export default function InspectionForm({
                         <div style={{ fontSize: 12, opacity: 0.8 }}>
                           Complete the full maintenance request for this failed item, then return to continue this inspection.
                         </div>
-                        <select
-                          value={failRequestLinks[failLinkKey("exiting", it.key)] || ""}
-                          onChange={(e) =>
-                            setFailRequestLinks((prev) => ({
-                              ...prev,
-                              [failLinkKey("exiting", it.key)]: e.target.value,
-                            }))
-                          }
-                          style={{ ...inputStyle(), marginTop: 8 }}
-                        >
-                          <option value="">Select existing open request...</option>
-                          {openRequests.map((req) => (
-                            <option key={req.id} value={req.id}>
-                              {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
-                              {new Date(req.created_at).toLocaleDateString()}
-                            </option>
-                          ))}
-                        </select>
                         {failRequestLinks[failLinkKey("exiting", it.key)] ? (
                           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                             Linked Request:{" "}
