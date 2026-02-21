@@ -455,6 +455,17 @@ export default function InspectionForm({
     }));
   }
 
+  function toggleDashLight(option: string, checked: boolean) {
+    setDashLightsOn((prev) => {
+      if (checked) {
+        if (option === "None") return ["None"];
+        const withoutNone = prev.filter((v) => v !== "None");
+        return withoutNone.includes(option) ? withoutNone : [...withoutNone, option];
+      }
+      return prev.filter((v) => v !== option);
+    });
+  }
+
   function saveDraft() {
     if (!vehicleId) return;
     const draft = {
@@ -905,26 +916,38 @@ export default function InspectionForm({
                         }}
                       >
                         <div style={{ fontWeight: 700 }}>Dash Lights On? *</div>
-                        <div style={{ display: "grid", gap: 6 }}>
-                          <select
-                            multiple
-                            value={dashLightsOn}
-                            onChange={(e) => {
-                              const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                              if (values.includes("None") && values.length > 1) {
-                                setDashLightsOn(values.filter((v) => v !== "None"));
-                              } else {
-                                setDashLightsOn(values);
-                              }
+                        <div style={{ display: "grid", gap: 6, minWidth: 240 }}>
+                          <div
+                            style={{
+                              border: "1px solid rgba(255,255,255,0.14)",
+                              borderRadius: 12,
+                              padding: 10,
+                              background: "rgba(255,255,255,0.03)",
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                              gap: 8,
                             }}
-                            style={{ ...inputStyle(), minHeight: 120, minWidth: 240 }}
                           >
                             {DASH_LIGHT_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
+                              <label
+                                key={opt}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  cursor: "pointer",
+                                  fontSize: 13,
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={dashLightsOn.includes(opt)}
+                                  onChange={(e) => toggleDashLight(opt, e.target.checked)}
+                                />
+                                <span>{opt}</span>
+                              </label>
                             ))}
-                          </select>
+                          </div>
                           <div style={{ fontSize: 12, opacity: 0.72 }}>
                             Select all that apply.
                           </div>
