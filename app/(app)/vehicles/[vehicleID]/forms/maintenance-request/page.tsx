@@ -73,6 +73,12 @@ export default function MaintenanceRequestPage() {
   const prefillSystem = (searchParams.get("systemAffected") || "").trim();
   const prefillUrgency = (searchParams.get("urgency") || "").trim();
   const prefillDetails = (searchParams.get("details") || "").trim();
+  const sourceMileage = (searchParams.get("sourceMileage") || "").trim();
+  const rawReturnTo = (searchParams.get("returnTo") || "").trim();
+  const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
+  const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
+  const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : "";
+  const parsedSourceMileage = Number(sourceMileage);
 
   // ✅ folder: app/(app)/vehicles/[vehicleID]/maintenance-request/page.tsx
   const params = useParams<{ vehicleID?: string }>();
@@ -118,7 +124,11 @@ export default function MaintenanceRequestPage() {
   );
 
   const [status] = useState<RequestStatus>("Open");
-  const [mileage, setMileage] = useState("");
+  const [mileage, setMileage] = useState(() =>
+    Number.isFinite(parsedSourceMileage) && parsedSourceMileage > 0
+      ? String(parsedSourceMileage)
+      : ""
+  );
 
   const [mitigationApplied, setMitigationApplied] =
     useState<TriState | "">("");
@@ -141,7 +151,9 @@ export default function MaintenanceRequestPage() {
 
       const savedMileage = localStorage.getItem(vehicleMileageKey(vehicleId));
       const m = savedMileage ? Number(savedMileage) : NaN;
-      if (Number.isFinite(m) && m > 0) setMileage(String(m));
+      if (Number.isFinite(m) && m > 0) {
+        setMileage((prev) => (prev.trim() ? prev : String(m)));
+      }
     };
 
     read();
@@ -224,8 +236,6 @@ export default function MaintenanceRequestPage() {
       return;
     }
 
-    localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
-
     if (insertedRequest?.id) {
       try {
         await fetch("/api/form-reports/grade", {
@@ -241,7 +251,45 @@ export default function MaintenanceRequestPage() {
       }
     }
 
-    router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+    try {
+      const { data: vehicleRow, error: vehicleReadError } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (vehicleReadError) {
+        console.error("Failed to read vehicle mileage:", vehicleReadError);
+      } else {
+        const existingMileage = Number(vehicleRow?.mileage ?? 0);
+        const nextMileage =
+          Number.isFinite(existingMileage) && existingMileage > 0
+            ? Math.max(existingMileage, m)
+            : m;
+        const { error: vehicleUpdateError } = await supabase
+          .from("vehicles")
+          .update({ mileage: nextMileage })
+          .eq("id", vehicleId);
+        if (vehicleUpdateError) {
+          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
+        }
+        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
+      }
+    } catch (vehicleMileageError) {
+      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
+      localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+    }
+
+    if (returnTo && insertedRequest?.id && linkSectionId && linkItemKey) {
+      const q = new URLSearchParams({
+        linkedRequestId: insertedRequest.id,
+        linkSectionId,
+        linkItemKey,
+      });
+      router.replace(`${returnTo}${returnTo.includes("?") ? "&" : "?"}${q.toString()}`);
+      return;
+    }
+
+    router.replace(returnTo || `/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
   return (
@@ -502,7 +550,7 @@ export default function MaintenanceRequestPage() {
             type="button"
             onClick={() => {
               if (!confirmLeaveForm()) return;
-              router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+              router.replace(returnTo || `/vehicles/${encodeURIComponent(vehicleId)}`);
             }}
             style={secondaryButtonStyle()}
           >Discard & Return</button>

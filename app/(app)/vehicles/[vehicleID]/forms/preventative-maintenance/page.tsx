@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type PMChoice = "" | "pass" | "fail" | "na";
 type YesNo = "" | "yes" | "no";
@@ -254,7 +255,7 @@ export default function VehiclePreventativeMaintenanceForm() {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     const m = Number(mileage);
@@ -378,6 +379,34 @@ export default function VehiclePreventativeMaintenanceForm() {
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
     if (oilChangePerformed === "yes") {
       localStorage.setItem(vehicleLastOilChangeMileageKey(vehicleId), String(m));
+    }
+
+    try {
+      const supabase = createSupabaseBrowser();
+      const { data: vehicleRow, error: vehicleReadError } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (vehicleReadError) {
+        console.error("Failed to read vehicle mileage:", vehicleReadError);
+      } else {
+        const existingMileage = Number(vehicleRow?.mileage ?? 0);
+        const nextMileage =
+          Number.isFinite(existingMileage) && existingMileage > 0
+            ? Math.max(existingMileage, m)
+            : m;
+        const { error: vehicleUpdateError } = await supabase
+          .from("vehicles")
+          .update({ mileage: nextMileage })
+          .eq("id", vehicleId);
+        if (vehicleUpdateError) {
+          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
+        }
+        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
+      }
+    } catch (vehicleMileageError) {
+      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
 
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);

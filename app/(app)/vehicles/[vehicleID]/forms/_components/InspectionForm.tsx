@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
 
@@ -53,15 +53,6 @@ type StoredInspectionRecord = {
   managerSignature?: string;
 };
 
-type OpenMaintenanceRequest = {
-  id: string;
-  status: string | null;
-  urgency: string | null;
-  system_affected: string | null;
-  description: string | null;
-  created_at: string;
-};
-
 type ExtraFieldConfig = {
   label: string;
   placeholder: string;
@@ -109,7 +100,7 @@ function extraFieldConfig(itemKey: string, label: string): ExtraFieldConfig | nu
   const k = itemKey.toLowerCase();
   const l = label.toLowerCase();
   if (k.includes("tire") || l.includes("psi")) {
-    return { label: "Measured PSI", placeholder: "e.g. 42.5", inputMode: "decimal", required: true };
+    return { label: "Measured PSI", placeholder: "e.g. 42.5", inputMode: "decimal", required: false };
   }
   if (k === "fuel_level" || k === "def_level") {
     return { label: "Recorded Level", placeholder: "e.g. 75%", inputMode: "text", required: true };
@@ -126,6 +117,10 @@ function vehicleMileageKey(vehicleId: string) {
 
 function vehicleTypeKey(vehicleId: string) {
   return `vehicle:${vehicleId}:type`;
+}
+
+function inspectionDraftKey(vehicleId: string, type: InspectionType) {
+  return `inspection:draft:${type}:${vehicleId}`;
 }
 
 function todayYYYYMMDD() {
@@ -233,6 +228,7 @@ export default function InspectionForm({
   acknowledgementText: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   useFormExitGuard();
 
   // ✅ Get vehicle ID from route param (folder is [vehicleID])
@@ -245,27 +241,6 @@ export default function InspectionForm({
 
   // ✅ Make vehicleType real state
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
-
-  // ✅ Read localStorage reliably (immediate + short retry)
-  useEffect(() => {
-    if (!vehicleId) return;
-
-    const read = () => {
-      const raw = localStorage.getItem(vehicleTypeKey(vehicleId));
-      setVehicleType(isVehicleType(raw) ? raw : "truck");
-    };
-
-    read();
-
-    // retry shortly after mount (covers timing cases)
-    const t1 = window.setTimeout(read, 50);
-    const t2 = window.setTimeout(read, 250);
-
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-    };
-  }, [vehicleId]);
 
   // ✅ Filter sections based on vehicleType
   const visibleSections = useMemo(() => {
@@ -285,11 +260,10 @@ export default function InspectionForm({
     useState<StoredInspectionRecord["sections"]>({});
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
-  const [openRequests, setOpenRequests] = useState<OpenMaintenanceRequest[]>([]);
-  const [creatingFailLinkKey, setCreatingFailLinkKey] = useState<string | null>(null);
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
+  const restoredDraftRef = useRef(false);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -343,6 +317,71 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Read vehicle metadata from local storage (with short retries for timing).
+  useEffect(() => {
+    if (!vehicleId) return;
+
+    const read = () => {
+      const raw = localStorage.getItem(vehicleTypeKey(vehicleId));
+      setVehicleType(isVehicleType(raw) ? raw : "truck");
+      const savedMileage = localStorage.getItem(vehicleMileageKey(vehicleId));
+      const parsedMileage = savedMileage ? Number(savedMileage) : NaN;
+      if (Number.isFinite(parsedMileage) && parsedMileage > 0) {
+        setMileage((prev) => (prev.trim() ? prev : String(parsedMileage)));
+      }
+    };
+
+    read();
+    const t1 = window.setTimeout(read, 50);
+    const t2 = window.setTimeout(read, 250);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [vehicleId]);
+
+  useEffect(() => {
+    if (!vehicleId || restoredDraftRef.current) return;
+    const raw = localStorage.getItem(inspectionDraftKey(vehicleId, type));
+    if (!raw) {
+      restoredDraftRef.current = true;
+      return;
+    }
+    try {
+      const draft = JSON.parse(raw) as {
+        inspectionDate?: string;
+        mileage?: string;
+        employee?: string;
+        dashLightsOn?: string[];
+        sectionState?: StoredInspectionRecord["sections"];
+        itemExtraValues?: Record<string, string>;
+        failRequestLinks?: Record<string, string>;
+        exiting?: Record<string, ChoiceOrBlank>;
+        inspectionStatus?: "Pass" | "Fail - Maintenance Required" | "Out of Service" | "";
+        notes?: string;
+        employeeSignature?: string;
+        managerSignature?: string;
+      };
+      if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
+      if (typeof draft.mileage === "string") setMileage(draft.mileage);
+      if (typeof draft.employee === "string") setEmployee(draft.employee);
+      if (Array.isArray(draft.dashLightsOn)) setDashLightsOn(draft.dashLightsOn);
+      if (draft.sectionState && typeof draft.sectionState === "object") setSectionState(draft.sectionState);
+      if (draft.itemExtraValues && typeof draft.itemExtraValues === "object") setItemExtraValues(draft.itemExtraValues);
+      if (draft.failRequestLinks && typeof draft.failRequestLinks === "object") setFailRequestLinks(draft.failRequestLinks);
+      if (draft.exiting && typeof draft.exiting === "object") setExiting(draft.exiting);
+      if (typeof draft.inspectionStatus === "string") setInspectionStatus(draft.inspectionStatus);
+      if (typeof draft.notes === "string") setNotes(draft.notes);
+      if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
+      if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
+    } catch (error) {
+      console.error("Failed to restore inspection draft:", error);
+    } finally {
+      restoredDraftRef.current = true;
+    }
+  }, [vehicleId, type]);
+
   useEffect(() => {
     void (async () => {
       const name = await getSignedInDisplayName();
@@ -352,29 +391,15 @@ export default function InspectionForm({
   }, []);
 
   useEffect(() => {
-    if (!vehicleId) return;
-    let active = true;
-    void (async () => {
-      const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("maintenance_requests")
-        .select("id,status,urgency,system_affected,description,created_at")
-        .eq("vehicle_id", vehicleId)
-        .in("status", ["Open", "In Progress"])
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (!active) return;
-      if (error) {
-        console.error("Failed loading open maintenance requests:", error);
-        setOpenRequests([]);
-        return;
-      }
-      setOpenRequests((data ?? []) as OpenMaintenanceRequest[]);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [vehicleId]);
+    const linkedRequestId = (searchParams.get("linkedRequestId") || "").trim();
+    const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
+    const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
+    if (!linkedRequestId || !linkSectionId || !linkItemKey) return;
+    setFailRequestLinks((prev) => ({
+      ...prev,
+      [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
+    }));
+  }, [searchParams]);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -434,42 +459,51 @@ export default function InspectionForm({
     }));
   }
 
-  async function quickCreateRequest(sectionTitle: string, itemLabel: string, linkKey: string) {
+  function saveDraft() {
     if (!vehicleId) return;
-    const supabase = createSupabaseBrowser();
-    setCreatingFailLinkKey(linkKey);
-    const description = [
-      `Auto-created from ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} failure`,
-      `Section: ${sectionTitle}`,
-      `Failed Item: ${itemLabel}`,
-      `Teammate: ${employee.trim() || "Unknown"}`,
-      notes.trim() ? `Inspection Notes: ${notes.trim()}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const draft = {
+      inspectionDate,
+      mileage,
+      employee,
+      dashLightsOn,
+      sectionState,
+      itemExtraValues,
+      failRequestLinks,
+      exiting,
+      inspectionStatus,
+      notes,
+      employeeSignature,
+      managerSignature,
+    };
+    localStorage.setItem(inspectionDraftKey(vehicleId, type), JSON.stringify(draft));
+  }
 
-    const { data, error } = await supabase
-      .from("maintenance_requests")
-      .insert({
-        vehicle_id: vehicleId,
-        status: "Open",
-        urgency: "High",
-        system_affected: mapSystemAffected(itemLabel),
-        drivability: "Limited – Operate with caution",
-        unit_status: "Active",
-        issue_identified_during: getIssueIdentifiedDuring(type),
-        description,
-      })
-      .select("id,status,urgency,system_affected,description,created_at")
-      .single();
-    setCreatingFailLinkKey(null);
-    if (error || !data) {
-      alert(error?.message || "Failed to create maintenance request.");
+  function openFullRequestForm(sectionId: string, item: InspectionItem, sectionTitle: string) {
+    if (!vehicleId) return;
+    const parsedMileage = Number(mileage);
+    if (!Number.isFinite(parsedMileage) || parsedMileage <= 0) {
+      alert("Enter a valid mileage in this inspection before opening the maintenance request form.");
       return;
     }
 
-    setOpenRequests((prev) => [data as OpenMaintenanceRequest, ...prev]);
-    setFailRequestLinks((prev) => ({ ...prev, [linkKey]: data.id }));
+    saveDraft();
+    const returnTo =
+      typeof window !== "undefined"
+        ? window.location.pathname
+        : `/vehicles/${encodeURIComponent(vehicleId)}/forms/${type}`;
+    const q = new URLSearchParams({
+      issue: item.label,
+      identifiedDuring: getIssueIdentifiedDuring(type),
+      systemAffected: mapSystemAffected(item.label),
+      urgency: "High",
+      details: itemExtraValues[failLinkKey(sectionId, item.key)] || "",
+      sourceMileage: String(parsedMileage),
+      returnTo,
+      linkSectionId: sectionId,
+      linkItemKey: item.key,
+      sectionTitle,
+    });
+    router.push(`/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-request?${q.toString()}`);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -516,7 +550,7 @@ export default function InspectionForm({
           if (value === "fail") {
             const link = (failRequestLinks[failLinkKey(sec.id, it.key)] || "").trim();
             if (!link) {
-              return alert(`Link or create a maintenance request for failed item: "${it.label}".`);
+              return alert(`Complete the maintenance request form for failed item: "${it.label}".`);
             }
           }
         }
@@ -529,7 +563,7 @@ export default function InspectionForm({
       if (value === "fail") {
         const link = (failRequestLinks[failLinkKey("exiting", it.key)] || "").trim();
         if (!link) {
-          return alert(`Link or create a maintenance request for failed item: "${it.label}".`);
+          return alert(`Complete the maintenance request form for failed item: "${it.label}".`);
         }
       }
     }
@@ -574,7 +608,33 @@ export default function InspectionForm({
       return;
     }
 
-    localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+    try {
+      const { data: vehicleRow, error: vehicleReadError } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (vehicleReadError) {
+        console.error("Failed to read vehicle mileage:", vehicleReadError);
+      } else {
+        const existingMileage = Number(vehicleRow?.mileage ?? 0);
+        const nextMileage =
+          Number.isFinite(existingMileage) && existingMileage > 0
+            ? Math.max(existingMileage, m)
+            : m;
+        const { error: vehicleUpdateError } = await supabase
+          .from("vehicles")
+          .update({ mileage: nextMileage })
+          .eq("id", vehicleId);
+        if (vehicleUpdateError) {
+          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
+        }
+        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
+      }
+    } catch (vehicleMileageError) {
+      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
+      localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+    }
 
     if (insertedInspection?.id) {
       try {
@@ -591,6 +651,7 @@ export default function InspectionForm({
       }
     }
 
+    localStorage.removeItem(inspectionDraftKey(vehicleId, type));
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
@@ -830,55 +891,24 @@ export default function InspectionForm({
                               <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>
                                 Maintenance Request Link Required
                               </div>
-                              <select
-                                value={failRequestLinks[failLinkKey(sec.id, it.key)] || ""}
-                                onChange={(e) =>
-                                  setFailRequestLinks((prev) => ({
-                                    ...prev,
-                                    [failLinkKey(sec.id, it.key)]: e.target.value,
-                                  }))
-                                }
-                                style={inputStyle()}
-                              >
-                                <option value="">Select existing open request...</option>
-                                {openRequests.map((req) => (
-                                  <option key={req.id} value={req.id}>
-                                    {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
-                                    {new Date(req.created_at).toLocaleDateString()}
-                                  </option>
-                                ))}
-                              </select>
+                              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                Complete the full maintenance request for this failed item, then return to continue this inspection.
+                              </div>
+                              {failRequestLinks[failLinkKey(sec.id, it.key)] ? (
+                                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
+                                  Linked Request:{" "}
+                                  <strong>{failRequestLinks[failLinkKey(sec.id, it.key)]}</strong>
+                                </div>
+                              ) : null}
                               <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    void quickCreateRequest(sec.title, it.label, failLinkKey(sec.id, it.key))
-                                  }
+                                  onClick={() => openFullRequestForm(sec.id, it, sec.title)}
                                   style={buttonStyle()}
-                                  disabled={creatingFailLinkKey === failLinkKey(sec.id, it.key)}
                                 >
-                                  {creatingFailLinkKey === failLinkKey(sec.id, it.key)
-                                    ? "Creating..."
-                                    : "Create & Link Request"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    window.open(
-                                      `/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-request?issue=${encodeURIComponent(
-                                        it.label
-                                      )}&identifiedDuring=${encodeURIComponent(getIssueIdentifiedDuring(type))}&systemAffected=${encodeURIComponent(
-                                        mapSystemAffected(it.label)
-                                      )}&urgency=High&details=${encodeURIComponent(
-                                        itemExtraValues[failLinkKey(sec.id, it.key)] || ""
-                                      )}`,
-                                      "_blank",
-                                      "noopener,noreferrer"
-                                    )
-                                  }
-                                  style={secondaryButtonStyle()}
-                                >
-                                  Open Full Request Form
+                                  {failRequestLinks[failLinkKey(sec.id, it.key)]
+                                    ? "Update Linked Request"
+                                    : "Complete Maintenance Request"}
                                 </button>
                               </div>
                             </div>
@@ -936,36 +966,24 @@ export default function InspectionForm({
                         <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>
                           Maintenance Request Link Required
                         </div>
-                        <select
-                          value={failRequestLinks[failLinkKey("exiting", it.key)] || ""}
-                          onChange={(e) =>
-                            setFailRequestLinks((prev) => ({
-                              ...prev,
-                              [failLinkKey("exiting", it.key)]: e.target.value,
-                            }))
-                          }
-                          style={inputStyle()}
-                        >
-                          <option value="">Select existing open request...</option>
-                          {openRequests.map((req) => (
-                            <option key={req.id} value={req.id}>
-                              {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
-                              {new Date(req.created_at).toLocaleDateString()}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>
+                          Complete the full maintenance request for this failed item, then return to continue this inspection.
+                        </div>
+                        {failRequestLinks[failLinkKey("exiting", it.key)] ? (
+                          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
+                            Linked Request:{" "}
+                            <strong>{failRequestLinks[failLinkKey("exiting", it.key)]}</strong>
+                          </div>
+                        ) : null}
                         <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             type="button"
-                            onClick={() =>
-                              void quickCreateRequest("Exiting / Securing", it.label, failLinkKey("exiting", it.key))
-                            }
+                            onClick={() => openFullRequestForm("exiting", it, "Exiting / Securing")}
                             style={buttonStyle()}
-                            disabled={creatingFailLinkKey === failLinkKey("exiting", it.key)}
                           >
-                            {creatingFailLinkKey === failLinkKey("exiting", it.key)
-                              ? "Creating..."
-                              : "Create & Link Request"}
+                            {failRequestLinks[failLinkKey("exiting", it.key)]
+                              ? "Update Linked Request"
+                              : "Complete Maintenance Request"}
                           </button>
                         </div>
                       </div>

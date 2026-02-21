@@ -531,6 +531,32 @@ export default function MaintenanceLogPage() {
 
     // update vehicle mileage (only forward)
     localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
+    try {
+      const { data: vehicleRow, error: vehicleReadError } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (vehicleReadError) {
+        console.error("Failed to read vehicle mileage:", vehicleReadError);
+      } else {
+        const existingMileage = Number(vehicleRow?.mileage ?? 0);
+        const nextMileage =
+          Number.isFinite(existingMileage) && existingMileage > 0
+            ? Math.max(existingMileage, m)
+            : m;
+        const { error: vehicleUpdateError } = await supabase
+          .from("vehicles")
+          .update({ mileage: nextMileage })
+          .eq("id", vehicleId);
+        if (vehicleUpdateError) {
+          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
+        }
+        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
+      }
+    } catch (vehicleMileageError) {
+      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
+    }
 
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
