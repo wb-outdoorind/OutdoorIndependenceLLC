@@ -273,7 +273,13 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     const res = await fetch("/api/trend-actions/digest", { method: "POST" });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setRunNowMessage(json?.error || "Failed to run digest.");
+      if (res.status === 429 && json?.cooldown?.nextAvailableAt) {
+        const next = new Date(String(json.cooldown.nextAvailableAt));
+        const nextLabel = Number.isNaN(next.getTime()) ? String(json.cooldown.nextAvailableAt) : next.toLocaleString();
+        setRunNowMessage(`Manual cooldown active. Next run available at ${nextLabel}.`);
+      } else {
+        setRunNowMessage(json?.error || "Failed to run digest.");
+      }
       setRunNowBusy(false);
       return;
     }

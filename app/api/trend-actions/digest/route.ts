@@ -357,11 +357,61 @@ export async function GET(req: Request) {
 export async function POST() {
   const session = await getCurrentUserProfile();
   const role = session?.profile?.role ?? null;
+  const userId = session?.user?.id ?? null;
   if (role !== "owner") {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
+  if (!userId) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
   try {
+    const admin = createSupabaseAdmin();
+    const cooldownKey = "trend_actions_digest_manual";
+    const cooldownMinutes = 15;
+    const now = new Date();
+    const { data: stateRow, error: stateError } = await admin
+      .from("system_job_state")
+      .select("key,last_run_at")
+      .eq("key", cooldownKey)
+      .maybeSingle();
+    if (stateError) {
+      return NextResponse.json({ error: stateError.message }, { status: 500 });
+    }
+
+    const lastRunAt = stateRow?.last_run_at ? new Date(stateRow.last_run_at) : null;
+    if (lastRunAt && !Number.isNaN(lastRunAt.getTime())) {
+      const elapsedMs = now.getTime() - lastRunAt.getTime();
+      const cooldownMs = cooldownMinutes * 60 * 1000;
+      if (elapsedMs < cooldownMs) {
+        const nextAt = new Date(lastRunAt.getTime() + cooldownMs).toISOString();
+        return NextResponse.json(
+          {
+            error: "Manual digest cooldown active.",
+            cooldown: {
+              minutes: cooldownMinutes,
+              lastRunAt: lastRunAt.toISOString(),
+              nextAvailableAt: nextAt,
+            },
+          },
+          { status: 429 }
+        );
+      }
+    }
+
+    const upsertStatePayload = {
+      key: cooldownKey,
+      last_run_at: now.toISOString(),
+      last_run_by: userId,
+      updated_at: now.toISOString(),
+    };
+    const { error: stateUpsertError } = await admin
+      .from("system_job_state")
+      .upsert(upsertStatePayload, { onConflict: "key" });
+    if (stateUpsertError) {
+      return NextResponse.json({ error: stateUpsertError.message }, { status: 500 });
+    }
+
     const payload = await runDigest({ source: "manual", ignoreTimeGate: true });
     return NextResponse.json(payload);
   } catch (error) {
