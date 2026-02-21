@@ -53,6 +53,15 @@ type StoredInspectionRecord = {
   managerSignature?: string;
 };
 
+type OpenMaintenanceRequest = {
+  id: string;
+  status: string | null;
+  urgency: string | null;
+  system_affected: string | null;
+  description: string | null;
+  created_at: string;
+};
+
 type ExtraFieldConfig = {
   label: string;
   placeholder: string;
@@ -96,12 +105,8 @@ function mapSystemAffected(label: string): string {
   return "Other";
 }
 
-function extraFieldConfig(itemKey: string, label: string): ExtraFieldConfig | null {
+function extraFieldConfig(itemKey: string): ExtraFieldConfig | null {
   const k = itemKey.toLowerCase();
-  const l = label.toLowerCase();
-  if (k.includes("tire") || l.includes("psi")) {
-    return { label: "Measured PSI", placeholder: "e.g. 42.5", inputMode: "decimal", required: false };
-  }
   if (k === "fuel_level" || k === "def_level") {
     return { label: "Recorded Level", placeholder: "e.g. 75%", inputMode: "text", required: true };
   }
@@ -260,6 +265,7 @@ export default function InspectionForm({
     useState<StoredInspectionRecord["sections"]>({});
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
+  const [openRequests, setOpenRequests] = useState<OpenMaintenanceRequest[]>([]);
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -400,6 +406,31 @@ export default function InspectionForm({
       [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
     }));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select("id,status,urgency,system_affected,description,created_at")
+        .eq("vehicle_id", vehicleId)
+        .in("status", ["Open", "In Progress"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading open maintenance requests:", error);
+        setOpenRequests([]);
+        return;
+      }
+      setOpenRequests((data ?? []) as OpenMaintenanceRequest[]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [vehicleId]);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -542,7 +573,7 @@ export default function InspectionForm({
         for (const it of sec.items) {
           const value = st.items?.[it.key] as ChoiceOrBlank;
           if (!value) return alert(`Please answer all checklist items before submitting.`);
-          const extraCfg = extraFieldConfig(it.key, it.label);
+          const extraCfg = extraFieldConfig(it.key);
           if (extraCfg?.required) {
             const extraVal = (itemExtraValues[failLinkKey(sec.id, it.key)] || "").trim();
             if (!extraVal) {
@@ -791,37 +822,11 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && sec.id === "truck" ? (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                      Dash Lights On? * (Select all that apply)
-                    </div>
-                    <select
-                      multiple
-                      value={dashLightsOn}
-                      onChange={(e) => {
-                        const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                        if (values.includes("None") && values.length > 1) {
-                          setDashLightsOn(values.filter((v) => v !== "None"));
-                        } else {
-                          setDashLightsOn(values);
-                        }
-                      }}
-                      style={{ ...inputStyle(), minHeight: 120 }}
-                    >
-                      {DASH_LIGHT_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-
                 {/* Items (only show when applicable) */}
                 {st.applicable ? (
-                  <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-                    {sec.items.map((it) => (
+                  <>
+                    <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+                      {sec.items.map((it) => (
                       <div
                         key={it.key}
                         style={{
@@ -842,7 +847,7 @@ export default function InspectionForm({
                             onChange={(v) => setItem(sec.id, it.key, v)}
                           />
                           {(() => {
-                            const cfg = extraFieldConfig(it.key, it.label);
+                            const cfg = extraFieldConfig(it.key);
                             if (!cfg) return null;
                             const detailKey = failLinkKey(sec.id, it.key);
                             return (
@@ -876,6 +881,24 @@ export default function InspectionForm({
                               <div style={{ fontSize: 12, opacity: 0.8 }}>
                                 Complete the full maintenance request for this failed item, then return to continue this inspection.
                               </div>
+                              <select
+                                value={failRequestLinks[failLinkKey(sec.id, it.key)] || ""}
+                                onChange={(e) =>
+                                  setFailRequestLinks((prev) => ({
+                                    ...prev,
+                                    [failLinkKey(sec.id, it.key)]: e.target.value,
+                                  }))
+                                }
+                                style={{ ...inputStyle(), marginTop: 8 }}
+                              >
+                                <option value="">Select existing open request...</option>
+                                {openRequests.map((req) => (
+                                  <option key={req.id} value={req.id}>
+                                    {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
+                                    {new Date(req.created_at).toLocaleDateString()}
+                                  </option>
+                                ))}
+                              </select>
                               {failRequestLinks[failLinkKey(sec.id, it.key)] ? (
                                 <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                                   Linked Request:{" "}
@@ -897,8 +920,35 @@ export default function InspectionForm({
                           ) : null}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    {sec.id === "truck" ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                          Dash Lights On? * (Select all that apply)
+                        </div>
+                        <select
+                          multiple
+                          value={dashLightsOn}
+                          onChange={(e) => {
+                            const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                            if (values.includes("None") && values.length > 1) {
+                              setDashLightsOn(values.filter((v) => v !== "None"));
+                            } else {
+                              setDashLightsOn(values);
+                            }
+                          }}
+                          style={{ ...inputStyle(), minHeight: 120 }}
+                        >
+                          {DASH_LIGHT_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <div style={{ marginTop: 12, fontSize: 13, opacity: 0.7 }}>
                     Mark as applicable to show questions.
@@ -951,6 +1001,24 @@ export default function InspectionForm({
                         <div style={{ fontSize: 12, opacity: 0.8 }}>
                           Complete the full maintenance request for this failed item, then return to continue this inspection.
                         </div>
+                        <select
+                          value={failRequestLinks[failLinkKey("exiting", it.key)] || ""}
+                          onChange={(e) =>
+                            setFailRequestLinks((prev) => ({
+                              ...prev,
+                              [failLinkKey("exiting", it.key)]: e.target.value,
+                            }))
+                          }
+                          style={{ ...inputStyle(), marginTop: 8 }}
+                        >
+                          <option value="">Select existing open request...</option>
+                          {openRequests.map((req) => (
+                            <option key={req.id} value={req.id}>
+                              {req.id.slice(0, 8)} · {req.system_affected || "Issue"} · {req.urgency || "n/a"} ·{" "}
+                              {new Date(req.created_at).toLocaleDateString()}
+                            </option>
+                          ))}
+                        </select>
                         {failRequestLinks[failLinkKey("exiting", it.key)] ? (
                           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                             Linked Request:{" "}

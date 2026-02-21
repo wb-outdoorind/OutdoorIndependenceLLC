@@ -28,6 +28,7 @@ If any unsafe condition, damage, or mechanical issue is identified:
         { key: "coolant_full", label: "Coolant level full" },
         { key: "tires_ok", label: "Tires operational and correct PSI" },
         { key: "lights_ok", label: "All lights operational" },
+        { key: "dashboard_gauges", label: "Dashboard gauges and indicators working" },
         { key: "no_body_damage", label: "No new body damage" },
         { key: "hitch_ball_pin", label: "Hitch, ball (2-5/16”), and pin secured" },
         { key: "safety_equipment", label: "Required safety equipment present" },
