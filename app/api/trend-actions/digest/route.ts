@@ -36,6 +36,22 @@ type EquipmentDigestRow = {
   current_hours: number | null;
 };
 
+type DigestRunLogPayload = {
+  runSource: "cron" | "manual";
+  initiatedBy: string | null;
+  success: boolean;
+  skipped: boolean;
+  dateKey?: string | null;
+  sentTo?: number;
+  openCount?: number;
+  inReviewCount?: number;
+  emailAttempted?: number;
+  emailSent?: number;
+  emailFailed?: number;
+  errorMessage?: string | null;
+  meta?: Record<string, unknown> | null;
+};
+
 function todayInChicagoParts() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -141,6 +157,46 @@ async function sendDigestEmail(params: {
     const text = await response.text();
     throw new Error(`Resend ${response.status}: ${text}`);
   }
+}
+
+async function logDigestRun(payload: DigestRunLogPayload) {
+  const admin = createSupabaseAdmin();
+  const { error } = await admin.from("digest_run_logs").insert({
+    run_source: payload.runSource,
+    initiated_by: payload.initiatedBy,
+    success: payload.success,
+    skipped: payload.skipped,
+    date_key: payload.dateKey ?? null,
+    sent_to: payload.sentTo ?? 0,
+    open_count: payload.openCount ?? 0,
+    in_review_count: payload.inReviewCount ?? 0,
+    email_attempted: payload.emailAttempted ?? 0,
+    email_sent: payload.emailSent ?? 0,
+    email_failed: payload.emailFailed ?? 0,
+    error_message: payload.errorMessage ?? null,
+    meta: payload.meta ?? null,
+  });
+  if (error) {
+    console.error("[digest] failed to write run log:", error.message);
+  }
+}
+
+function runLogFields(payload: unknown) {
+  const data = (payload ?? {}) as Record<string, unknown>;
+  const email = ((data.email as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const detailLines = Array.isArray(data.detailLines) ? data.detailLines : [];
+  const topAssets = Array.isArray(data.topAssets) ? data.topAssets : [];
+  return {
+    dateKey: typeof data.dateKey === "string" ? data.dateKey : chicagoDateKey(),
+    sentTo: typeof data.sentTo === "number" ? data.sentTo : 0,
+    openCount: typeof data.openCount === "number" ? data.openCount : 0,
+    inReviewCount: typeof data.inReviewCount === "number" ? data.inReviewCount : 0,
+    emailAttempted: typeof email.attempted === "number" ? email.attempted : 0,
+    emailSent: typeof email.sent === "number" ? email.sent : 0,
+    emailFailed: typeof email.failed === "number" ? email.failed : 0,
+    meta: detailLines.length || topAssets.length ? { detailLines, topAssets } : null,
+    skipped: Boolean(data.skipped),
+  };
 }
 
 async function runDigest(params: { source: "cron" | "manual"; ignoreTimeGate: boolean }) {
@@ -342,14 +398,46 @@ export async function GET(req: Request) {
   }
 
   if (!isAllowedNowForDigest()) {
+    const dateKey = chicagoDateKey();
+    await logDigestRun({
+      runSource: "cron",
+      initiatedBy: null,
+      success: true,
+      skipped: true,
+      dateKey,
+      meta: { reason: "time_gate_not_open" },
+    });
     return NextResponse.json({ ok: true, skipped: "Not 3:00 PM America/Chicago." });
   }
 
   try {
     const payload = await runDigest({ source: "cron", ignoreTimeGate: false });
+    const fields = runLogFields(payload);
+    await logDigestRun({
+      runSource: "cron",
+      initiatedBy: null,
+      success: true,
+      skipped: fields.skipped,
+      dateKey: fields.dateKey,
+      sentTo: fields.sentTo,
+      openCount: fields.openCount,
+      inReviewCount: fields.inReviewCount,
+      emailAttempted: fields.emailAttempted,
+      emailSent: fields.emailSent,
+      emailFailed: fields.emailFailed,
+      meta: fields.meta,
+    });
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to run digest.";
+    await logDigestRun({
+      runSource: "cron",
+      initiatedBy: null,
+      success: false,
+      skipped: false,
+      dateKey: chicagoDateKey(),
+      errorMessage: message,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -385,6 +473,15 @@ export async function POST() {
       const cooldownMs = cooldownMinutes * 60 * 1000;
       if (elapsedMs < cooldownMs) {
         const nextAt = new Date(lastRunAt.getTime() + cooldownMs).toISOString();
+        await logDigestRun({
+          runSource: "manual",
+          initiatedBy: userId,
+          success: false,
+          skipped: true,
+          dateKey: chicagoDateKey(),
+          errorMessage: "Manual digest cooldown active.",
+          meta: { nextAvailableAt: nextAt, cooldownMinutes },
+        });
         return NextResponse.json(
           {
             error: "Manual digest cooldown active.",
@@ -413,9 +510,32 @@ export async function POST() {
     }
 
     const payload = await runDigest({ source: "manual", ignoreTimeGate: true });
+    const fields = runLogFields(payload);
+    await logDigestRun({
+      runSource: "manual",
+      initiatedBy: userId,
+      success: true,
+      skipped: fields.skipped,
+      dateKey: fields.dateKey,
+      sentTo: fields.sentTo,
+      openCount: fields.openCount,
+      inReviewCount: fields.inReviewCount,
+      emailAttempted: fields.emailAttempted,
+      emailSent: fields.emailSent,
+      emailFailed: fields.emailFailed,
+      meta: fields.meta,
+    });
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to run digest.";
+    await logDigestRun({
+      runSource: "manual",
+      initiatedBy: userId,
+      success: false,
+      skipped: false,
+      dateKey: chicagoDateKey(),
+      errorMessage: message,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

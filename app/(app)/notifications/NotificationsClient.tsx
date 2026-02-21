@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type NotificationRow = {
   id: number;
@@ -15,6 +15,23 @@ type NotificationRow = {
   is_read: boolean;
   created_at: string;
   read_at: string | null;
+};
+
+type DigestRunRow = {
+  id: number;
+  run_source: "cron" | "manual";
+  initiated_by: string | null;
+  ran_at: string;
+  success: boolean;
+  skipped: boolean;
+  date_key: string | null;
+  sent_to: number;
+  open_count: number;
+  in_review_count: number;
+  email_attempted: number;
+  email_sent: number;
+  email_failed: number;
+  error_message: string | null;
 };
 
 type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
@@ -146,21 +163,27 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
+  const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
-    const [notificationsRes, prefsRes] = await Promise.all([
+    const shouldLoadRuns = role === "owner" || role === "mechanic";
+    const [notificationsRes, prefsRes, runsRes] = await Promise.all([
       fetch("/api/notifications", { method: "GET" }),
       fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "get_prefs" }),
       }),
+      shouldLoadRuns
+        ? fetch("/api/trend-actions/digest/runs", { method: "GET" })
+        : Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 })),
     ]);
 
     const notificationsJson = await notificationsRes.json().catch(() => ({}));
     const prefsJson = await prefsRes.json().catch(() => ({}));
+    const runsJson = await runsRes.json().catch(() => ({}));
 
     if (!notificationsRes.ok) {
       setErrorMessage(notificationsJson?.error || "Failed to load notifications.");
@@ -174,8 +197,13 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       setEmailEnabled(prefsJson.prefs.emailEnabled !== false);
       setSmsEnabled(prefsJson.prefs.smsEnabled === true);
     }
+    if (shouldLoadRuns && runsRes.ok) {
+      setDigestRuns((runsJson.runs ?? []) as DigestRunRow[]);
+    } else {
+      setDigestRuns([]);
+    }
     setLoading(false);
-  }
+  }, [role]);
 
   useEffect(() => {
     let active = true;
@@ -187,7 +215,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [loadAll]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -348,6 +376,46 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           </label>
         </div>
       </div>
+
+      {role === "owner" || role === "mechanic" ? (
+        <div style={{ marginTop: 12, ...cardStyle() }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Recent Digest Runs</div>
+          {digestRuns.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No digest runs logged yet.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {digestRuns.map((run) => (
+                <div
+                  key={run.id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 800 }}>
+                      {run.run_source.toUpperCase()} · {run.success ? "Success" : "Failed"}
+                      {run.skipped ? " (Skipped)" : ""}
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>{formatDateTime(run.ran_at)}</div>
+                  </div>
+                  <div style={{ marginTop: 6, opacity: 0.85, fontSize: 13 }}>
+                    Date: {run.date_key || "n/a"} · In-app: {run.sent_to} · Open: {run.open_count} · In Review: {run.in_review_count}
+                  </div>
+                  <div style={{ marginTop: 4, opacity: 0.85, fontSize: 13 }}>
+                    Email attempted: {run.email_attempted} · sent: {run.email_sent} · failed: {run.email_failed}
+                  </div>
+                  {run.error_message ? (
+                    <div style={{ marginTop: 4, color: "#ff9d9d", fontSize: 13 }}>{run.error_message}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
