@@ -7,9 +7,13 @@ export default async function FormReportsPage() {
   if (!session?.user) redirect("/login");
 
   const role = session?.profile?.role ?? "employee";
-  const canView = role === "owner" || role === "operations_manager";
+  const canView =
+    role === "owner" ||
+    role === "operations_manager" ||
+    role === "office_admin" ||
+    role === "mechanic";
   if (!canView) {
-    redirect("/not-authorized?reason=form_reports_requires_owner_or_operations_manager");
+    redirect("/not-authorized?reason=accountability_center_requires_management_or_mechanic");
   }
 
   return <FormReportsClient />;

@@ -106,13 +106,13 @@ export default async function Home() {
       role === "owner" || role === "operations_manager" || role === "office_admin";
     const isMechanic = role === "mechanic";
 
-    if (role === "owner" || role === "operations_manager") {
+    if (role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic") {
       tiles = [
         ...tiles,
         {
-          title: "Form Reports",
+          title: "Accountability Center",
           href: "/form-reports",
-          desc: "Auto-graded form quality, teammate scores, and accountability flags",
+          desc: "Team/member scorecards, mechanic accountability, SLA risk, and coaching actions",
         },
       ];
     }
@@ -165,7 +165,7 @@ export default async function Home() {
         ],
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
-          { label: "View Form Reports", href: "/form-reports" },
+          { label: "Open Accountability Center", href: "/form-reports" },
           { label: "Open Inventory Alerts", href: "/inventory/alerts" },
         ],
       };

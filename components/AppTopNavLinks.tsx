@@ -43,6 +43,7 @@ export default function AppTopNavLinks() {
       <Link href="/notifications" className="app-topnav-link">
         Notifications{unreadCount > 0 ? ` (${unreadCount})` : ""}
       </Link>
+      <Link href="/form-reports" className="app-topnav-link">Accountability Center</Link>
       <Link href="/settings" className="app-topnav-link">Settings</Link>
     </nav>
   );
