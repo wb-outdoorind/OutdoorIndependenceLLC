@@ -891,29 +891,44 @@ export default function InspectionForm({
                       ))}
                     </div>
                     {sec.id === "truck" ? (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                          Dash Lights On? * (Select all that apply)
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto",
+                          gap: 12,
+                          alignItems: "center",
+                          padding: 12,
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          background: "rgba(255,255,255,0.02)",
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>Dash Lights On? *</div>
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <select
+                            multiple
+                            value={dashLightsOn}
+                            onChange={(e) => {
+                              const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                              if (values.includes("None") && values.length > 1) {
+                                setDashLightsOn(values.filter((v) => v !== "None"));
+                              } else {
+                                setDashLightsOn(values);
+                              }
+                            }}
+                            style={{ ...inputStyle(), minHeight: 120, minWidth: 240 }}
+                          >
+                            {DASH_LIGHT_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                          <div style={{ fontSize: 12, opacity: 0.72 }}>
+                            Select all that apply.
+                          </div>
                         </div>
-                        <select
-                          multiple
-                          value={dashLightsOn}
-                          onChange={(e) => {
-                            const values = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                            if (values.includes("None") && values.length > 1) {
-                              setDashLightsOn(values.filter((v) => v !== "None"));
-                            } else {
-                              setDashLightsOn(values);
-                            }
-                          }}
-                          style={{ ...inputStyle(), minHeight: 120 }}
-                        >
-                          {DASH_LIGHT_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
                       </div>
                     ) : null}
                   </>
