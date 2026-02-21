@@ -537,6 +537,20 @@ export default function InspectionForm({
     router.push(`/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-request?${q.toString()}`);
   }
 
+  function openLinkCurrentRequestPage(sectionId: string, itemKey: string) {
+    if (!vehicleId) return;
+    const returnTo =
+      typeof window !== "undefined"
+        ? window.location.pathname
+        : `/vehicles/${encodeURIComponent(vehicleId)}/forms/${type}`;
+    const q = new URLSearchParams({
+      returnTo,
+      linkSectionId: sectionId,
+      linkItemKey: itemKey,
+    });
+    router.push(`/vehicles/${encodeURIComponent(vehicleId)}/forms/link-current-request?${q.toString()}`);
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -915,6 +929,13 @@ export default function InspectionForm({
                                     ? "Update Linked Request"
                                     : "Complete Maintenance Request"}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openLinkCurrentRequestPage(sec.id, it.key)}
+                                  style={secondaryButtonStyle()}
+                                >
+                                  Link Current Request
+                                </button>
                               </div>
                             </div>
                           ) : null}
@@ -1034,6 +1055,13 @@ export default function InspectionForm({
                             {failRequestLinks[failLinkKey("exiting", it.key)]
                               ? "Update Linked Request"
                               : "Complete Maintenance Request"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openLinkCurrentRequestPage("exiting", it.key)}
+                            style={secondaryButtonStyle()}
+                          >
+                            Link Current Request
                           </button>
                         </div>
                       </div>
