@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -118,6 +119,13 @@ function severityColor(severity: NotificationRow["severity"]) {
   if (severity === "high") return "rgba(255,140,100,0.2)";
   if (severity === "warning") return "rgba(255,210,90,0.2)";
   return "rgba(120,180,255,0.18)";
+}
+
+function notificationHref(row: NotificationRow) {
+  if (row.kind === "trend_actions_digest" && row.entity_id) {
+    return `/notifications/digest/${encodeURIComponent(row.entity_id)}`;
+  }
+  return null;
 }
 
 export default function NotificationsClient({ role }: { role: string | null }) {
@@ -423,6 +431,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                       <button type="button" onClick={() => void markOneRead(row.id)} style={buttonStyle()}>
                         Mark Read
                       </button>
+                    ) : null}
+                    {notificationHref(row) ? (
+                      <Link href={notificationHref(row)!} style={buttonStyle()}>
+                        View Details
+                      </Link>
                     ) : null}
                   </div>
                 </div>
