@@ -81,7 +81,7 @@ function isSectionEquipmentPicker(sectionId: string) {
 function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
   const hay = `${row.name ?? ""} ${row.equipment_type ?? ""}`.toLowerCase();
   if (sectionId === "trailer") {
-    return hay.includes("trailer");
+    return !hay.includes("trailer");
   }
   if (sectionId === "plow") {
     return hay.includes("plow");
@@ -90,6 +90,11 @@ function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
     return hay.includes("salter") || hay.includes("salt") || hay.includes("spreader");
   }
   return true;
+}
+
+function isTrailerEquipment(row: EquipmentOption) {
+  const hay = `${row.name ?? ""} ${row.equipment_type ?? ""}`.toLowerCase();
+  return hay.includes("trailer");
 }
 
 const DASH_LIGHT_OPTIONS = [
@@ -676,7 +681,11 @@ export default function InspectionForm({
 
     for (const sec of visibleSections) {
       const st = sectionState[sec.id];
-      if (st?.applicable && sec.nameFieldLabel && !isSectionEquipmentPicker(sec.id)) {
+      if (
+        st?.applicable &&
+        sec.nameFieldLabel &&
+        (!isSectionEquipmentPicker(sec.id) || sec.id === "trailer")
+      ) {
         if (!st.name?.trim())
           return alert(
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
@@ -754,6 +763,18 @@ export default function InspectionForm({
             })),
         ])
       ),
+      trailerSelection:
+        sectionState.trailer?.name && equipmentOptions.length
+          ? (() => {
+              const selected = equipmentOptions.find((row) => row.id === sectionState.trailer?.name);
+              if (!selected) return { id: sectionState.trailer?.name };
+              return {
+                id: selected.id,
+                name: selected.name ?? selected.id,
+                equipment_type: selected.equipment_type ?? null,
+              };
+            })()
+          : null,
       type,
     };
 
@@ -941,6 +962,30 @@ export default function InspectionForm({
                 </div>
 
                 {/* Optional name field when applicable */}
+                {st.applicable && sec.nameFieldLabel && sec.id === "trailer" ? (
+                  <div style={{ marginTop: 12 }}>
+                    <div
+                      style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}
+                    >
+                      {sec.nameFieldLabel} *
+                    </div>
+                    <select
+                      value={st.name ?? ""}
+                      onChange={(e) => setSectionName(sec.id, e.target.value)}
+                      style={inputStyle()}
+                    >
+                      <option value="">Select trailer...</option>
+                      {equipmentOptions
+                        .filter((row) => isTrailerEquipment(row))
+                        .map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {(row.name ?? row.id) + (row.equipment_type ? ` · ${row.equipment_type}` : "")}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                ) : null}
+
                 {st.applicable && sec.nameFieldLabel && !isSectionEquipmentPicker(sec.id) ? (
                   <div style={{ marginTop: 12 }}>
                     <div
