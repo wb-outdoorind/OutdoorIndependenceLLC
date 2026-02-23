@@ -75,6 +75,24 @@ type NewActionForm = {
   due_date: string;
 };
 
+type PersonScoreRow = {
+  key: string;
+  userId: string | null;
+  name: string;
+  role: string | null;
+  forms: number;
+  avgFormScore: number;
+  onTimeRate: number;
+  failLinkRate: number;
+  formFlags: number;
+  incompleteForms: number;
+  logs: number;
+  mechanicObjectiveScore: number;
+  linkageRate: number;
+  closureRate: number;
+  overallScore: number;
+};
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -128,6 +146,10 @@ function inPeriod(iso: string, period: ScorePeriod) {
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function normalizedPersonKey(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function mechanicScoreBand(score: number) {
@@ -192,6 +214,7 @@ export default function FormReportsClient() {
   const [actions, setActions] = useState<AccountabilityActionRow[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSaving, setActionSaving] = useState(false);
+  const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   const [newAction, setNewAction] = useState<NewActionForm>({
     target_user_id: "",
@@ -318,117 +341,211 @@ export default function FormReportsClient() {
     [inspections, period]
   );
 
-  const teammateScoreboard = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        forms: number;
-        totalScore: number;
-        flags: number;
-        incomplete: number;
-        onTime: number;
-        inspections: number;
-        failCount: number;
-        linkedFailCount: number;
-      }
-    >();
+  const periodLogs = useMemo(
+    () => maintenanceLogs.filter((row) => inPeriod(row.created_at, period)),
+    [maintenanceLogs, period]
+  );
 
-    for (const row of periodGrades) {
-      const name = (row.submitted_by || "Unknown").trim() || "Unknown";
-      const current = map.get(name) ?? {
+  const unifiedScoreboard = useMemo<PersonScoreRow[]>(() => {
+    type AggregationRow = {
+      key: string;
+      userId: string | null;
+      name: string;
+      role: string | null;
+      forms: number;
+      formScoreTotal: number;
+      formFlags: number;
+      incompleteForms: number;
+      inspections: number;
+      onTime: number;
+      failCount: number;
+      linkedFailCount: number;
+      logs: number;
+      mechanicScoreTotal: number;
+      withRequest: number;
+      closed: number;
+    };
+
+    const rows = new Map<string, AggregationRow>();
+    const keyByDisplay = new Map<string, string>();
+
+    const ensureRow = (key: string, defaults: Partial<AggregationRow> = {}) => {
+      const existing = rows.get(key);
+      if (existing) return existing;
+      const created: AggregationRow = {
+        key,
+        userId: defaults.userId ?? null,
+        name: defaults.name ?? "Unknown",
+        role: defaults.role ?? null,
         forms: 0,
-        totalScore: 0,
-        flags: 0,
-        incomplete: 0,
-        onTime: 0,
+        formScoreTotal: 0,
+        formFlags: 0,
+        incompleteForms: 0,
         inspections: 0,
+        onTime: 0,
         failCount: 0,
         linkedFailCount: 0,
+        logs: 0,
+        mechanicScoreTotal: 0,
+        withRequest: 0,
+        closed: 0,
       };
-      current.forms += 1;
-      current.totalScore += Number(row.score ?? 0);
-      if (row.accountability_flag) current.flags += 1;
-      if (!row.is_complete) current.incomplete += 1;
-      map.set(name, current);
+      rows.set(key, created);
+      return created;
+    };
+
+    for (const p of profiles) {
+      const key = `uid:${p.id}`;
+      const displayName = p.full_name?.trim() || p.email?.trim() || p.id;
+      ensureRow(key, { userId: p.id, name: displayName, role: p.role ?? null });
+      keyByDisplay.set(normalizedPersonKey(displayName), key);
+      keyByDisplay.set(normalizedPersonKey(p.id), key);
+      if (p.email) keyByDisplay.set(normalizedPersonKey(p.email), key);
+    }
+
+    const resolveByDisplay = (raw: string | null | undefined) => {
+      const cleaned = (raw ?? "").trim();
+      if (!cleaned) return ensureRow("name:unknown", { name: "Unknown" });
+      const normalized = normalizedPersonKey(cleaned);
+      const existingKey = keyByDisplay.get(normalized);
+      if (existingKey) return ensureRow(existingKey);
+      const fallbackKey = `name:${normalized}`;
+      const created = ensureRow(fallbackKey, { name: cleaned });
+      keyByDisplay.set(normalized, fallbackKey);
+      return created;
+    };
+
+    for (const row of periodGrades) {
+      const target = resolveByDisplay(row.submitted_by);
+      target.forms += 1;
+      target.formScoreTotal += Number(row.score ?? 0);
+      if (row.accountability_flag) target.formFlags += 1;
+      if (!row.is_complete) target.incompleteForms += 1;
     }
 
     for (const row of periodInspections) {
       const meta = parseInspectionMeta(row.checklist);
-      const name = meta.employee || "Unknown";
-      const current = map.get(name) ?? {
-        forms: 0,
-        totalScore: 0,
-        flags: 0,
-        incomplete: 0,
-        onTime: 0,
-        inspections: 0,
-        failCount: 0,
-        linkedFailCount: 0,
-      };
-      current.inspections += 1;
+      const target = resolveByDisplay(meta.employee);
+      target.inspections += 1;
       if (meta.inspectionDate && row.created_at.slice(0, 10) === meta.inspectionDate) {
-        current.onTime += 1;
+        target.onTime += 1;
       }
-      current.failCount += meta.failCount;
-      current.linkedFailCount += Math.min(meta.linkedFailCount, meta.failCount);
-      map.set(name, current);
+      target.failCount += meta.failCount;
+      target.linkedFailCount += Math.min(meta.linkedFailCount, meta.failCount);
     }
 
-    return Array.from(map.entries())
-      .map(([name, row]) => {
-        const avgScore = row.forms ? Math.round(row.totalScore / row.forms) : 0;
+    for (const row of periodLogs) {
+      const target = resolveByDisplay(row.created_by);
+      target.logs += 1;
+      target.mechanicScoreTotal += maintenanceLogQualityScore(row);
+      if (row.request_id) target.withRequest += 1;
+      if ((row.status_update ?? "").trim() === "Closed") target.closed += 1;
+    }
+
+    return Array.from(rows.values())
+      .filter((row) => row.forms > 0 || row.logs > 0 || row.inspections > 0)
+      .map((row) => {
+        const avgFormScore = row.forms ? Math.round(row.formScoreTotal / row.forms) : 0;
         const onTimeRate = row.inspections ? Math.round((row.onTime / row.inspections) * 100) : 100;
         const failLinkRate = row.failCount ? Math.round((row.linkedFailCount / row.failCount) * 100) : 100;
-        const accountabilityScore = clampPercent(
-          avgScore * 0.5 +
-            onTimeRate * 0.25 +
-            failLinkRate * 0.25 -
-            row.flags * 8 -
-            row.incomplete * 4
-        );
-        return {
-          name,
-          forms: row.forms,
-          avgScore,
-          onTimeRate,
-          failLinkRate,
-          flags: row.flags,
-          accountabilityScore,
-        };
-      })
-      .sort((a, b) => b.accountabilityScore - a.accountabilityScore || b.forms - a.forms);
-  }, [periodGrades, periodInspections]);
-
-  const mechanicScoreboard = useMemo(() => {
-    const relevantLogs = maintenanceLogs.filter((row) => inPeriod(row.created_at, period));
-    const grouped = new Map<string, { logs: number; totalScore: number; withRequest: number; closed: number }>();
-    for (const row of relevantLogs) {
-      const key = row.created_by || "unknown";
-      const existing = grouped.get(key) ?? { logs: 0, totalScore: 0, withRequest: 0, closed: 0 };
-      existing.logs += 1;
-      existing.totalScore += maintenanceLogQualityScore(row);
-      if (row.request_id) existing.withRequest += 1;
-      if ((row.status_update ?? "").trim() === "Closed") existing.closed += 1;
-      grouped.set(key, existing);
-    }
-    return Array.from(grouped.entries())
-      .map(([userId, row]) => {
-        const avgScore = row.logs ? Math.round(row.totalScore / row.logs) : 0;
+        const mechanicObjectiveScore = row.logs ? Math.round(row.mechanicScoreTotal / row.logs) : 0;
         const linkageRate = row.logs ? Math.round((row.withRequest / row.logs) * 100) : 100;
         const closureRate = row.logs ? Math.round((row.closed / row.logs) * 100) : 100;
-        const accountabilityScore = clampPercent(avgScore * 0.6 + linkageRate * 0.2 + closureRate * 0.2);
+
+        const formsComposite = clampPercent(
+          avgFormScore * 0.5 +
+            onTimeRate * 0.25 +
+            failLinkRate * 0.25 -
+            row.formFlags * 8 -
+            row.incompleteForms * 4
+        );
+        const mechanicComposite = clampPercent(
+          mechanicObjectiveScore * 0.6 + linkageRate * 0.2 + closureRate * 0.2
+        );
+
+        const overallScore = clampPercent(
+          formsComposite * 0.6 + mechanicComposite * 0.4
+        );
+
         return {
-          userId,
-          name: userId === "unknown" ? "Unknown" : nameById[userId] || userId,
+          key: row.key,
+          userId: row.userId,
+          name: row.name,
+          role: row.role,
+          forms: row.forms,
+          avgFormScore,
+          onTimeRate,
+          failLinkRate,
+          formFlags: row.formFlags,
+          incompleteForms: row.incompleteForms,
           logs: row.logs,
-          avgScore,
+          mechanicObjectiveScore,
           linkageRate,
           closureRate,
-          accountabilityScore,
+          overallScore,
         };
       })
-      .sort((a, b) => b.accountabilityScore - a.accountabilityScore || b.logs - a.logs);
-  }, [maintenanceLogs, period, nameById]);
+      .sort((a, b) => b.overallScore - a.overallScore || b.forms + b.logs - (a.forms + a.logs));
+  }, [periodGrades, periodInspections, periodLogs, profiles]);
+
+  const effectiveSelectedPersonKey = useMemo(() => {
+    if (!unifiedScoreboard.length) return "";
+    if (selectedPersonKey && unifiedScoreboard.some((row) => row.key === selectedPersonKey)) {
+      return selectedPersonKey;
+    }
+    return unifiedScoreboard[0].key;
+  }, [selectedPersonKey, unifiedScoreboard]);
+
+  const selectedPerson = useMemo(
+    () => unifiedScoreboard.find((row) => row.key === effectiveSelectedPersonKey) ?? null,
+    [effectiveSelectedPersonKey, unifiedScoreboard]
+  );
+
+  const selectedIdentitySet = useMemo(() => {
+    const values = new Set<string>();
+    if (!selectedPerson) return values;
+    values.add(normalizedPersonKey(selectedPerson.name));
+    if (selectedPerson.userId) values.add(normalizedPersonKey(selectedPerson.userId));
+    const matchedProfile = selectedPerson.userId
+      ? profiles.find((p) => p.id === selectedPerson.userId)
+      : profiles.find((p) => normalizedPersonKey(p.full_name || p.email || p.id) === normalizedPersonKey(selectedPerson.name));
+    if (matchedProfile?.full_name) values.add(normalizedPersonKey(matchedProfile.full_name));
+    if (matchedProfile?.email) values.add(normalizedPersonKey(matchedProfile.email));
+    if (matchedProfile?.id) values.add(normalizedPersonKey(matchedProfile.id));
+    return values;
+  }, [profiles, selectedPerson]);
+
+  const selectedFormRows = useMemo(() => {
+    if (!selectedPerson || selectedIdentitySet.size === 0) return [];
+    return periodGrades
+      .filter((row) => selectedIdentitySet.has(normalizedPersonKey(row.submitted_by)))
+      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())
+      .slice(0, 20);
+  }, [periodGrades, selectedIdentitySet, selectedPerson]);
+
+  const selectedInspectionRows = useMemo(() => {
+    if (!selectedPerson || selectedIdentitySet.size === 0) return [];
+    return periodInspections
+      .filter((row) => {
+        const meta = parseInspectionMeta(row.checklist);
+        return selectedIdentitySet.has(normalizedPersonKey(meta.employee));
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 20);
+  }, [periodInspections, selectedIdentitySet, selectedPerson]);
+
+  const selectedLogRows = useMemo(() => {
+    if (!selectedPerson || selectedIdentitySet.size === 0) return [];
+    return periodLogs
+      .filter((row) => {
+        const byId = selectedPerson.userId && row.created_by === selectedPerson.userId;
+        const byName = selectedIdentitySet.has(normalizedPersonKey(row.created_by));
+        const byProfileName = row.created_by && selectedIdentitySet.has(normalizedPersonKey(nameById[row.created_by]));
+        return Boolean(byId || byName || byProfileName);
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 20);
+  }, [nameById, periodLogs, selectedIdentitySet, selectedPerson]);
 
   const globalRisk = useMemo(() => {
     if (!nowMs) {
@@ -558,71 +675,162 @@ export default function FormReportsClient() {
       </section>
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Team Member Accountability Scoreboard</div>
+        <div style={{ fontWeight: 900, marginBottom: 4 }}>Employee Scoreboard</div>
+        <div style={{ opacity: 0.75, marginBottom: 10 }}>
+          Click an employee to open score breakdown and submitted forms.
+        </div>
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading...</div>
         ) : errorMessage ? (
           <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
-        ) : !teammateScoreboard.length ? (
-          <div style={{ opacity: 0.75 }}>No teammate data in this period.</div>
+        ) : !unifiedScoreboard.length ? (
+          <div style={{ opacity: 0.75 }}>No score data in this period.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {teammateScoreboard.map((row) => (
-              <div
-                key={row.name}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(180px, 1.5fr) repeat(6, minmax(90px, 1fr))",
-                  gap: 8,
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 10,
-                  padding: 10,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>{row.name}</div>
-                <MiniStat label="Accountability" value={`${row.accountabilityScore}%`} />
-                <MiniStat label="Forms" value={String(row.forms)} />
-                <MiniStat label="Avg" value={`${row.avgScore}%`} />
-                <MiniStat label="On-Time" value={`${row.onTimeRate}%`} />
-                <MiniStat label="Fail→Req" value={`${row.failLinkRate}%`} />
-                <MiniStat label="Flags" value={String(row.flags)} />
-              </div>
-            ))}
+            {unifiedScoreboard.map((row) => {
+              const selected = row.key === effectiveSelectedPersonKey;
+              return (
+                <button
+                  key={row.key}
+                  type="button"
+                  onClick={() => setSelectedPersonKey(row.key)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(220px, 1.5fr) repeat(7, minmax(90px, 1fr))",
+                    gap: 8,
+                    border: selected
+                      ? "1px solid rgba(126,255,167,0.45)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 10,
+                    padding: 10,
+                    alignItems: "center",
+                    background: selected ? "rgba(126,255,167,0.10)" : "rgba(255,255,255,0.02)",
+                    color: "inherit",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{row.name}</div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>{row.role || "No role set"}</div>
+                  </div>
+                  <MiniStat label="Overall" value={`${row.overallScore}%`} />
+                  <MiniStat label="Forms" value={String(row.forms)} />
+                  <MiniStat label="Form Avg" value={`${row.avgFormScore}%`} />
+                  <MiniStat label="On-Time" value={`${row.onTimeRate}%`} />
+                  <MiniStat label="Flags" value={String(row.formFlags)} />
+                  <MiniStat label="Logs" value={String(row.logs)} />
+                  <MiniStat label="Mech Obj" value={`${row.mechanicObjectiveScore}%`} />
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Mechanic Accountability Scoreboard</div>
-        {loading ? (
-          <div style={{ opacity: 0.75 }}>Loading...</div>
-        ) : !mechanicScoreboard.length ? (
-          <div style={{ opacity: 0.75 }}>No mechanic log data in this period.</div>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>
+          {selectedPerson ? `${selectedPerson.name} · Score Detail` : "Select an employee"}
+        </div>
+        {!selectedPerson ? (
+          <div style={{ opacity: 0.75 }}>No employee selected.</div>
         ) : (
-          <div style={{ display: "grid", gap: 8 }}>
-            {mechanicScoreboard.map((row) => (
-              <div
-                key={row.userId}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(180px, 1.5fr) repeat(5, minmax(90px, 1fr))",
-                  gap: 8,
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 10,
-                  padding: 10,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>{row.name}</div>
-                <MiniStat label="Accountability" value={`${row.accountabilityScore}%`} />
-                <MiniStat label="Logs" value={String(row.logs)} />
-                <MiniStat label="Quality" value={`${row.avgScore}%`} />
-                <MiniStat label="Request Link" value={`${row.linkageRate}%`} />
-                <MiniStat label="Closed" value={`${row.closureRate}%`} />
-                <MiniStat label="Band" value={mechanicScoreBand(row.accountabilityScore)} />
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+              <Stat label="Overall Score" value={`${selectedPerson.overallScore}%`} />
+              <Stat label="Form Score" value={`${selectedPerson.avgFormScore}%`} />
+              <Stat label="On-Time Inspections" value={`${selectedPerson.onTimeRate}%`} />
+              <Stat label="Fail→Request Link Rate" value={`${selectedPerson.failLinkRate}%`} />
+              <Stat label="Mechanic Objective" value={`${selectedPerson.mechanicObjectiveScore}%`} />
+              <Stat label="Mechanic Linkage Rate" value={`${selectedPerson.linkageRate}%`} />
+              <Stat label="Mechanic Closure Rate" value={`${selectedPerson.closureRate}%`} />
+              <Stat label="Mechanic Band" value={mechanicScoreBand(selectedPerson.mechanicObjectiveScore)} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Submitted Graded Forms</div>
+                {!selectedFormRows.length ? (
+                  <div style={{ opacity: 0.75 }}>No graded forms in this period.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {selectedFormRows.map((row) => (
+                      <div key={row.id} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 700 }}>{row.form_type}</div>
+                          <div style={{ fontWeight: 800 }}>{row.score}%</div>
+                        </div>
+                        <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>
+                          {new Date(row.submitted_at).toLocaleString()}
+                        </div>
+                        <div style={{ opacity: 0.82, fontSize: 12, marginTop: 4 }}>
+                          {row.vehicle_id ? `Vehicle: ${row.vehicle_id}` : row.equipment_id ? `Equipment: ${row.equipment_id}` : "No linked asset"}
+                        </div>
+                        <div style={{ opacity: 0.82, fontSize: 12, marginTop: 4 }}>
+                          {row.is_complete ? "Complete" : "Incomplete"}
+                          {row.has_na ? " · Contains N/A" : ""}
+                          {row.accountability_flag ? " · Flagged" : ""}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
+
+              <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Inspection Forms</div>
+                {!selectedInspectionRows.length ? (
+                  <div style={{ opacity: 0.75 }}>No inspections in this period.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {selectedInspectionRows.map((row) => {
+                      const meta = parseInspectionMeta(row.checklist);
+                      return (
+                        <div key={row.id} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: 700 }}>{row.overall_status || "Inspection"}</div>
+                            <div style={{ fontWeight: 800 }}>{meta.failCount} fail(s)</div>
+                          </div>
+                          <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>
+                            {new Date(row.created_at).toLocaleString()}
+                          </div>
+                          <div style={{ opacity: 0.82, fontSize: 12, marginTop: 4 }}>
+                            Linked fail requests: {meta.linkedFailCount}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Maintenance Logs</div>
+                {!selectedLogRows.length ? (
+                  <div style={{ opacity: 0.75 }}>No maintenance logs in this period.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {selectedLogRows.map((row) => (
+                      <div key={row.id} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 700 }}>{row.status_update || "No status update"}</div>
+                          <div style={{ fontWeight: 800 }}>{maintenanceLogQualityScore(row)}%</div>
+                        </div>
+                        <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>
+                          {new Date(row.created_at).toLocaleString()}
+                        </div>
+                        <div style={{ opacity: 0.82, fontSize: 12, marginTop: 4 }}>
+                          {row.request_id ? `Linked request: ${row.request_id}` : "No request linked"}
+                        </div>
+                        <div style={{ opacity: 0.82, fontSize: 12, marginTop: 4 }}>
+                          {(row.notes ?? "").trim() || "No notes entered"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </section>
