@@ -73,6 +73,24 @@ const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   salter: "Salter Selection",
 };
 
+function isSectionEquipmentPicker(sectionId: string) {
+  return Boolean(SECTION_EQUIPMENT_PICKERS[sectionId]);
+}
+
+function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
+  const hay = `${row.name ?? ""} ${row.equipment_type ?? ""}`.toLowerCase();
+  if (sectionId === "trailer") {
+    return hay.includes("trailer");
+  }
+  if (sectionId === "plow") {
+    return hay.includes("plow");
+  }
+  if (sectionId === "salter") {
+    return hay.includes("salter") || hay.includes("salt") || hay.includes("spreader");
+  }
+  return true;
+}
+
 const DASH_LIGHT_OPTIONS = [
   "None",
   "Check Engine",
@@ -613,7 +631,7 @@ export default function InspectionForm({
 
     for (const sec of visibleSections) {
       const st = sectionState[sec.id];
-      if (st?.applicable && sec.nameFieldLabel) {
+      if (st?.applicable && sec.nameFieldLabel && !isSectionEquipmentPicker(sec.id)) {
         if (!st.name?.trim())
           return alert(
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
@@ -622,7 +640,7 @@ export default function InspectionForm({
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
       }
-      if (st?.applicable && SECTION_EQUIPMENT_PICKERS[sec.id]) {
+      if (st?.applicable && isSectionEquipmentPicker(sec.id)) {
         const selected = sectionEquipmentIds[sec.id] ?? [];
         if (selected.length === 0) {
           return alert(`Select at least one item for ${sec.title}.`);
@@ -878,7 +896,7 @@ export default function InspectionForm({
                 </div>
 
                 {/* Optional name field when applicable */}
-                {st.applicable && sec.nameFieldLabel ? (
+                {st.applicable && sec.nameFieldLabel && !isSectionEquipmentPicker(sec.id) ? (
                   <div style={{ marginTop: 12 }}>
                     <div
                       style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}
@@ -894,7 +912,7 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && SECTION_EQUIPMENT_PICKERS[sec.id] ? (
+                {st.applicable && isSectionEquipmentPicker(sec.id) ? (
                   <div
                     style={{
                       marginTop: 12,
@@ -933,14 +951,29 @@ export default function InspectionForm({
                       ) : equipmentOptions.length === 0 ? (
                         <div style={{ opacity: 0.72 }}>No equipment records found.</div>
                       ) : (
-                        equipmentOptions
-                          .filter((row) => {
-                            const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
+                        (() => {
+                          const selectedIds = sectionEquipmentIds[sec.id] ?? [];
+                          const base = equipmentOptions.filter((row) => equipmentMatchesSection(sec.id, row));
+                          const keepSelected = equipmentOptions.filter(
+                            (row) => selectedIds.includes(row.id) && !base.some((b) => b.id === row.id)
+                          );
+                          const scoped = [...keepSelected, ...base];
+                          const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
+                          const visible = scoped.filter((row) => {
                             if (!q) return true;
                             const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
                             return hay.includes(q);
-                          })
-                          .map((row) => (
+                          });
+
+                          if (visible.length === 0) {
+                            return (
+                              <div style={{ opacity: 0.72 }}>
+                                No matching equipment found for this section. Update equipment type/name if needed.
+                              </div>
+                            );
+                          }
+
+                          return visible.map((row) => (
                             <label
                               key={row.id}
                               style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
@@ -958,7 +991,8 @@ export default function InspectionForm({
                                 </span>
                               </span>
                             </label>
-                          ))
+                          ));
+                        })()
                       )}
                     </div>
                     <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
