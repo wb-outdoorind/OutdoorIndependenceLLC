@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { createServerSupabase } from "@/lib/supabase/server";
+import HomeDashboardCard from "@/components/home/HomeDashboardCard";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,14 @@ type DashboardData = {
   actions: Array<{ label: string; href: string }>;
 };
 
+type TeammateOpsStats = {
+  daily: number;
+  weekly: number;
+  monthly: number;
+  ytd: number;
+  formCount: number;
+};
+
 function parseChecklistEmployee(checklist: unknown) {
   if (!checklist || typeof checklist !== "object") return "";
   const employee = (checklist as Record<string, unknown>).employee;
@@ -68,11 +77,44 @@ function todayDateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfWeek() {
+  const d = startOfToday();
+  const day = d.getDay();
+  const diffToMonday = (day + 6) % 7;
+  d.setDate(d.getDate() - diffToMonday);
+  return d;
+}
+
+function startOfMonth() {
+  const d = startOfToday();
+  d.setDate(1);
+  return d;
+}
+
+function startOfYear() {
+  const d = startOfToday();
+  d.setMonth(0, 1);
+  return d;
+}
+
+function avgScore(values: number[]) {
+  if (!values.length) return 0;
+  return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
+}
+
 export default async function Home() {
   let lowStockCount = 0;
   let role: string | null = null;
   let tiles = [...baseTiles];
   let dashboard: DashboardData | null = null;
+  let teammateOpsStats: TeammateOpsStats | null = null;
+  let canExpandDashboard = false;
 
   try {
     const supabase = await createServerSupabase();
@@ -105,6 +147,75 @@ export default async function Home() {
     const isLeadership =
       role === "owner" || role === "operations_manager" || role === "office_admin";
     const isMechanic = role === "mechanic";
+    const isTeammateOpsRole =
+      role === "apprentice" ||
+      role === "team_member_1" ||
+      role === "team_member_2" ||
+      role === "team_lead_1" ||
+      role === "team_lead_2";
+
+    if (isLeadership || isTeammateOpsRole) {
+      const [gradesRes, teammateProfilesRes] = await Promise.all([
+        supabase
+          .from("form_submission_grades")
+          .select("score,submitted_at,submitted_by")
+          .order("submitted_at", { ascending: false })
+          .limit(4000),
+        supabase
+          .from("profiles")
+          .select("id,full_name,email,role")
+          .in("role", ["apprentice", "team_member_1", "team_member_2", "team_lead_1", "team_lead_2"])
+          .eq("status", "Active"),
+      ]);
+
+      const teammateProfiles = (teammateProfilesRes.data ?? []) as Array<{
+        id: string;
+        full_name: string | null;
+        email: string | null;
+      }>;
+      const allowed = new Set<string>();
+      for (const p of teammateProfiles) {
+        if (p.id) allowed.add(p.id.trim().toLowerCase());
+        if (p.full_name) allowed.add(p.full_name.trim().toLowerCase());
+        if (p.email) allowed.add(p.email.trim().toLowerCase());
+      }
+
+      const gradeRows = ((gradesRes.data ?? []) as Array<{
+        score: number | null;
+        submitted_at: string;
+        submitted_by: string | null;
+      }>).filter((row) => {
+        const submittedBy = (row.submitted_by ?? "").trim().toLowerCase();
+        return submittedBy && allowed.has(submittedBy);
+      });
+
+      const nowToday = startOfToday();
+      const nowWeek = startOfWeek();
+      const nowMonth = startOfMonth();
+      const nowYear = startOfYear();
+
+      const dailyScores = gradeRows
+        .filter((row) => new Date(row.submitted_at) >= nowToday)
+        .map((row) => Number(row.score ?? 0));
+      const weeklyScores = gradeRows
+        .filter((row) => new Date(row.submitted_at) >= nowWeek)
+        .map((row) => Number(row.score ?? 0));
+      const monthlyScores = gradeRows
+        .filter((row) => new Date(row.submitted_at) >= nowMonth)
+        .map((row) => Number(row.score ?? 0));
+      const ytdScores = gradeRows
+        .filter((row) => new Date(row.submitted_at) >= nowYear)
+        .map((row) => Number(row.score ?? 0));
+
+      teammateOpsStats = {
+        daily: avgScore(dailyScores),
+        weekly: avgScore(weeklyScores),
+        monthly: avgScore(monthlyScores),
+        ytd: avgScore(ytdScores),
+        formCount: gradeRows.length,
+      };
+    }
+    canExpandDashboard = Boolean(isLeadership && teammateOpsStats);
 
     if (role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic") {
       tiles = [
@@ -200,6 +311,23 @@ export default async function Home() {
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
           { label: "Open Inventory", href: "/inventory" },
+          { label: "Open Notifications", href: "/notifications" },
+        ],
+      };
+    } else if (isTeammateOpsRole) {
+      dashboard = {
+        title: "Teammate Operations Dashboard",
+        subtitle: "Average form score metrics for apprentice through team lead 2 roles.",
+        stats: [
+          { label: "Today Avg Score", value: `${teammateOpsStats?.daily ?? 0}%` },
+          { label: "Week Avg Score", value: `${teammateOpsStats?.weekly ?? 0}%` },
+          { label: "Month Avg Score", value: `${teammateOpsStats?.monthly ?? 0}%` },
+          { label: "YTD Avg Score", value: `${teammateOpsStats?.ytd ?? 0}%` },
+          { label: "Tracked Forms", value: String(teammateOpsStats?.formCount ?? 0) },
+        ],
+        actions: [
+          { label: "Open Maintenance Center", href: "/maintenance?section=operations" },
+          { label: "Open Scan QR", href: "/scan" },
           { label: "Open Notifications", href: "/notifications" },
         ],
       };
@@ -320,38 +448,11 @@ export default async function Home() {
       </p>
 
       {dashboard ? (
-        <section style={{ ...dashboardCardStyle, marginTop: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{dashboard.title}</div>
-              <div style={{ opacity: 0.75, marginTop: 4 }}>{dashboard.subtitle}</div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: 14,
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-              gap: 10,
-            }}
-          >
-            {dashboard.stats.map((stat) => (
-              <div key={stat.label} style={statCardStyle}>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>{stat.label}</div>
-                <div style={{ fontWeight: 900, fontSize: 22, marginTop: 2 }}>{stat.value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {dashboard.actions.map((action) => (
-              <Link key={action.href} href={action.href} style={dashboardActionStyle}>
-                {action.label}
-              </Link>
-            ))}
-          </div>
-        </section>
+        <HomeDashboardCard
+          dashboard={dashboard}
+          teammateOpsStats={teammateOpsStats}
+          canExpandDashboard={canExpandDashboard}
+        />
       ) : null}
 
       <div
@@ -420,29 +521,4 @@ const headerButtonStyle: React.CSSProperties = {
   color: "inherit",
   textDecoration: "none",
   fontWeight: 800,
-};
-
-const dashboardCardStyle: React.CSSProperties = {
-  border: "1px solid var(--surface-border)",
-  borderRadius: 16,
-  padding: 16,
-  background: "var(--surface)",
-};
-
-const statCardStyle: React.CSSProperties = {
-  border: "1px solid var(--surface-border)",
-  borderRadius: 12,
-  padding: 10,
-  background: "rgba(255,255,255,0.02)",
-};
-
-const dashboardActionStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 10,
-  border: "1px solid var(--surface-border)",
-  background: "rgba(255,255,255,0.05)",
-  color: "inherit",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: 13,
 };
