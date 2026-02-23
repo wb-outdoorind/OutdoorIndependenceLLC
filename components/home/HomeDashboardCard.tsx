@@ -16,6 +16,32 @@ type TeammateOpsStats = {
   monthly: number;
   ytd: number;
   formCount: number;
+  formVolume: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+    ytd: number;
+    byRole: Array<{ role: string; count: number }>;
+  };
+  completionQuality: {
+    completeRate: number;
+    flaggedRate: number;
+    lateRate: number;
+  };
+  topMissedSections: Array<{ label: string; count: number }>;
+  failToRequestLinkRate: number;
+  teamHeatmap: Array<{
+    name: string;
+    role: string;
+    avgScore: number;
+    trend: "up" | "down" | "flat";
+  }>;
+  atRiskQueue: Array<{
+    name: string;
+    role: string;
+    overallScore: number;
+    flags: number;
+  }>;
 };
 
 export default function HomeDashboardCard({
@@ -90,6 +116,75 @@ export default function HomeDashboardCard({
               <div style={{ fontWeight: 900, fontSize: 22, marginTop: 2 }}>{teammateOpsStats.formCount}</div>
             </div>
           </div>
+
+          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+            <div style={detailCardStyle}>
+              <div style={detailTitleStyle}>Form Volume</div>
+              <div style={detailLineStyle}>Daily: {teammateOpsStats.formVolume.daily}</div>
+              <div style={detailLineStyle}>Weekly: {teammateOpsStats.formVolume.weekly}</div>
+              <div style={detailLineStyle}>Monthly: {teammateOpsStats.formVolume.monthly}</div>
+              <div style={detailLineStyle}>YTD: {teammateOpsStats.formVolume.ytd}</div>
+              <div style={{ ...detailLineStyle, marginTop: 8 }}>By Role:</div>
+              {teammateOpsStats.formVolume.byRole.length === 0 ? (
+                <div style={detailMutedStyle}>No role volume data.</div>
+              ) : (
+                teammateOpsStats.formVolume.byRole.map((row) => (
+                  <div key={`role-${row.role}`} style={detailMutedStyle}>
+                    {row.role}: {row.count}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={detailCardStyle}>
+              <div style={detailTitleStyle}>Completion Quality</div>
+              <div style={detailLineStyle}>Complete forms: {teammateOpsStats.completionQuality.completeRate}%</div>
+              <div style={detailLineStyle}>Flagged forms: {teammateOpsStats.completionQuality.flaggedRate}%</div>
+              <div style={detailLineStyle}>Late forms: {teammateOpsStats.completionQuality.lateRate}%</div>
+              <div style={{ ...detailLineStyle, marginTop: 10 }}>
+                Fail-to-request link rate: {teammateOpsStats.failToRequestLinkRate}%
+              </div>
+            </div>
+
+            <div style={detailCardStyle}>
+              <div style={detailTitleStyle}>Top Missed Sections</div>
+              {teammateOpsStats.topMissedSections.length === 0 ? (
+                <div style={detailMutedStyle}>No missed-section data in range.</div>
+              ) : (
+                teammateOpsStats.topMissedSections.map((row) => (
+                  <div key={`missed-${row.label}`} style={detailLineStyle}>
+                    {row.label}: {row.count}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={detailCardStyle}>
+              <div style={detailTitleStyle}>Team Heatmap</div>
+              {teammateOpsStats.teamHeatmap.length === 0 ? (
+                <div style={detailMutedStyle}>No teammate score rows yet.</div>
+              ) : (
+                teammateOpsStats.teamHeatmap.map((row) => (
+                  <div key={`heat-${row.name}`} style={detailLineStyle}>
+                    {row.name} ({row.role}) {row.avgScore}% {row.trend === "up" ? "↑" : row.trend === "down" ? "↓" : "→"}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={detailCardStyle}>
+              <div style={detailTitleStyle}>At-Risk Queue</div>
+              {teammateOpsStats.atRiskQueue.length === 0 ? (
+                <div style={detailMutedStyle}>No teammates currently at risk.</div>
+              ) : (
+                teammateOpsStats.atRiskQueue.map((row) => (
+                  <div key={`risk-${row.name}`} style={detailLineStyle}>
+                    {row.name} ({row.role}) score {row.overallScore}% · flags {row.flags}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -137,4 +232,28 @@ const expandButtonStyle: React.CSSProperties = {
   color: "inherit",
   fontWeight: 800,
   cursor: "pointer",
+};
+
+const detailCardStyle: React.CSSProperties = {
+  border: "1px solid var(--surface-border)",
+  borderRadius: 12,
+  padding: 10,
+  background: "rgba(255,255,255,0.02)",
+};
+
+const detailTitleStyle: React.CSSProperties = {
+  fontWeight: 900,
+  marginBottom: 6,
+};
+
+const detailLineStyle: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.9,
+  marginTop: 3,
+};
+
+const detailMutedStyle: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.72,
+  marginTop: 3,
 };

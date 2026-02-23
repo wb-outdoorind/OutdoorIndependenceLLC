@@ -44,6 +44,16 @@ type GradeRow = {
   accountability_flag: boolean | null;
 };
 
+type TeammateGradeRow = {
+  score: number | null;
+  submitted_at: string;
+  submitted_by: string | null;
+  is_complete: boolean | null;
+  accountability_flag: boolean | null;
+  accountability_reason: string | null;
+  form_type: string | null;
+};
+
 type InspectionRow = {
   inspection_type: string | null;
   overall_status: string | null;
@@ -64,6 +74,32 @@ type TeammateOpsStats = {
   monthly: number;
   ytd: number;
   formCount: number;
+  formVolume: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+    ytd: number;
+    byRole: Array<{ role: string; count: number }>;
+  };
+  completionQuality: {
+    completeRate: number;
+    flaggedRate: number;
+    lateRate: number;
+  };
+  topMissedSections: Array<{ label: string; count: number }>;
+  failToRequestLinkRate: number;
+  teamHeatmap: Array<{
+    name: string;
+    role: string;
+    avgScore: number;
+    trend: "up" | "down" | "flat";
+  }>;
+  atRiskQueue: Array<{
+    name: string;
+    role: string;
+    overallScore: number;
+    flags: number;
+  }>;
 };
 
 function parseChecklistEmployee(checklist: unknown) {
@@ -106,6 +142,34 @@ function startOfYear() {
 function avgScore(values: number[]) {
   if (!values.length) return 0;
   return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
+}
+
+function pct(part: number, whole: number) {
+  if (!whole) return 0;
+  return Math.round((part / whole) * 100);
+}
+
+function parseInspectionMeta(checklist: unknown) {
+  const obj = checklist && typeof checklist === "object" ? (checklist as Record<string, unknown>) : {};
+  const employee = typeof obj.employee === "string" ? obj.employee.trim() : "";
+  const inspectionDate = typeof obj.inspectionDate === "string" ? obj.inspectionDate.trim() : "";
+  const failLinks =
+    obj.failRequestLinks && typeof obj.failRequestLinks === "object"
+      ? (obj.failRequestLinks as Record<string, unknown>)
+      : {};
+  let failCount = 0;
+  const sections = obj.sections && typeof obj.sections === "object" ? (obj.sections as Record<string, unknown>) : {};
+  for (const sectionValue of Object.values(sections)) {
+    if (!sectionValue || typeof sectionValue !== "object") continue;
+    const sec = sectionValue as Record<string, unknown>;
+    if (sec.applicable !== true) continue;
+    const items = sec.items && typeof sec.items === "object" ? (sec.items as Record<string, unknown>) : {};
+    for (const v of Object.values(items)) {
+      if (v === "fail") failCount += 1;
+    }
+  }
+  const linkedFailCount = Object.values(failLinks).filter((v) => typeof v === "string" && v.trim().length > 0).length;
+  return { employee, inspectionDate, failCount, linkedFailCount };
 }
 
 export default async function Home() {
@@ -155,10 +219,10 @@ export default async function Home() {
       role === "team_lead_2";
 
     if (isLeadership || isTeammateOpsRole) {
-      const [gradesRes, teammateProfilesRes] = await Promise.all([
+      const [gradesRes, teammateProfilesRes, inspectionsRes] = await Promise.all([
         supabase
           .from("form_submission_grades")
-          .select("score,submitted_at,submitted_by")
+          .select("score,submitted_at,submitted_by,is_complete,accountability_flag,accountability_reason,form_type")
           .order("submitted_at", { ascending: false })
           .limit(4000),
         supabase
@@ -166,33 +230,57 @@ export default async function Home() {
           .select("id,full_name,email,role")
           .in("role", ["apprentice", "team_member_1", "team_member_2", "team_lead_1", "team_lead_2"])
           .eq("status", "Active"),
+        supabase
+          .from("inspections")
+          .select("created_at,checklist")
+          .order("created_at", { ascending: false })
+          .limit(4000),
       ]);
 
       const teammateProfiles = (teammateProfilesRes.data ?? []) as Array<{
         id: string;
         full_name: string | null;
         email: string | null;
+        role?: string | null;
       }>;
       const allowed = new Set<string>();
+      const roleByIdentity = new Map<string, string>();
       for (const p of teammateProfiles) {
-        if (p.id) allowed.add(p.id.trim().toLowerCase());
-        if (p.full_name) allowed.add(p.full_name.trim().toLowerCase());
-        if (p.email) allowed.add(p.email.trim().toLowerCase());
+        const roleLabel = (p.role ?? "teammate").replaceAll("_", " ");
+        if (p.id) {
+          const id = p.id.trim().toLowerCase();
+          allowed.add(id);
+          roleByIdentity.set(id, roleLabel);
+        }
+        if (p.full_name) {
+          const name = p.full_name.trim().toLowerCase();
+          allowed.add(name);
+          roleByIdentity.set(name, roleLabel);
+        }
+        if (p.email) {
+          const email = p.email.trim().toLowerCase();
+          allowed.add(email);
+          roleByIdentity.set(email, roleLabel);
+        }
       }
 
-      const gradeRows = ((gradesRes.data ?? []) as Array<{
-        score: number | null;
-        submitted_at: string;
-        submitted_by: string | null;
-      }>).filter((row) => {
+      const gradeRows = ((gradesRes.data ?? []) as TeammateGradeRow[]).filter((row) => {
         const submittedBy = (row.submitted_by ?? "").trim().toLowerCase();
         return submittedBy && allowed.has(submittedBy);
       });
+      const inspectionRows = ((inspectionsRes.data ?? []) as Array<{ created_at: string; checklist: unknown }>).filter(
+        (row) => {
+          const meta = parseInspectionMeta(row.checklist);
+          return meta.employee && allowed.has(meta.employee.toLowerCase());
+        }
+      );
 
       const nowToday = startOfToday();
       const nowWeek = startOfWeek();
       const nowMonth = startOfMonth();
       const nowYear = startOfYear();
+      const prevWeekStart = new Date(nowWeek);
+      prevWeekStart.setDate(prevWeekStart.getDate() - 7);
 
       const dailyScores = gradeRows
         .filter((row) => new Date(row.submitted_at) >= nowToday)
@@ -207,12 +295,128 @@ export default async function Home() {
         .filter((row) => new Date(row.submitted_at) >= nowYear)
         .map((row) => Number(row.score ?? 0));
 
+      const byRoleMap = new Map<string, number>();
+      for (const row of gradeRows) {
+        const identity = (row.submitted_by ?? "").trim().toLowerCase();
+        const roleLabel = roleByIdentity.get(identity) ?? "teammate";
+        byRoleMap.set(roleLabel, (byRoleMap.get(roleLabel) ?? 0) + 1);
+      }
+      const byRole = Array.from(byRoleMap.entries())
+        .map(([roleName, count]) => ({ role: roleName, count }))
+        .sort((a, b) => b.count - a.count);
+
+      const completedForms = gradeRows.filter((row) => row.is_complete === true).length;
+      const flaggedForms = gradeRows.filter((row) => row.accountability_flag === true).length;
+      const lateForms = gradeRows.filter((row) => {
+        const reason = (row.accountability_reason ?? "").toLowerCase();
+        return reason.includes("late") || reason.includes("not on time");
+      }).length;
+
+      const missedSectionCounts = new Map<string, number>();
+      for (const row of gradeRows) {
+        if (!row.accountability_reason) continue;
+        const reason = row.accountability_reason.toLowerCase();
+        if (!reason.includes("missing")) continue;
+        const parts = row.accountability_reason.split(/[;,]/).map((part) => part.trim()).filter(Boolean);
+        if (parts.length) {
+          for (const part of parts) {
+            const normalized = part.replace(/^missing required fields?:?/i, "").trim();
+            if (!normalized) continue;
+            const label = normalized.split(".")[0] || normalized;
+            missedSectionCounts.set(label, (missedSectionCounts.get(label) ?? 0) + 1);
+          }
+        } else {
+          const fallback = row.form_type || "form";
+          missedSectionCounts.set(fallback, (missedSectionCounts.get(fallback) ?? 0) + 1);
+        }
+      }
+      const topMissedSections = Array.from(missedSectionCounts.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      let totalFailedItems = 0;
+      let totalLinkedFailedItems = 0;
+      for (const row of inspectionRows) {
+        const meta = parseInspectionMeta(row.checklist);
+        totalFailedItems += meta.failCount;
+        totalLinkedFailedItems += Math.min(meta.linkedFailCount, meta.failCount);
+      }
+      const failToRequestLinkRate = pct(totalLinkedFailedItems, totalFailedItems);
+
+      type HeatAgg = { name: string; role: string; current: number[]; previous: number[]; flags: number };
+      const heatMapAgg = new Map<string, HeatAgg>();
+      for (const row of gradeRows) {
+        const identity = (row.submitted_by ?? "").trim().toLowerCase();
+        const key = identity || "unknown";
+        const current = heatMapAgg.get(key) ?? {
+          name: row.submitted_by || "Unknown",
+          role: roleByIdentity.get(identity) ?? "teammate",
+          current: [],
+          previous: [],
+          flags: 0,
+        };
+        const submittedAt = new Date(row.submitted_at);
+        const score = Number(row.score ?? 0);
+        if (submittedAt >= nowWeek) current.current.push(score);
+        else if (submittedAt >= prevWeekStart && submittedAt < nowWeek) current.previous.push(score);
+        if (row.accountability_flag) current.flags += 1;
+        heatMapAgg.set(key, current);
+      }
+
+      const teamHeatmap = Array.from(heatMapAgg.values())
+        .map((row) => {
+          const currentAvg = avgScore(row.current);
+          const previousAvg = avgScore(row.previous);
+          const delta = currentAvg - previousAvg;
+          const trend: "up" | "down" | "flat" = delta >= 3 ? "up" : delta <= -3 ? "down" : "flat";
+          return {
+            name: row.name,
+            role: row.role,
+            avgScore: currentAvg,
+            trend,
+          };
+        })
+        .sort((a, b) => b.avgScore - a.avgScore)
+        .slice(0, 12);
+
+      const atRiskQueue = Array.from(heatMapAgg.values())
+        .map((row) => {
+          const formScore = avgScore(row.current.length ? row.current : row.previous);
+          const overallScore = Math.max(0, Math.min(100, Math.round(formScore - row.flags * 5)));
+          return {
+            name: row.name,
+            role: row.role,
+            overallScore,
+            flags: row.flags,
+          };
+        })
+        .filter((row) => row.overallScore < 80 || row.flags > 2)
+        .sort((a, b) => a.overallScore - b.overallScore || b.flags - a.flags)
+        .slice(0, 10);
+
       teammateOpsStats = {
         daily: avgScore(dailyScores),
         weekly: avgScore(weeklyScores),
         monthly: avgScore(monthlyScores),
         ytd: avgScore(ytdScores),
         formCount: gradeRows.length,
+        formVolume: {
+          daily: dailyScores.length,
+          weekly: weeklyScores.length,
+          monthly: monthlyScores.length,
+          ytd: ytdScores.length,
+          byRole,
+        },
+        completionQuality: {
+          completeRate: pct(completedForms, gradeRows.length),
+          flaggedRate: pct(flaggedForms, gradeRows.length),
+          lateRate: pct(lateForms, gradeRows.length),
+        },
+        topMissedSections,
+        failToRequestLinkRate,
+        teamHeatmap,
+        atRiskQueue,
       };
     }
     canExpandDashboard = Boolean(isLeadership && teammateOpsStats);
