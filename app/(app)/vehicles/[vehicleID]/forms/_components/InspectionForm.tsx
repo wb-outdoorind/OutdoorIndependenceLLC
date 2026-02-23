@@ -60,6 +60,13 @@ type ExtraFieldConfig = {
   required: boolean;
 };
 
+type EquipmentOption = {
+  id: string;
+  name: string | null;
+  equipment_type: string | null;
+  status: string | null;
+};
+
 const DASH_LIGHT_OPTIONS = [
   "None",
   "Check Engine",
@@ -256,6 +263,10 @@ export default function InspectionForm({
     useState<StoredInspectionRecord["sections"]>({});
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
+  const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [trailerEquipmentIds, setTrailerEquipmentIds] = useState<string[]>([]);
+  const [trailerEquipmentSearch, setTrailerEquipmentSearch] = useState("");
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -358,6 +369,7 @@ export default function InspectionForm({
         notes?: string;
         employeeSignature?: string;
         managerSignature?: string;
+        trailerEquipmentIds?: string[];
       };
       if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
       if (typeof draft.mileage === "string") setMileage(draft.mileage);
@@ -371,6 +383,7 @@ export default function InspectionForm({
       if (typeof draft.notes === "string") setNotes(draft.notes);
       if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
       if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
+      if (Array.isArray(draft.trailerEquipmentIds)) setTrailerEquipmentIds(draft.trailerEquipmentIds);
     } catch (error) {
       console.error("Failed to restore inspection draft:", error);
     } finally {
@@ -396,6 +409,31 @@ export default function InspectionForm({
       [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
     }));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    void (async () => {
+      setEquipmentLoading(true);
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment")
+        .select("id,name,equipment_type,status")
+        .order("name", { ascending: true })
+        .limit(500);
+      if (!active) return;
+      setEquipmentLoading(false);
+      if (error) {
+        console.error("Failed loading equipment options:", error);
+        setEquipmentOptions([]);
+        return;
+      }
+      setEquipmentOptions((data ?? []) as EquipmentOption[]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [vehicleId]);
 
   const defectsFound = useMemo(() => {
     for (const sec of visibleSections) {
@@ -466,6 +504,13 @@ export default function InspectionForm({
     });
   }
 
+  function toggleTrailerEquipment(id: string, checked: boolean) {
+    setTrailerEquipmentIds((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id];
+      return prev.filter((x) => x !== id);
+    });
+  }
+
   function saveDraft() {
     if (!vehicleId) return;
     const draft = {
@@ -476,6 +521,7 @@ export default function InspectionForm({
       sectionState,
       itemExtraValues,
       failRequestLinks,
+      trailerEquipmentIds,
       exiting,
       inspectionStatus,
       notes,
@@ -559,6 +605,9 @@ export default function InspectionForm({
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
       }
+      if (sec.id === "trailer" && st?.applicable && trailerEquipmentIds.length === 0) {
+        return alert("Select the equipment being hauled for the Trailer section.");
+      }
       if (st?.applicable) {
         for (const it of sec.items) {
           const value = st.items?.[it.key] as ChoiceOrBlank;
@@ -609,6 +658,14 @@ export default function InspectionForm({
       dashLightsOn,
       itemExtraValues,
       failRequestLinks,
+      trailerEquipmentIds,
+      trailerEquipment: equipmentOptions
+        .filter((row) => trailerEquipmentIds.includes(row.id))
+        .map((row) => ({
+          id: row.id,
+          name: row.name ?? row.id,
+          equipment_type: row.equipment_type ?? null,
+        })),
       type,
     };
 
@@ -809,6 +866,79 @@ export default function InspectionForm({
                       placeholder={sec.nameFieldLabel}
                       style={inputStyle()}
                     />
+                  </div>
+                ) : null}
+
+                {st.applicable && sec.id === "trailer" ? (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>Trailer Loadout Equipment *</div>
+                    <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
+                      Select exactly what equipment is being hauled today.
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <input
+                        value={trailerEquipmentSearch}
+                        onChange={(e) => setTrailerEquipmentSearch(e.target.value)}
+                        placeholder="Search equipment..."
+                        style={inputStyle()}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 10,
+                        padding: 10,
+                        maxHeight: 220,
+                        overflowY: "auto",
+                        display: "grid",
+                        gap: 8,
+                      }}
+                    >
+                      {equipmentLoading ? (
+                        <div style={{ opacity: 0.72 }}>Loading equipment...</div>
+                      ) : equipmentOptions.length === 0 ? (
+                        <div style={{ opacity: 0.72 }}>No equipment records found.</div>
+                      ) : (
+                        equipmentOptions
+                          .filter((row) => {
+                            const q = trailerEquipmentSearch.trim().toLowerCase();
+                            if (!q) return true;
+                            const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
+                            return hay.includes(q);
+                          })
+                          .map((row) => (
+                            <label
+                              key={row.id}
+                              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={trailerEquipmentIds.includes(row.id)}
+                                onChange={(e) => toggleTrailerEquipment(row.id, e.target.checked)}
+                              />
+                              <span>
+                                <strong>{row.name ?? row.id}</strong>
+                                <span style={{ opacity: 0.72 }}>
+                                  {" "}
+                                  · {row.equipment_type ?? "Unspecified"}
+                                </span>
+                              </span>
+                            </label>
+                          ))
+                      )}
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+                      Selected: <strong>{trailerEquipmentIds.length}</strong>
+                    </div>
                   </div>
                 ) : null}
 
