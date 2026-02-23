@@ -177,6 +177,13 @@ function extraFieldConfig(itemKey: string): ExtraFieldConfig | null {
   return null;
 }
 
+function parseDiagnosticCodes(raw: string) {
+  return raw
+    .split(/[\n,]+/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
 }
@@ -348,6 +355,7 @@ export default function InspectionForm({
   const [sectionState, setSectionState] =
     useState<StoredInspectionRecord["sections"]>({});
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
+  const [diagCodeDraftByItem, setDiagCodeDraftByItem] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [equipmentLoading, setEquipmentLoading] = useState(false);
@@ -515,6 +523,22 @@ export default function InspectionForm({
   }, [vehicleId, type]);
 
   useEffect(() => {
+    setSectionState((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const sec of visibleSections) {
+        if (!isAlwaysRequiredSection(sec.id)) continue;
+        const existing = next[sec.id];
+        if (existing && !existing.applicable) {
+          next[sec.id] = { ...existing, applicable: true };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [visibleSections]);
+
+  useEffect(() => {
     void (async () => {
       const name = await getSignedInDisplayName();
       if (!name) return;
@@ -671,6 +695,31 @@ export default function InspectionForm({
     setItemExtraValues((prev) => ({
       ...prev,
       [failLinkKey(sectionId, itemKey)]: value,
+    }));
+  }
+
+  function addDiagnosticCode(sectionId: string, itemKey: string) {
+    const detailKey = failLinkKey(sectionId, itemKey);
+    const incoming = (diagCodeDraftByItem[detailKey] ?? "").trim();
+    if (!incoming) return;
+    const existing = parseDiagnosticCodes(itemExtraValues[detailKey] || "");
+    if (!existing.some((v) => v.toLowerCase() === incoming.toLowerCase())) {
+      setItemExtraValues((prev) => ({
+        ...prev,
+        [detailKey]: [...existing, incoming].join(", "),
+      }));
+    }
+    setDiagCodeDraftByItem((prev) => ({ ...prev, [detailKey]: "" }));
+  }
+
+  function removeDiagnosticCode(sectionId: string, itemKey: string, value: string) {
+    const detailKey = failLinkKey(sectionId, itemKey);
+    const next = parseDiagnosticCodes(itemExtraValues[detailKey] || "").filter(
+      (v) => v.toLowerCase() !== value.toLowerCase()
+    );
+    setItemExtraValues((prev) => ({
+      ...prev,
+      [detailKey]: next.join(", "),
     }));
   }
 
@@ -2307,6 +2356,82 @@ export default function InspectionForm({
                             const cfg = extraFieldConfig(it.key);
                             if (!cfg) return null;
                             const detailKey = failLinkKey(sec.id, it.key);
+                            if (it.key === "diag_codes_list") {
+                              const codes = parseDiagnosticCodes(itemExtraValues[detailKey] || "");
+                              return (
+                                <div>
+                                  <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 6 }}>
+                                    {cfg.label}
+                                  </div>
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <input
+                                      value={diagCodeDraftByItem[detailKey] || ""}
+                                      onChange={(e) =>
+                                        setDiagCodeDraftByItem((prev) => ({
+                                          ...prev,
+                                          [detailKey]: e.target.value,
+                                        }))
+                                      }
+                                      inputMode={cfg.inputMode}
+                                      placeholder="Type code"
+                                      style={{ ...inputStyle(), flex: "1 1 180px" }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          addDiagnosticCode(sec.id, it.key);
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      style={buttonStyle()}
+                                      onClick={() => addDiagnosticCode(sec.id, it.key)}
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    {codes.length === 0 ? (
+                                      <span style={{ fontSize: 12, opacity: 0.68 }}>No diagnostic codes added.</span>
+                                    ) : (
+                                      codes.map((code) => (
+                                        <span
+                                          key={code}
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 6,
+                                            padding: "5px 9px",
+                                            borderRadius: 999,
+                                            border: "1px solid rgba(255,255,255,0.14)",
+                                            background: "rgba(255,255,255,0.05)",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                          }}
+                                        >
+                                          {code}
+                                          <button
+                                            type="button"
+                                            onClick={() => removeDiagnosticCode(sec.id, it.key, code)}
+                                            style={{
+                                              border: "none",
+                                              background: "transparent",
+                                              color: "inherit",
+                                              cursor: "pointer",
+                                              opacity: 0.8,
+                                              padding: 0,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            x
+                                          </button>
+                                        </span>
+                                      ))
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
                             return (
                               <div>
                                 <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 6 }}>
