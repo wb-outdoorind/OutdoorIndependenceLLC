@@ -18,6 +18,7 @@ type AssignableRole =
   | "team_lead_2"
   | "team_member_1"
   | "team_member_2"
+  | "apprentice"
   | "mechanic"
   | "office_admin"
   | "operations_manager"
@@ -140,6 +141,7 @@ export default function NewEmployeeClient() {
               <option value="team_lead_2">Team Lead 2</option>
               <option value="team_member_1">Team Member 1</option>
               <option value="team_member_2">Team Member 2</option>
+              <option value="apprentice">Apprentice</option>
               <option value="mechanic">Mechanic</option>
               <option value="office_admin">Office Admin</option>
               <option value="operations_manager">Operations Manager</option>

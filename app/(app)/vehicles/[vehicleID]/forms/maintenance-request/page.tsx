@@ -40,6 +40,17 @@ type SystemAffected =
 
 type TriState = "Yes" | "No" | "Not sure";
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "team_lead_1"
+  | "team_lead_2"
+  | "team_member_1"
+  | "team_member_2"
+  | "apprentice"
+  | "employee";
 
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
@@ -136,6 +147,7 @@ export default function MaintenanceRequestPage() {
     useState<TriState | "">("");
   const [downtimeExpected, setDowntimeExpected] =
     useState<TriState | "">("");
+  const [userRole, setUserRole] = useState<Role | null>(null);
 
   // ✅ load transfer data safely
   useEffect(() => {
@@ -174,6 +186,26 @@ export default function MaintenanceRequestPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const supabase = createSupabaseBrowser();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          setUserRole("employee");
+          return;
+        }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+        setUserRole((profile?.role as Role | undefined) ?? "employee");
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const suggestedTitle = useMemo(() => {
     const base = `${systemAffected}`;
     const end = urgency === "Urgent" ? " (URGENT)" : "";
@@ -184,6 +216,9 @@ export default function MaintenanceRequestPage() {
     e.preventDefault();
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
+    if (userRole === "apprentice") {
+      return alert("Apprentice role cannot submit maintenance requests.");
+    }
 
     const m = Number(mileage);
     if (!requestDate) return alert("Request Date is required.");

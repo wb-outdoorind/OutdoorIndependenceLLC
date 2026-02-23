@@ -291,6 +291,7 @@ function prettyRole(role: string) {
   if (r === "team_lead_2") return "Team Lead 2";
   if (r === "team_member_1") return "Team Member 1";
   if (r === "team_member_2") return "Team Member 2";
+  if (r === "apprentice") return "Apprentice";
   if (r === "employee") return "Teammate (Legacy)";
   return role || "Unknown";
 }

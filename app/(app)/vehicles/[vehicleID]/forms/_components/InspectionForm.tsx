@@ -74,6 +74,17 @@ type VehicleOption = {
   type: string | null;
   status: string | null;
 };
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "team_lead_1"
+  | "team_lead_2"
+  | "team_member_1"
+  | "team_member_2"
+  | "apprentice"
+  | "employee";
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
@@ -385,6 +396,7 @@ export default function InspectionForm({
   const [employeeSignature, setEmployeeSignature] = useState("");
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
 
   // Read vehicle metadata from local storage (with short retries for timing).
   useEffect(() => {
@@ -469,6 +481,26 @@ export default function InspectionForm({
       if (!name) return;
       setEmployee((prev) => (prev.trim() ? prev : name));
     })();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const supabase = createSupabaseBrowser();
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          setCurrentUserRole("employee");
+          return;
+        }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+        setCurrentUserRole((profile?.role as Role | undefined) ?? "employee");
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -783,6 +815,10 @@ export default function InspectionForm({
 
   function openFullRequestForm(sectionId: string, item: InspectionItem, sectionTitle: string) {
     if (!vehicleId) return;
+    if (currentUserRole === "apprentice") {
+      alert("Apprentice role cannot submit maintenance requests. Link to an existing request instead.");
+      return;
+    }
     const parsedMileage = Number(mileage);
     if (!Number.isFinite(parsedMileage) || parsedMileage <= 0) {
       alert("Enter a valid mileage in this inspection before opening the maintenance request form.");
@@ -856,7 +892,7 @@ export default function InspectionForm({
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
           );
       }
-      if (st?.applicable && isSectionEquipmentPicker(sec.id) && !st.name?.trim()) {
+      if (st?.applicable && isSectionEquipmentPicker(sec.id) && sec.id !== "truck" && !st.name?.trim()) {
         return alert(`Select the ${sec.title} item for this section.`);
       }
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
@@ -1129,6 +1165,18 @@ export default function InspectionForm({
           {visibleSections.map((sec) => {
             const st = sectionState[sec.id];
             if (!st) return null;
+            const truckLoadoutAnchorKey = sec.items.some((item) => item.key === "equipment_secured")
+              ? "equipment_secured"
+              : sec.items.some((item) => item.key === "equipment_secured_next_day")
+                ? "equipment_secured_next_day"
+                : sec.items.some((item) => item.key === "equipment_clean_operational")
+                  ? "equipment_clean_operational"
+                  : "";
+            const trailerLoadoutAnchorKey = sec.items.some((item) => item.key === "equipment_loaded")
+              ? "equipment_loaded"
+              : sec.items.some((item) => item.key === "equipment_checked")
+                ? "equipment_checked"
+                : sec.items[0]?.key ?? "";
 
             return (
               <div key={sec.id} style={cardStyle()}>
@@ -1165,7 +1213,7 @@ export default function InspectionForm({
                 </div>
 
                 {/* Optional name field when applicable */}
-                {st.applicable && isSectionEquipmentPicker(sec.id) ? (
+                {st.applicable && isSectionEquipmentPicker(sec.id) && sec.id !== "truck" ? (
                   <div
                     style={{
                       marginTop: 12,
@@ -1382,7 +1430,7 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && isSectionEquipmentPicker(sec.id) ? (
+                {st.applicable && isSectionEquipmentPicker(sec.id) && sec.id !== "truck" && sec.id !== "trailer" ? (
                   <div
                     style={{
                       marginTop: 12,
@@ -1587,7 +1635,7 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && sec.id === "trailer" ? (
+                {st.applicable && sec.id === "trailer" && false ? (
                   <div
                     style={{
                       marginTop: 12,
@@ -1806,8 +1854,390 @@ export default function InspectionForm({
                   <>
                     <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
                       {sec.items.map((it) => (
+                      <React.Fragment key={it.key}>
+                      {sec.id === "truck" && it.key === truckLoadoutAnchorKey ? (
+                        <div
+                          style={{
+                            padding: 12,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.02)",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700 }}>Truck Loadout Equipment *</div>
+                          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
+                            Add equipment one-by-one to the selected bucket for this section.
+                          </div>
+                          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                            {(sectionEquipmentIds[sec.id] ?? []).length === 0 ? (
+                              <div style={{ fontSize: 12, opacity: 0.72 }}>No equipment added yet.</div>
+                            ) : (
+                              (sectionEquipmentIds[sec.id] ?? []).map((id) => {
+                                const row = equipmentOptions.find((opt) => opt.id === id);
+                                return (
+                                  <div
+                                    key={id}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: 8,
+                                      border: "1px solid rgba(255,255,255,0.12)",
+                                      borderRadius: 10,
+                                      padding: 8,
+                                      background: "rgba(255,255,255,0.02)",
+                                    }}
+                                  >
+                                    <div>
+                                      <strong>{row?.name ?? id}</strong>
+                                      <span style={{ opacity: 0.72 }}>
+                                        {" "}
+                                        · {row?.equipment_type ?? "Unspecified"}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      style={secondaryButtonStyle()}
+                                      onClick={() => removeSectionEquipment(sec.id, id)}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <button
+                              type="button"
+                              style={buttonStyle()}
+                              onClick={() => {
+                                setPickerOpenSectionId(sec.id);
+                                setPickerMode(sec.id, pickerModeBySection[sec.id] ?? "search");
+                              }}
+                            >
+                              Add Equipment
+                            </button>
+                          </div>
+                          {pickerOpenSectionId === sec.id ? (
+                            <div
+                              style={{
+                                marginTop: 10,
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 12,
+                                padding: 10,
+                                background: "rgba(255,255,255,0.02)",
+                                display: "grid",
+                                gap: 8,
+                              }}
+                            >
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  style={pickerModeBySection[sec.id] === "scan" ? secondaryButtonStyle() : buttonStyle()}
+                                  onClick={() => setPickerMode(sec.id, "search")}
+                                >
+                                  Search
+                                </button>
+                                <button
+                                  type="button"
+                                  style={pickerModeBySection[sec.id] === "scan" ? buttonStyle() : secondaryButtonStyle()}
+                                  onClick={() => setPickerMode(sec.id, "scan")}
+                                >
+                                  Scan QR
+                                </button>
+                                <button
+                                  type="button"
+                                  style={secondaryButtonStyle()}
+                                  onClick={() => setPickerOpenSectionId(null)}
+                                >
+                                  Close
+                                </button>
+                              </div>
+                              {(pickerModeBySection[sec.id] ?? "search") === "search" ? (
+                                <>
+                                  <input
+                                    value={sectionEquipmentSearch[sec.id] ?? ""}
+                                    onChange={(e) => setSectionSearch(sec.id, e.target.value)}
+                                    placeholder="Search equipment..."
+                                    style={inputStyle()}
+                                  />
+                                  <div
+                                    style={{
+                                      border: "1px solid rgba(255,255,255,0.12)",
+                                      borderRadius: 10,
+                                      padding: 10,
+                                      maxHeight: 200,
+                                      overflowY: "auto",
+                                      display: "grid",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    {equipmentLoading ? (
+                                      <div style={{ opacity: 0.72 }}>Loading equipment...</div>
+                                    ) : (
+                                      (() => {
+                                        const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
+                                        const visible = equipmentOptions
+                                          .filter((row) => equipmentMatchesSection(sec.id, row))
+                                          .filter((row) => {
+                                            if (!q) return true;
+                                            const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
+                                            return hay.includes(q);
+                                          });
+                                        if (!visible.length) {
+                                          return <div style={{ opacity: 0.72 }}>No matching equipment found.</div>;
+                                        }
+                                        return visible.map((row) => (
+                                          <button
+                                            key={row.id}
+                                            type="button"
+                                            style={{ textAlign: "left", ...secondaryButtonStyle() }}
+                                            onClick={() => {
+                                              addSectionEquipment(sec.id, row.id);
+                                              setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                            }}
+                                          >
+                                            <strong>{row.name ?? row.id}</strong>
+                                            <span style={{ opacity: 0.72 }}>
+                                              {" "}
+                                              · {row.equipment_type ?? "Unspecified"}
+                                            </span>
+                                          </button>
+                                        ));
+                                      })()
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <input
+                                    value={pickerScanValueBySection[sec.id] ?? ""}
+                                    onChange={(e) =>
+                                      setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: e.target.value }))
+                                    }
+                                    placeholder="Scan or paste equipment QR value"
+                                    style={inputStyle()}
+                                  />
+                                  <button
+                                    type="button"
+                                    style={buttonStyle()}
+                                    onClick={() => {
+                                      const found = findEquipmentByQr(sec.id, pickerScanValueBySection[sec.id] ?? "");
+                                      if (!found) {
+                                        setPickerErrorBySection((prev) => ({
+                                          ...prev,
+                                          [sec.id]: "No matching equipment found for this section.",
+                                        }));
+                                        return;
+                                      }
+                                      addSectionEquipment(sec.id, found.id);
+                                      setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                      setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                    }}
+                                  >
+                                    Add Equipment
+                                  </button>
+                                </>
+                              )}
+                              {pickerErrorBySection[sec.id] ? (
+                                <div style={{ fontSize: 12, color: "#ff9d9d" }}>{pickerErrorBySection[sec.id]}</div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {sec.id === "trailer" && it.key === trailerLoadoutAnchorKey ? (
+                        <div
+                          style={{
+                            padding: 12,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.02)",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700 }}>Trailer Loadout - Equipment and Vehicles *</div>
+                          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
+                            Add loadout equipment and loadout vehicles. Linked vehicles must complete their own{" "}
+                            {type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} inspection before this form can submit.
+                          </div>
+                          <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.8 }}>Equipment</div>
+                          <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                            {(sectionEquipmentIds[sec.id] ?? []).length === 0 ? (
+                              <div style={{ fontSize: 12, opacity: 0.72 }}>No equipment added yet.</div>
+                            ) : (
+                              (sectionEquipmentIds[sec.id] ?? []).map((id) => {
+                                const row = equipmentOptions.find((opt) => opt.id === id);
+                                return (
+                                  <div key={id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 8, background: "rgba(255,255,255,0.02)" }}>
+                                    <div>
+                                      <strong>{row?.name ?? id}</strong>
+                                      <span style={{ opacity: 0.72 }}>
+                                        {" "}
+                                        · {row?.equipment_type ?? "Unspecified"}
+                                      </span>
+                                    </div>
+                                    <button type="button" style={secondaryButtonStyle()} onClick={() => removeSectionEquipment(sec.id, id)}>
+                                      Remove
+                                    </button>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <button
+                              type="button"
+                              style={buttonStyle()}
+                              onClick={() => {
+                                setPickerOpenSectionId(sec.id);
+                                setPickerMode(sec.id, pickerModeBySection[sec.id] ?? "search");
+                              }}
+                            >
+                              Add Equipment
+                            </button>
+                          </div>
+                          {pickerOpenSectionId === sec.id ? (
+                            <div style={{ marginTop: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10, background: "rgba(255,255,255,0.02)", display: "grid", gap: 8 }}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button type="button" style={pickerModeBySection[sec.id] === "scan" ? secondaryButtonStyle() : buttonStyle()} onClick={() => setPickerMode(sec.id, "search")}>Search</button>
+                                <button type="button" style={pickerModeBySection[sec.id] === "scan" ? buttonStyle() : secondaryButtonStyle()} onClick={() => setPickerMode(sec.id, "scan")}>Scan QR</button>
+                                <button type="button" style={secondaryButtonStyle()} onClick={() => setPickerOpenSectionId(null)}>Close</button>
+                              </div>
+                              {(pickerModeBySection[sec.id] ?? "search") === "search" ? (
+                                <>
+                                  <input value={sectionEquipmentSearch[sec.id] ?? ""} onChange={(e) => setSectionSearch(sec.id, e.target.value)} placeholder="Search equipment..." style={inputStyle()} />
+                                  <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 10, maxHeight: 200, overflowY: "auto", display: "grid", gap: 8 }}>
+                                    {equipmentLoading ? <div style={{ opacity: 0.72 }}>Loading equipment...</div> : (() => {
+                                      const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
+                                      const visible = equipmentOptions.filter((row) => equipmentMatchesSection(sec.id, row)).filter((row) => {
+                                        if (!q) return true;
+                                        const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
+                                        return hay.includes(q);
+                                      });
+                                      if (!visible.length) return <div style={{ opacity: 0.72 }}>No matching equipment found.</div>;
+                                      return visible.map((row) => (
+                                        <button key={row.id} type="button" style={{ textAlign: "left", ...secondaryButtonStyle() }} onClick={() => {
+                                          addSectionEquipment(sec.id, row.id);
+                                          setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                        }}>
+                                          <strong>{row.name ?? row.id}</strong>
+                                          <span style={{ opacity: 0.72 }}> · {row.equipment_type ?? "Unspecified"}</span>
+                                        </button>
+                                      ));
+                                    })()}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <input value={pickerScanValueBySection[sec.id] ?? ""} onChange={(e) => setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: e.target.value }))} placeholder="Scan or paste equipment QR value" style={inputStyle()} />
+                                  <button type="button" style={buttonStyle()} onClick={() => {
+                                    const found = findEquipmentByQr(sec.id, pickerScanValueBySection[sec.id] ?? "");
+                                    if (!found) {
+                                      setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "No matching equipment found for this section." }));
+                                      return;
+                                    }
+                                    addSectionEquipment(sec.id, found.id);
+                                    setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                    setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                  }}>Add Equipment</button>
+                                </>
+                              )}
+                              {pickerErrorBySection[sec.id] ? (
+                                <div style={{ fontSize: 12, color: "#ff9d9d" }}>{pickerErrorBySection[sec.id]}</div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          <div style={{ marginTop: 12, fontSize: 12, fontWeight: 800, opacity: 0.8 }}>Vehicles</div>
+                          <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                            {trailerVehicleIds.length === 0 ? (
+                              <div style={{ fontSize: 12, opacity: 0.72 }}>No vehicles added yet.</div>
+                            ) : (
+                              trailerVehicleIds.map((id) => {
+                                const row = vehicleOptions.find((opt) => opt.id === id);
+                                const linked = (trailerVehicleLinks[id] || "").trim();
+                                return (
+                                  <div key={id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 8, background: "rgba(255,255,255,0.02)" }}>
+                                    <div style={{ display: "grid", gap: 4 }}>
+                                      <div>
+                                        <strong>{row?.name ?? id}</strong>
+                                        <span style={{ opacity: 0.72 }}> · {row?.type ?? "Unspecified"}</span>
+                                      </div>
+                                      <div style={{ fontSize: 12, opacity: linked ? 0.95 : 0.72 }}>
+                                        {linked
+                                          ? `Linked ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}: ${linked}`
+                                          : `No linked ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} yet`}
+                                      </div>
+                                    </div>
+                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                      <button type="button" style={buttonStyle()} onClick={() => openVehicleInspectionForLink(id)}>
+                                        {linked ? `Update ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}` : `Complete ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}`}
+                                      </button>
+                                      <button type="button" style={secondaryButtonStyle()} onClick={() => removeTrailerVehicle(id)}>
+                                        Remove
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <button type="button" style={buttonStyle()} onClick={() => {
+                              setTrailerVehiclePickerOpen(true);
+                              setTrailerVehicleError("");
+                            }}>
+                              Add Vehicle
+                            </button>
+                          </div>
+                          {trailerVehiclePickerOpen ? (
+                            <div style={{ marginTop: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10, background: "rgba(255,255,255,0.02)", display: "grid", gap: 8 }}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button type="button" style={trailerVehiclePickerMode === "scan" ? secondaryButtonStyle() : buttonStyle()} onClick={() => { setTrailerVehiclePickerMode("search"); setTrailerVehicleError(""); }}>Search</button>
+                                <button type="button" style={trailerVehiclePickerMode === "scan" ? buttonStyle() : secondaryButtonStyle()} onClick={() => { setTrailerVehiclePickerMode("scan"); setTrailerVehicleError(""); }}>Scan QR</button>
+                                <button type="button" style={secondaryButtonStyle()} onClick={() => setTrailerVehiclePickerOpen(false)}>Close</button>
+                              </div>
+                              {trailerVehiclePickerMode === "search" ? (
+                                <>
+                                  <input value={trailerVehicleSearch} onChange={(e) => setTrailerVehicleSearch(e.target.value)} placeholder="Search vehicles..." style={inputStyle()} />
+                                  <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 10, maxHeight: 200, overflowY: "auto", display: "grid", gap: 8 }}>
+                                    {vehicleLoading ? <div style={{ opacity: 0.72 }}>Loading vehicles...</div> : (() => {
+                                      const q = trailerVehicleSearch.trim().toLowerCase();
+                                      const visible = vehicleOptions.filter((row) => row.id !== vehicleId).filter((row) => {
+                                        if (!q) return true;
+                                        const hay = `${row.name ?? ""} ${row.type ?? ""} ${row.id}`.toLowerCase();
+                                        return hay.includes(q);
+                                      });
+                                      if (!visible.length) return <div style={{ opacity: 0.72 }}>No matching vehicles found.</div>;
+                                      return visible.map((row) => (
+                                        <button key={row.id} type="button" style={{ textAlign: "left", ...secondaryButtonStyle() }} onClick={() => addTrailerVehicle(row.id)}>
+                                          <strong>{row.name ?? row.id}</strong>
+                                          <span style={{ opacity: 0.72 }}> · {row.type ?? "Unspecified"}</span>
+                                        </button>
+                                      ));
+                                    })()}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <input value={trailerVehicleScanValue} onChange={(e) => setTrailerVehicleScanValue(e.target.value)} placeholder="Scan or paste vehicle QR value" style={inputStyle()} />
+                                  <button type="button" style={buttonStyle()} onClick={() => {
+                                    const found = findVehicleByQr(trailerVehicleScanValue);
+                                    if (!found) {
+                                      setTrailerVehicleError("No matching vehicle found.");
+                                      return;
+                                    }
+                                    addTrailerVehicle(found.id);
+                                    setTrailerVehicleScanValue("");
+                                  }}>Add Vehicle</button>
+                                </>
+                              )}
+                              {trailerVehicleError ? <div style={{ fontSize: 12, color: "#ff9d9d" }}>{trailerVehicleError}</div> : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div
-                        key={it.key}
                         style={{
                           display: "grid",
                           gridTemplateColumns: "1fr auto",
@@ -1870,7 +2300,12 @@ export default function InspectionForm({
                                 <button
                                   type="button"
                                   onClick={() => openFullRequestForm(sec.id, it, sec.title)}
-                                  style={buttonStyle()}
+                                  style={{
+                                    ...buttonStyle(),
+                                    opacity: currentUserRole === "apprentice" ? 0.6 : 1,
+                                    cursor: currentUserRole === "apprentice" ? "not-allowed" : "pointer",
+                                  }}
+                                  disabled={currentUserRole === "apprentice"}
                                 >
                                   {failRequestLinks[failLinkKey(sec.id, it.key)]
                                     ? "Update Linked Request"
@@ -1888,61 +2323,62 @@ export default function InspectionForm({
                           ) : null}
                         </div>
                       </div>
-                      ))}
-                    </div>
-                    {sec.id === "truck" ? (
-                      <div
-                        style={{
-                          marginTop: 12,
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto",
-                          gap: 12,
-                          alignItems: "center",
-                          padding: 12,
-                          borderRadius: 12,
-                          border: "1px solid rgba(255,255,255,0.12)",
-                          background: "rgba(255,255,255,0.02)",
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>Dash Lights On? *</div>
-                        <div style={{ display: "grid", gap: 6, minWidth: 240 }}>
-                          <div
-                            style={{
-                              border: "1px solid rgba(255,255,255,0.14)",
-                              borderRadius: 12,
-                              padding: 10,
-                              background: "rgba(255,255,255,0.03)",
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                              gap: 8,
-                            }}
-                          >
-                            {DASH_LIGHT_OPTIONS.map((opt) => (
-                              <label
-                                key={opt}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  cursor: "pointer",
-                                  fontSize: 13,
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={dashLightsOn.includes(opt)}
-                                  onChange={(e) => toggleDashLight(opt, e.target.checked)}
-                                />
-                                <span>{opt}</span>
-                              </label>
-                            ))}
-                          </div>
-                          <div style={{ fontSize: 12, opacity: 0.72 }}>
-                            Select all that apply.
+                      {sec.id === "truck" && it.key === "dashboard_operational" ? (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: "grid",
+                            gridTemplateColumns: "1fr auto",
+                            gap: 12,
+                            alignItems: "center",
+                            padding: 12,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.02)",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700 }}>Dash Lights On? *</div>
+                          <div style={{ display: "grid", gap: 6, minWidth: 240 }}>
+                            <div
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.14)",
+                                borderRadius: 12,
+                                padding: 10,
+                                background: "rgba(255,255,255,0.03)",
+                                display: "grid",
+                                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                                gap: 8,
+                              }}
+                            >
+                              {DASH_LIGHT_OPTIONS.map((opt) => (
+                                <label
+                                  key={opt}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    cursor: "pointer",
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={dashLightsOn.includes(opt)}
+                                    onChange={(e) => toggleDashLight(opt, e.target.checked)}
+                                  />
+                                  <span>{opt}</span>
+                                </label>
+                              ))}
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>
+                              Select all that apply.
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                      </React.Fragment>
+                      ))}
+                    </div>
                   </>
                 ) : (
                   <div style={{ marginTop: 12, fontSize: 13, opacity: 0.7 }}>
@@ -2006,7 +2442,12 @@ export default function InspectionForm({
                           <button
                             type="button"
                             onClick={() => openFullRequestForm("exiting", it, "Exiting / Securing")}
-                            style={buttonStyle()}
+                            style={{
+                              ...buttonStyle(),
+                              opacity: currentUserRole === "apprentice" ? 0.6 : 1,
+                              cursor: currentUserRole === "apprentice" ? "not-allowed" : "pointer",
+                            }}
+                            disabled={currentUserRole === "apprentice"}
                           >
                             {failRequestLinks[failLinkKey("exiting", it.key)]
                               ? "Update Linked Request"

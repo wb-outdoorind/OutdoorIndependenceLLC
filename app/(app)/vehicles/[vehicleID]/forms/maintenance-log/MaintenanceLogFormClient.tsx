@@ -62,7 +62,17 @@ type MaintenanceRequestRecord = {
 };
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "team_lead_1"
+  | "team_lead_2"
+  | "team_member_1"
+  | "team_member_2"
+  | "apprentice"
+  | "employee";
 
 type InventoryItem = {
   id: string;
@@ -381,6 +391,9 @@ export default function MaintenanceLogPage() {
     setSubmitError(null);
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
+    if (userRole === "apprentice") {
+      return alert("Apprentice role cannot submit maintenance logs.");
+    }
 
     const m = Number(mileage);
     if (!title.trim()) return alert("Please enter a title (what was done).");

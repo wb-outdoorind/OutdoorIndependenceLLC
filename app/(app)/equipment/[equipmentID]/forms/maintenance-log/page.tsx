@@ -8,7 +8,17 @@ import { writeAudit } from "@/lib/audit";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "team_lead_1"
+  | "team_lead_2"
+  | "team_member_1"
+  | "team_member_2"
+  | "apprentice"
+  | "employee";
 
 type EquipmentRequestOption = {
   id: string;
@@ -312,6 +322,9 @@ export default function EquipmentMaintenanceLogPage() {
     setSubmitError(null);
 
     if (!equipmentId) return alert("Missing equipment ID in the URL.");
+    if (userRole === "apprentice") {
+      return alert("Apprentice role cannot submit maintenance logs.");
+    }
 
     const h = Number(hours);
     if (!title.trim()) return alert("Please enter a title (what was done).");

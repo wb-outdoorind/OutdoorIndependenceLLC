@@ -3,7 +3,10 @@ export type Role =
   | "operations_manager"
   | "office_admin"
   | "mechanic"
+  | "apprentice"
   | "employee"
+  | "team_lead_1"
+  | "team_lead_2"
   | "team_member_1"
   | "team_member_2";
 
