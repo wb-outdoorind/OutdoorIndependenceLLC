@@ -65,6 +65,7 @@ type EquipmentOption = {
   name: string | null;
   equipment_type: string | null;
   status: string | null;
+  asset_qr: string | null;
 };
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
@@ -291,6 +292,10 @@ export default function InspectionForm({
   const [equipmentLoading, setEquipmentLoading] = useState(false);
   const [sectionEquipmentIds, setSectionEquipmentIds] = useState<Record<string, string[]>>({});
   const [sectionEquipmentSearch, setSectionEquipmentSearch] = useState<Record<string, string>>({});
+  const [pickerOpenSectionId, setPickerOpenSectionId] = useState<string | null>(null);
+  const [pickerModeBySection, setPickerModeBySection] = useState<Record<string, "search" | "scan">>({});
+  const [pickerScanValueBySection, setPickerScanValueBySection] = useState<Record<string, string>>({});
+  const [pickerErrorBySection, setPickerErrorBySection] = useState<Record<string, string>>({});
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -444,7 +449,7 @@ export default function InspectionForm({
       const supabase = createSupabaseBrowser();
       const { data, error } = await supabase
         .from("equipment")
-        .select("id,name,equipment_type,status")
+        .select("id,name,equipment_type,status,asset_qr")
         .order("name", { ascending: true })
         .limit(500);
       if (!active) return;
@@ -530,20 +535,60 @@ export default function InspectionForm({
     });
   }
 
-  function toggleSectionEquipment(sectionId: string, id: string, checked: boolean) {
+  function setSectionSearch(sectionId: string, value: string) {
+    setSectionEquipmentSearch((prev) => ({ ...prev, [sectionId]: value }));
+  }
+
+  function addSectionEquipment(sectionId: string, id: string) {
     setSectionEquipmentIds((prev) => {
       const current = prev[sectionId] ?? [];
-      const next = checked
-        ? current.includes(id)
-          ? current
-          : [...current, id]
-        : current.filter((x) => x !== id);
-      return { ...prev, [sectionId]: next };
+      if (current.includes(id)) return prev;
+      return { ...prev, [sectionId]: [...current, id] };
     });
   }
 
-  function setSectionSearch(sectionId: string, value: string) {
-    setSectionEquipmentSearch((prev) => ({ ...prev, [sectionId]: value }));
+  function removeSectionEquipment(sectionId: string, id: string) {
+    setSectionEquipmentIds((prev) => ({
+      ...prev,
+      [sectionId]: (prev[sectionId] ?? []).filter((x) => x !== id),
+    }));
+  }
+
+  function setPickerMode(sectionId: string, mode: "search" | "scan") {
+    setPickerModeBySection((prev) => ({ ...prev, [sectionId]: mode }));
+    setPickerErrorBySection((prev) => ({ ...prev, [sectionId]: "" }));
+  }
+
+  function findEquipmentByQr(sectionId: string, rawValue: string) {
+    const value = rawValue.trim();
+    if (!value) return null;
+    let lastSegment = "";
+    try {
+      const u = new URL(value);
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length) lastSegment = decodeURIComponent(parts[parts.length - 1]);
+    } catch {
+      // not URL
+    }
+    const scoped = equipmentOptions.filter((row) => equipmentMatchesSection(sectionId, row));
+    const candidates = [value, value.toLowerCase(), lastSegment, lastSegment.toLowerCase()].filter(Boolean);
+    for (const candidate of candidates) {
+      const found = scoped.find((row) => {
+        const id = row.id.trim();
+        const name = (row.name ?? "").trim();
+        const qr = (row.asset_qr ?? "").trim();
+        return (
+          id === candidate ||
+          id.toLowerCase() === candidate.toLowerCase() ||
+          qr === candidate ||
+          qr.toLowerCase() === candidate.toLowerCase() ||
+          name === candidate ||
+          name.toLowerCase() === candidate.toLowerCase()
+        );
+      });
+      if (found) return found;
+    }
+    return null;
   }
 
   function saveDraft() {
@@ -924,77 +969,193 @@ export default function InspectionForm({
                   >
                     <div style={{ fontWeight: 700 }}>{SECTION_EQUIPMENT_PICKERS[sec.id]} *</div>
                     <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
-                      Select exactly what is being used/attached for this section today.
+                      Add equipment one-by-one to the selected bucket for this section.
                     </div>
-                    <div style={{ marginTop: 8 }}>
-                      <input
-                        value={sectionEquipmentSearch[sec.id] ?? ""}
-                        onChange={(e) => setSectionSearch(sec.id, e.target.value)}
-                        placeholder="Search equipment..."
-                        style={inputStyle()}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 8,
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        borderRadius: 10,
-                        padding: 10,
-                        maxHeight: 220,
-                        overflowY: "auto",
-                        display: "grid",
-                        gap: 8,
-                      }}
-                    >
-                      {equipmentLoading ? (
-                        <div style={{ opacity: 0.72 }}>Loading equipment...</div>
-                      ) : equipmentOptions.length === 0 ? (
-                        <div style={{ opacity: 0.72 }}>No equipment records found.</div>
+                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                      {(sectionEquipmentIds[sec.id] ?? []).length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.72 }}>No equipment added yet.</div>
                       ) : (
-                        (() => {
-                          const selectedIds = sectionEquipmentIds[sec.id] ?? [];
-                          const base = equipmentOptions.filter((row) => equipmentMatchesSection(sec.id, row));
-                          const keepSelected = equipmentOptions.filter(
-                            (row) => selectedIds.includes(row.id) && !base.some((b) => b.id === row.id)
-                          );
-                          const scoped = [...keepSelected, ...base];
-                          const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
-                          const visible = scoped.filter((row) => {
-                            if (!q) return true;
-                            const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
-                            return hay.includes(q);
-                          });
-
-                          if (visible.length === 0) {
-                            return (
-                              <div style={{ opacity: 0.72 }}>
-                                No matching equipment found for this section. Update equipment type/name if needed.
-                              </div>
-                            );
-                          }
-
-                          return visible.map((row) => (
-                            <label
-                              key={row.id}
-                              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                        (sectionEquipmentIds[sec.id] ?? []).map((id) => {
+                          const row = equipmentOptions.find((opt) => opt.id === id);
+                          return (
+                            <div
+                              key={id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 8,
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 10,
+                                padding: 8,
+                                background: "rgba(255,255,255,0.02)",
+                              }}
                             >
-                              <input
-                                type="checkbox"
-                                checked={(sectionEquipmentIds[sec.id] ?? []).includes(row.id)}
-                                onChange={(e) => toggleSectionEquipment(sec.id, row.id, e.target.checked)}
-                              />
-                              <span>
-                                <strong>{row.name ?? row.id}</strong>
+                              <div>
+                                <strong>{row?.name ?? id}</strong>
                                 <span style={{ opacity: 0.72 }}>
                                   {" "}
-                                  · {row.equipment_type ?? "Unspecified"}
+                                  · {row?.equipment_type ?? "Unspecified"}
                                 </span>
-                              </span>
-                            </label>
-                          ));
-                        })()
+                              </div>
+                              <button
+                                type="button"
+                                style={secondaryButtonStyle()}
+                                onClick={() => removeSectionEquipment(sec.id, id)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        style={buttonStyle()}
+                        onClick={() => {
+                          setPickerOpenSectionId(sec.id);
+                          setPickerMode(sec.id, pickerModeBySection[sec.id] ?? "search");
+                        }}
+                      >
+                        Add Equipment
+                      </button>
+                    </div>
+                    {pickerOpenSectionId === sec.id ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: 12,
+                          padding: 10,
+                          background: "rgba(255,255,255,0.02)",
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            style={pickerModeBySection[sec.id] === "scan" ? secondaryButtonStyle() : buttonStyle()}
+                            onClick={() => setPickerMode(sec.id, "search")}
+                          >
+                            Search
+                          </button>
+                          <button
+                            type="button"
+                            style={pickerModeBySection[sec.id] === "scan" ? buttonStyle() : secondaryButtonStyle()}
+                            onClick={() => setPickerMode(sec.id, "scan")}
+                          >
+                            Scan QR
+                          </button>
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle()}
+                            onClick={() => setPickerOpenSectionId(null)}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        {(pickerModeBySection[sec.id] ?? "search") === "search" ? (
+                          <>
+                            <input
+                              value={sectionEquipmentSearch[sec.id] ?? ""}
+                              onChange={(e) => setSectionSearch(sec.id, e.target.value)}
+                              placeholder="Search equipment..."
+                              style={inputStyle()}
+                            />
+                            <div
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 10,
+                                padding: 10,
+                                maxHeight: 200,
+                                overflowY: "auto",
+                                display: "grid",
+                                gap: 8,
+                              }}
+                            >
+                              {equipmentLoading ? (
+                                <div style={{ opacity: 0.72 }}>Loading equipment...</div>
+                              ) : (
+                                (() => {
+                                  const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
+                                  const visible = equipmentOptions
+                                    .filter((row) => equipmentMatchesSection(sec.id, row))
+                                    .filter((row) => {
+                                      if (!q) return true;
+                                      const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
+                                      return hay.includes(q);
+                                    });
+                                  if (!visible.length) {
+                                    return <div style={{ opacity: 0.72 }}>No matching equipment found.</div>;
+                                  }
+                                  return visible.map((row) => (
+                                    <button
+                                      key={row.id}
+                                      type="button"
+                                      style={{
+                                        textAlign: "left",
+                                        ...secondaryButtonStyle(),
+                                      }}
+                                      onClick={() => {
+                                        addSectionEquipment(sec.id, row.id);
+                                        setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                      }}
+                                    >
+                                      <strong>{row.name ?? row.id}</strong>
+                                      <span style={{ opacity: 0.72 }}>
+                                        {" "}
+                                        · {row.equipment_type ?? "Unspecified"}
+                                      </span>
+                                    </button>
+                                  ));
+                                })()
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              value={pickerScanValueBySection[sec.id] ?? ""}
+                              onChange={(e) =>
+                                setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: e.target.value }))
+                              }
+                              placeholder="Scan or paste equipment QR value"
+                              style={inputStyle()}
+                            />
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                style={buttonStyle()}
+                                onClick={() => {
+                                  const found = findEquipmentByQr(sec.id, pickerScanValueBySection[sec.id] ?? "");
+                                  if (!found) {
+                                    setPickerErrorBySection((prev) => ({
+                                      ...prev,
+                                      [sec.id]: "No matching equipment found for this section.",
+                                    }));
+                                    return;
+                                  }
+                                  addSectionEquipment(sec.id, found.id);
+                                  setPickerScanValueBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                  setPickerErrorBySection((prev) => ({ ...prev, [sec.id]: "" }));
+                                }}
+                              >
+                                Add Equipment
+                              </button>
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>
+                              Tip: You can use your phone scanner or hardware scanner and paste/scan the value here.
+                            </div>
+                          </>
+                        )}
+                        {pickerErrorBySection[sec.id] ? (
+                          <div style={{ fontSize: 12, color: "#ff9d9d" }}>{pickerErrorBySection[sec.id]}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
                       Selected: <strong>{(sectionEquipmentIds[sec.id] ?? []).length}</strong>
                     </div>
