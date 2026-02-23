@@ -1224,7 +1224,7 @@ export default function InspectionForm({
                     }}
                   >
                     <div style={{ fontWeight: 700 }}>
-                      {sec.nameFieldLabel || `${sec.title} Selection`} *
+                      {SECTION_EQUIPMENT_PICKERS[sec.id] || `${sec.title} Selection`} *
                     </div>
                     <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
                       Add by searching or scanning QR, then select.
