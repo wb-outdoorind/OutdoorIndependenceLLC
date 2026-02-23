@@ -67,6 +67,12 @@ type EquipmentOption = {
   status: string | null;
 };
 
+const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
+  trailer: "Trailer Loadout Equipment",
+  plow: "Plow Selection",
+  salter: "Salter Selection",
+};
+
 const DASH_LIGHT_OPTIONS = [
   "None",
   "Check Engine",
@@ -265,8 +271,8 @@ export default function InspectionForm({
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [equipmentLoading, setEquipmentLoading] = useState(false);
-  const [trailerEquipmentIds, setTrailerEquipmentIds] = useState<string[]>([]);
-  const [trailerEquipmentSearch, setTrailerEquipmentSearch] = useState("");
+  const [sectionEquipmentIds, setSectionEquipmentIds] = useState<Record<string, string[]>>({});
+  const [sectionEquipmentSearch, setSectionEquipmentSearch] = useState<Record<string, string>>({});
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -369,7 +375,7 @@ export default function InspectionForm({
         notes?: string;
         employeeSignature?: string;
         managerSignature?: string;
-        trailerEquipmentIds?: string[];
+        sectionEquipmentIds?: Record<string, string[]>;
       };
       if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
       if (typeof draft.mileage === "string") setMileage(draft.mileage);
@@ -383,7 +389,9 @@ export default function InspectionForm({
       if (typeof draft.notes === "string") setNotes(draft.notes);
       if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
       if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
-      if (Array.isArray(draft.trailerEquipmentIds)) setTrailerEquipmentIds(draft.trailerEquipmentIds);
+      if (draft.sectionEquipmentIds && typeof draft.sectionEquipmentIds === "object") {
+        setSectionEquipmentIds(draft.sectionEquipmentIds);
+      }
     } catch (error) {
       console.error("Failed to restore inspection draft:", error);
     } finally {
@@ -504,11 +512,20 @@ export default function InspectionForm({
     });
   }
 
-  function toggleTrailerEquipment(id: string, checked: boolean) {
-    setTrailerEquipmentIds((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
+  function toggleSectionEquipment(sectionId: string, id: string, checked: boolean) {
+    setSectionEquipmentIds((prev) => {
+      const current = prev[sectionId] ?? [];
+      const next = checked
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.filter((x) => x !== id);
+      return { ...prev, [sectionId]: next };
     });
+  }
+
+  function setSectionSearch(sectionId: string, value: string) {
+    setSectionEquipmentSearch((prev) => ({ ...prev, [sectionId]: value }));
   }
 
   function saveDraft() {
@@ -521,7 +538,7 @@ export default function InspectionForm({
       sectionState,
       itemExtraValues,
       failRequestLinks,
-      trailerEquipmentIds,
+      sectionEquipmentIds,
       exiting,
       inspectionStatus,
       notes,
@@ -605,8 +622,11 @@ export default function InspectionForm({
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
       }
-      if (sec.id === "trailer" && st?.applicable && trailerEquipmentIds.length === 0) {
-        return alert("Select the equipment being hauled for the Trailer section.");
+      if (st?.applicable && SECTION_EQUIPMENT_PICKERS[sec.id]) {
+        const selected = sectionEquipmentIds[sec.id] ?? [];
+        if (selected.length === 0) {
+          return alert(`Select at least one item for ${sec.title}.`);
+        }
       }
       if (st?.applicable) {
         for (const it of sec.items) {
@@ -658,14 +678,19 @@ export default function InspectionForm({
       dashLightsOn,
       itemExtraValues,
       failRequestLinks,
-      trailerEquipmentIds,
-      trailerEquipment: equipmentOptions
-        .filter((row) => trailerEquipmentIds.includes(row.id))
-        .map((row) => ({
-          id: row.id,
-          name: row.name ?? row.id,
-          equipment_type: row.equipment_type ?? null,
-        })),
+      sectionEquipmentIds,
+      sectionEquipment: Object.fromEntries(
+        Object.entries(sectionEquipmentIds).map(([sectionId, ids]) => [
+          sectionId,
+          equipmentOptions
+            .filter((row) => ids.includes(row.id))
+            .map((row) => ({
+              id: row.id,
+              name: row.name ?? row.id,
+              equipment_type: row.equipment_type ?? null,
+            })),
+        ])
+      ),
       type,
     };
 
@@ -869,7 +894,7 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && sec.id === "trailer" ? (
+                {st.applicable && SECTION_EQUIPMENT_PICKERS[sec.id] ? (
                   <div
                     style={{
                       marginTop: 12,
@@ -879,14 +904,14 @@ export default function InspectionForm({
                       background: "rgba(255,255,255,0.02)",
                     }}
                   >
-                    <div style={{ fontWeight: 700 }}>Trailer Loadout Equipment *</div>
+                    <div style={{ fontWeight: 700 }}>{SECTION_EQUIPMENT_PICKERS[sec.id]} *</div>
                     <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
-                      Select exactly what equipment is being hauled today.
+                      Select exactly what is being used/attached for this section today.
                     </div>
                     <div style={{ marginTop: 8 }}>
                       <input
-                        value={trailerEquipmentSearch}
-                        onChange={(e) => setTrailerEquipmentSearch(e.target.value)}
+                        value={sectionEquipmentSearch[sec.id] ?? ""}
+                        onChange={(e) => setSectionSearch(sec.id, e.target.value)}
                         placeholder="Search equipment..."
                         style={inputStyle()}
                       />
@@ -910,7 +935,7 @@ export default function InspectionForm({
                       ) : (
                         equipmentOptions
                           .filter((row) => {
-                            const q = trailerEquipmentSearch.trim().toLowerCase();
+                            const q = (sectionEquipmentSearch[sec.id] ?? "").trim().toLowerCase();
                             if (!q) return true;
                             const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
                             return hay.includes(q);
@@ -922,8 +947,8 @@ export default function InspectionForm({
                             >
                               <input
                                 type="checkbox"
-                                checked={trailerEquipmentIds.includes(row.id)}
-                                onChange={(e) => toggleTrailerEquipment(row.id, e.target.checked)}
+                                checked={(sectionEquipmentIds[sec.id] ?? []).includes(row.id)}
+                                onChange={(e) => toggleSectionEquipment(sec.id, row.id, e.target.checked)}
                               />
                               <span>
                                 <strong>{row.name ?? row.id}</strong>
@@ -937,7 +962,7 @@ export default function InspectionForm({
                       )}
                     </div>
                     <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-                      Selected: <strong>{trailerEquipmentIds.length}</strong>
+                      Selected: <strong>{(sectionEquipmentIds[sec.id] ?? []).length}</strong>
                     </div>
                   </div>
                 ) : null}
