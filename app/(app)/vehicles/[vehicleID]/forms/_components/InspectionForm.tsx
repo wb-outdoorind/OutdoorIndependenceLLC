@@ -539,6 +539,33 @@ export default function InspectionForm({
   }, [visibleSections]);
 
   useEffect(() => {
+    // Keep trailer UI closed by default and never include current vehicle in trailer-linked list.
+    setTrailerVehiclePickerOpen(false);
+    setTrailerVehicleIds((prev) => prev.filter((id) => id !== vehicleId));
+
+    // Trailer section should not be open by default for non-truck assets.
+    if (vehicleType !== "truck") {
+      setSectionState((prev) => {
+        const trailerState = prev.trailer;
+        if (!trailerState) return prev;
+        if (!trailerState.applicable && !(trailerState.name ?? "").trim()) return prev;
+        return {
+          ...prev,
+          trailer: { ...trailerState, applicable: false, name: "" },
+        };
+      });
+      setSectionEquipmentIds((prev) => {
+        if (!prev.trailer) return prev;
+        const next = { ...prev };
+        delete next.trailer;
+        return next;
+      });
+      setTrailerVehicleIds([]);
+      setTrailerVehicleLinks({});
+    }
+  }, [vehicleId, vehicleType]);
+
+  useEffect(() => {
     void (async () => {
       const name = await getSignedInDisplayName();
       if (!name) return;
