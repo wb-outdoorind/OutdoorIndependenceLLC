@@ -151,7 +151,7 @@ export default async function Home() {
         : 0;
 
       dashboard = {
-        title: "Operations Dashboard",
+        title: "Administrative Operations Dashboard",
         subtitle:
           role === "office_admin"
             ? "Live operations overview for office administration."

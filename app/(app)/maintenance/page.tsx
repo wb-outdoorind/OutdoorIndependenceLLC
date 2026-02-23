@@ -73,7 +73,38 @@ type EquipmentMetaRow = {
 
 type StatusTab = "Open" | "In Progress" | "Closed";
 type MaintenanceSection = "queue" | "operations";
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role =
+  | "owner"
+  | "operations_manager"
+  | "office_admin"
+  | "mechanic"
+  | "employee"
+  | "apprentice"
+  | "team_member_1"
+  | "team_member_2"
+  | "team_lead_1"
+  | "team_lead_2";
+
+type GradeRow = {
+  score: number | null;
+  submitted_at: string;
+  submitted_by: string | null;
+};
+
+type ProfileRoleRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+};
+
+type TeammateOpsMetrics = {
+  daily: number;
+  weekly: number;
+  monthly: number;
+  ytd: number;
+  formCount: number;
+};
 
 function urgencyRank(u: Urgency): number {
   switch (u) {
@@ -142,6 +173,42 @@ function extractTitleFromDescription(
   return systemAffected?.trim() ? `${systemAffected} issue` : "Maintenance Request";
 }
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfWeek() {
+  const d = startOfToday();
+  const day = d.getDay();
+  const diffToMonday = (day + 6) % 7;
+  d.setDate(d.getDate() - diffToMonday);
+  return d;
+}
+
+function startOfMonth() {
+  const d = startOfToday();
+  d.setDate(1);
+  return d;
+}
+
+function startOfYear() {
+  const d = startOfToday();
+  d.setMonth(0, 1);
+  return d;
+}
+
+function averageScoreFromRows(rows: GradeRow[]) {
+  if (!rows.length) return 0;
+  const total = rows.reduce((sum, row) => sum + Number(row.score ?? 0), 0);
+  return Math.round(total / rows.length);
+}
+
+function normalizedName(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export default function MaintenanceCenterPage() {
   const [section, setSection] = useState<MaintenanceSection>(() => {
     if (typeof window === "undefined") return "queue";
@@ -160,7 +227,18 @@ export default function MaintenanceCenterPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [canViewOperations, setCanViewOperations] = useState(false);
+  const [userRole, setUserRole] = useState<Role>("employee");
   const [roleResolved, setRoleResolved] = useState(false);
+  const [expandedTeamDashboard, setExpandedTeamDashboard] = useState(false);
+  const [teammateMetrics, setTeammateMetrics] = useState<TeammateOpsMetrics>({
+    daily: 0,
+    weekly: 0,
+    monthly: 0,
+    ytd: 0,
+    formCount: 0,
+  });
+  const [teammateMetricsLoading, setTeammateMetricsLoading] = useState(true);
+  const [teammateMetricsError, setTeammateMetricsError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -172,6 +250,7 @@ export default function MaintenanceCenterPage() {
 
       if (!authData.user) {
         setCanViewOperations(false);
+        setUserRole("employee");
         setRoleResolved(true);
         return;
       }
@@ -184,10 +263,78 @@ export default function MaintenanceCenterPage() {
 
       if (!alive) return;
       const role = (profile?.role as Role | undefined) ?? "employee";
+      setUserRole(role);
       setCanViewOperations(
         role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
       );
       setRoleResolved(true);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    void (async () => {
+      setTeammateMetricsLoading(true);
+      setTeammateMetricsError(null);
+
+      const supabase = createSupabaseBrowser();
+      const [gradesRes, profilesRes] = await Promise.all([
+        supabase
+          .from("form_submission_grades")
+          .select("score,submitted_at,submitted_by")
+          .order("submitted_at", { ascending: false })
+          .limit(4000),
+        supabase
+          .from("profiles")
+          .select("id,full_name,email,role")
+          .in("role", ["apprentice", "team_member_1", "team_member_2", "team_lead_1", "team_lead_2"])
+          .eq("status", "Active"),
+      ]);
+
+      if (!alive) return;
+      if (gradesRes.error || profilesRes.error) {
+        setTeammateMetricsError(
+          gradesRes.error?.message || profilesRes.error?.message || "Failed to load teammate dashboard metrics."
+        );
+        setTeammateMetricsLoading(false);
+        return;
+      }
+
+      const grades = (gradesRes.data ?? []) as GradeRow[];
+      const teammateProfiles = (profilesRes.data ?? []) as ProfileRoleRow[];
+
+      const allowedNames = new Set<string>();
+      for (const profile of teammateProfiles) {
+        allowedNames.add(normalizedName(profile.full_name));
+        allowedNames.add(normalizedName(profile.email));
+        allowedNames.add(normalizedName(profile.id));
+      }
+
+      const filtered = grades.filter((row) => allowedNames.has(normalizedName(row.submitted_by)));
+
+      const todayStart = startOfToday();
+      const weekStart = startOfWeek();
+      const monthStart = startOfMonth();
+      const yearStart = startOfYear();
+
+      const dailyRows = filtered.filter((row) => new Date(row.submitted_at) >= todayStart);
+      const weeklyRows = filtered.filter((row) => new Date(row.submitted_at) >= weekStart);
+      const monthlyRows = filtered.filter((row) => new Date(row.submitted_at) >= monthStart);
+      const ytdRows = filtered.filter((row) => new Date(row.submitted_at) >= yearStart);
+
+      setTeammateMetrics({
+        daily: averageScoreFromRows(dailyRows),
+        weekly: averageScoreFromRows(weeklyRows),
+        monthly: averageScoreFromRows(monthlyRows),
+        ytd: averageScoreFromRows(ytdRows),
+        formCount: filtered.length,
+      });
+      setTeammateMetricsLoading(false);
     })();
 
     return () => {
@@ -345,6 +492,13 @@ export default function MaintenanceCenterPage() {
     };
   }, [rows]);
 
+  const canViewTeammateOperations =
+    userRole === "apprentice" ||
+    userRole === "team_member_1" ||
+    userRole === "team_member_2" ||
+    userRole === "team_lead_1" ||
+    userRole === "team_lead_2";
+
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 40 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -386,7 +540,7 @@ export default function MaintenanceCenterPage() {
             background: section === "operations" ? "rgba(126,255,167,0.12)" : sectionCardStyle.background,
           }}
         >
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Operations Dashboard</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Administrative Operations Dashboard</div>
           <div style={{ opacity: 0.78, marginTop: 8 }}>PM due, downtime, failure trends, and maintenance performance.</div>
         </button>
       </div>
@@ -396,10 +550,36 @@ export default function MaintenanceCenterPage() {
           {!roleResolved ? (
             <div style={cardStyle}>Loading operations access...</div>
           ) : canViewOperations ? (
-            <OpsClient embedded title="Operations Dashboard" />
+            <>
+              <OpsClient embedded title="Administrative Operations Dashboard" />
+              <div style={{ marginTop: 12, ...cardStyle }}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedTeamDashboard((prev) => !prev)}
+                  style={buttonStyle}
+                >
+                  Expand dashboard
+                </button>
+                {expandedTeamDashboard ? (
+                  <div style={{ marginTop: 12 }}>
+                    <TeammateOperationsDashboard
+                      loading={teammateMetricsLoading}
+                      error={teammateMetricsError}
+                      metrics={teammateMetrics}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : canViewTeammateOperations ? (
+            <TeammateOperationsDashboard
+              loading={teammateMetricsLoading}
+              error={teammateMetricsError}
+              metrics={teammateMetrics}
+            />
           ) : (
             <div style={cardStyle}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>Operations Dashboard Access Required</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Administrative Operations Dashboard Access Required</div>
               <div style={{ opacity: 0.8 }}>
                 This section is available to owner, operations manager, office admin, and mechanic roles.
               </div>
@@ -568,6 +748,60 @@ function badge(text: string) {
   );
 }
 
+function TeammateOperationsDashboard({
+  loading,
+  error,
+  metrics,
+}: {
+  loading: boolean;
+  error: string | null;
+  metrics: TeammateOpsMetrics;
+}) {
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontWeight: 900, fontSize: 18 }}>Teammate Operations Dashboard</div>
+      <div style={{ opacity: 0.78, marginTop: 6 }}>
+        Average form scores for apprentice through team lead 2.
+      </div>
+      {loading ? (
+        <div style={{ marginTop: 12, opacity: 0.75 }}>Loading teammate score metrics...</div>
+      ) : error ? (
+        <div style={{ marginTop: 12, color: "#ff9d9d" }}>{error}</div>
+      ) : (
+        <div
+          style={{
+            marginTop: 12,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <div style={teammateStatCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Today Avg Score</div>
+            <div style={{ fontWeight: 900, marginTop: 4, fontSize: 24 }}>{metrics.daily}%</div>
+          </div>
+          <div style={teammateStatCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Week Avg Score</div>
+            <div style={{ fontWeight: 900, marginTop: 4, fontSize: 24 }}>{metrics.weekly}%</div>
+          </div>
+          <div style={teammateStatCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Month Avg Score</div>
+            <div style={{ fontWeight: 900, marginTop: 4, fontSize: 24 }}>{metrics.monthly}%</div>
+          </div>
+          <div style={teammateStatCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Year To Date Avg Score</div>
+            <div style={{ fontWeight: 900, marginTop: 4, fontSize: 24 }}>{metrics.ytd}%</div>
+          </div>
+          <div style={teammateStatCardStyle}>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>Tracked Forms</div>
+            <div style={{ fontWeight: 900, marginTop: 4, fontSize: 24 }}>{metrics.formCount}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const cardStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.14)",
   borderRadius: 16,
@@ -619,4 +853,11 @@ const sectionCardStyle: React.CSSProperties = {
   color: "inherit",
   padding: 16,
   cursor: "pointer",
+};
+
+const teammateStatCardStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 12,
+  padding: 12,
+  background: "rgba(255,255,255,0.02)",
 };
