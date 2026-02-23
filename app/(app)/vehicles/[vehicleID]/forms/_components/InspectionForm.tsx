@@ -92,9 +92,12 @@ function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
   return true;
 }
 
-function isTrailerEquipment(row: EquipmentOption) {
+function sectionSelectionMatches(sectionId: string, row: EquipmentOption) {
   const hay = `${row.name ?? ""} ${row.equipment_type ?? ""}`.toLowerCase();
-  return hay.includes("trailer");
+  if (sectionId === "trailer") return hay.includes("trailer");
+  if (sectionId === "plow") return hay.includes("plow");
+  if (sectionId === "salter") return hay.includes("salter") || hay.includes("salt") || hay.includes("spreader");
+  return true;
 }
 
 const DASH_LIGHT_OPTIONS = [
@@ -301,6 +304,11 @@ export default function InspectionForm({
   const [pickerModeBySection, setPickerModeBySection] = useState<Record<string, "search" | "scan">>({});
   const [pickerScanValueBySection, setPickerScanValueBySection] = useState<Record<string, string>>({});
   const [pickerErrorBySection, setPickerErrorBySection] = useState<Record<string, string>>({});
+  const [sectionSelectOpenId, setSectionSelectOpenId] = useState<string | null>(null);
+  const [sectionSelectModeById, setSectionSelectModeById] = useState<Record<string, "search" | "scan">>({});
+  const [sectionSelectSearchById, setSectionSelectSearchById] = useState<Record<string, string>>({});
+  const [sectionSelectScanById, setSectionSelectScanById] = useState<Record<string, string>>({});
+  const [sectionSelectErrorById, setSectionSelectErrorById] = useState<Record<string, string>>({});
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
@@ -596,6 +604,38 @@ export default function InspectionForm({
     return null;
   }
 
+  function findSectionSelectionByQr(sectionId: string, rawValue: string) {
+    const value = rawValue.trim();
+    if (!value) return null;
+    let lastSegment = "";
+    try {
+      const u = new URL(value);
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length) lastSegment = decodeURIComponent(parts[parts.length - 1]);
+    } catch {
+      // not URL
+    }
+    const scoped = equipmentOptions.filter((row) => sectionSelectionMatches(sectionId, row));
+    const candidates = [value, value.toLowerCase(), lastSegment, lastSegment.toLowerCase()].filter(Boolean);
+    for (const candidate of candidates) {
+      const found = scoped.find((row) => {
+        const id = row.id.trim();
+        const name = (row.name ?? "").trim();
+        const qr = (row.asset_qr ?? "").trim();
+        return (
+          id === candidate ||
+          id.toLowerCase() === candidate.toLowerCase() ||
+          qr === candidate ||
+          qr.toLowerCase() === candidate.toLowerCase() ||
+          name === candidate ||
+          name.toLowerCase() === candidate.toLowerCase()
+        );
+      });
+      if (found) return found;
+    }
+    return null;
+  }
+
   function saveDraft() {
     if (!vehicleId) return;
     const draft = {
@@ -684,12 +724,15 @@ export default function InspectionForm({
       if (
         st?.applicable &&
         sec.nameFieldLabel &&
-        (!isSectionEquipmentPicker(sec.id) || sec.id === "trailer")
+        !isSectionEquipmentPicker(sec.id)
       ) {
         if (!st.name?.trim())
           return alert(
             `${sec.nameFieldLabel} is required when ${sec.title} is applicable.`
           );
+      }
+      if (st?.applicable && isSectionEquipmentPicker(sec.id) && !st.name?.trim()) {
+        return alert(`Select the ${sec.title} item for this section.`);
       }
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
@@ -962,27 +1005,204 @@ export default function InspectionForm({
                 </div>
 
                 {/* Optional name field when applicable */}
-                {st.applicable && sec.nameFieldLabel && sec.id === "trailer" ? (
-                  <div style={{ marginTop: 12 }}>
-                    <div
-                      style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}
-                    >
-                      {sec.nameFieldLabel} *
+                {st.applicable && isSectionEquipmentPicker(sec.id) ? (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>
+                      {sec.nameFieldLabel || `${sec.title} Selection`} *
                     </div>
-                    <select
-                      value={st.name ?? ""}
-                      onChange={(e) => setSectionName(sec.id, e.target.value)}
-                      style={inputStyle()}
-                    >
-                      <option value="">Select trailer...</option>
-                      {equipmentOptions
-                        .filter((row) => isTrailerEquipment(row))
-                        .map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {(row.name ?? row.id) + (row.equipment_type ? ` · ${row.equipment_type}` : "")}
-                          </option>
-                        ))}
-                    </select>
+                    <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
+                      Add by searching or scanning QR, then select.
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      {st.name?.trim() ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: 10,
+                            padding: 8,
+                            background: "rgba(255,255,255,0.02)",
+                          }}
+                        >
+                          <div>
+                            {(() => {
+                              const row = equipmentOptions.find((r) => r.id === st.name);
+                              return (
+                                <span>
+                                  <strong>{row?.name ?? st.name}</strong>
+                                  <span style={{ opacity: 0.72 }}>
+                                    {" "}
+                                    · {row?.equipment_type ?? "Unspecified"}
+                                  </span>
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle()}
+                            onClick={() => setSectionName(sec.id, "")}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, opacity: 0.72 }}>No item selected yet.</div>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        style={buttonStyle()}
+                        onClick={() => {
+                          setSectionSelectOpenId(sec.id);
+                          setSectionSelectModeById((prev) => ({ ...prev, [sec.id]: prev[sec.id] ?? "search" }));
+                          setSectionSelectErrorById((prev) => ({ ...prev, [sec.id]: "" }));
+                        }}
+                      >
+                        Add Equipment
+                      </button>
+                    </div>
+                    {sectionSelectOpenId === sec.id ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: 12,
+                          padding: 10,
+                          background: "rgba(255,255,255,0.02)",
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            style={sectionSelectModeById[sec.id] === "scan" ? secondaryButtonStyle() : buttonStyle()}
+                            onClick={() => setSectionSelectModeById((prev) => ({ ...prev, [sec.id]: "search" }))}
+                          >
+                            Search
+                          </button>
+                          <button
+                            type="button"
+                            style={sectionSelectModeById[sec.id] === "scan" ? buttonStyle() : secondaryButtonStyle()}
+                            onClick={() => setSectionSelectModeById((prev) => ({ ...prev, [sec.id]: "scan" }))}
+                          >
+                            Scan QR
+                          </button>
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle()}
+                            onClick={() => setSectionSelectOpenId(null)}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        {(sectionSelectModeById[sec.id] ?? "search") === "search" ? (
+                          <>
+                            <input
+                              value={sectionSelectSearchById[sec.id] ?? ""}
+                              onChange={(e) =>
+                                setSectionSelectSearchById((prev) => ({ ...prev, [sec.id]: e.target.value }))
+                              }
+                              placeholder={`Search ${sec.title.toLowerCase()}...`}
+                              style={inputStyle()}
+                            />
+                            <div
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 10,
+                                padding: 10,
+                                maxHeight: 200,
+                                overflowY: "auto",
+                                display: "grid",
+                                gap: 8,
+                              }}
+                            >
+                              {equipmentLoading ? (
+                                <div style={{ opacity: 0.72 }}>Loading equipment...</div>
+                              ) : (
+                                (() => {
+                                  const q = (sectionSelectSearchById[sec.id] ?? "").trim().toLowerCase();
+                                  const visible = equipmentOptions
+                                    .filter((row) => sectionSelectionMatches(sec.id, row))
+                                    .filter((row) => {
+                                      if (!q) return true;
+                                      const hay = `${row.name ?? ""} ${row.equipment_type ?? ""} ${row.id}`.toLowerCase();
+                                      return hay.includes(q);
+                                    });
+                                  if (!visible.length) return <div style={{ opacity: 0.72 }}>No matching items found.</div>;
+                                  return visible.map((row) => (
+                                    <button
+                                      key={row.id}
+                                      type="button"
+                                      style={{ textAlign: "left", ...secondaryButtonStyle() }}
+                                      onClick={() => {
+                                        setSectionName(sec.id, row.id);
+                                        setSectionSelectErrorById((prev) => ({ ...prev, [sec.id]: "" }));
+                                      }}
+                                    >
+                                      <strong>{row.name ?? row.id}</strong>
+                                      <span style={{ opacity: 0.72 }}>
+                                        {" "}
+                                        · {row.equipment_type ?? "Unspecified"}
+                                      </span>
+                                    </button>
+                                  ));
+                                })()
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              value={sectionSelectScanById[sec.id] ?? ""}
+                              onChange={(e) =>
+                                setSectionSelectScanById((prev) => ({ ...prev, [sec.id]: e.target.value }))
+                              }
+                              placeholder={`Scan or paste ${sec.title.toLowerCase()} QR value`}
+                              style={inputStyle()}
+                            />
+                            <button
+                              type="button"
+                              style={buttonStyle()}
+                              onClick={() => {
+                                const found = findSectionSelectionByQr(sec.id, sectionSelectScanById[sec.id] ?? "");
+                                if (!found) {
+                                  setSectionSelectErrorById((prev) => ({
+                                    ...prev,
+                                    [sec.id]: `No matching ${sec.title.toLowerCase()} found.`,
+                                  }));
+                                  return;
+                                }
+                                setSectionName(sec.id, found.id);
+                                setSectionSelectScanById((prev) => ({ ...prev, [sec.id]: "" }));
+                                setSectionSelectErrorById((prev) => ({ ...prev, [sec.id]: "" }));
+                              }}
+                            >
+                              Select
+                            </button>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>
+                              Use your scanner/camera app and paste or scan into this field.
+                            </div>
+                          </>
+                        )}
+                        {sectionSelectErrorById[sec.id] ? (
+                          <div style={{ fontSize: 12, color: "#ff9d9d" }}>{sectionSelectErrorById[sec.id]}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
