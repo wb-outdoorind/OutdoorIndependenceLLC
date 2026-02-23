@@ -300,6 +300,8 @@ const trendPillStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
+const UNIVERSAL_DOT_NUMBER = "3834142";
+
 function badgeStyle(label: string): React.CSSProperties {
   const base: React.CSSProperties = {
     display: "inline-flex",
@@ -774,6 +776,7 @@ export default function VehicleDetailPage() {
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
   const canShowVehiclePmButton = (vehicle?.type ?? "").trim().toLowerCase() === "truck";
+  const isTruck = normalizeVehicleType(vehicle?.type ?? null) === "truck";
   const canEditVehicle =
     userRole === "owner" ||
     userRole === "operations_manager" ||
@@ -1128,6 +1131,10 @@ export default function VehicleDetailPage() {
                 <input value={editDraft.asset} onChange={(e) => updateDraft("asset", e.target.value)} style={detailInputStyle} />
               </div>
               <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>DOT #</div>
+                <div style={{ fontWeight: 900, marginTop: 8 }}>{isTruck ? UNIVERSAL_DOT_NUMBER : "—"}</div>
+              </div>
+              <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>
                 <div style={{ fontWeight: 900, fontSize: 18, marginTop: 2 }}>
                   {oilLifePercent === null ? "—" : `${oilLifePercent}%`}
@@ -1177,6 +1184,10 @@ export default function VehicleDetailPage() {
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
               <div style={{ fontWeight: 900 }}>{displayOilType}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>DOT #</div>
+              <div style={{ fontWeight: 900 }}>{isTruck ? UNIVERSAL_DOT_NUMBER : "—"}</div>
             </div>
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Life</div>
