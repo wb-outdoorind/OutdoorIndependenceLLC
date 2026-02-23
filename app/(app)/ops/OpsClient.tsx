@@ -120,6 +120,8 @@ type AssetHealthRow = {
   assetName: string;
   healthScore: number;
   operationalScore: number;
+  objectiveMechanicScore: number;
+  mechanicOpinionScore: number;
   mechanicScore: number;
   openRequests: number;
   pmStatus: "On Track" | "Due Soon" | "Overdue";
@@ -189,7 +191,7 @@ function legacyAssetAllowance(year: number | null | undefined) {
   return 0;
 }
 
-function maintenanceLogQualityScore(log: MaintenanceLogRow) {
+function maintenanceLogObjectiveScore(log: MaintenanceLogRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
   if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
@@ -199,8 +201,7 @@ function maintenanceLogQualityScore(log: MaintenanceLogRow) {
   if (notesLength < 20) objectiveScore -= 8;
   if (notesLength === 0) objectiveScore -= 8;
 
-  const objective = clampPercent(objectiveScore);
-  return combineMechanicScore(objective, log.mechanic_self_score);
+  return clampPercent(objectiveScore);
 }
 
 function statusChipStyle(overdue: boolean): React.CSSProperties {
@@ -837,7 +838,8 @@ export default function OpsPage({
       pmStatusByAsset.set(`${row.assetType}:${row.assetId}`, row.status);
     }
 
-    const logQualityByAsset = new Map<string, number[]>();
+    const objectiveQualityByAsset = new Map<string, number[]>();
+    const mechanicOpinionByAsset = new Map<string, number | null>();
     for (const log of allMaintenanceLogs) {
       const key = log.vehicle_id
         ? `Vehicle:${log.vehicle_id}`
@@ -845,9 +847,12 @@ export default function OpsPage({
         ? `Equipment:${log.equipment_id}`
         : null;
       if (!key) continue;
-      const current = logQualityByAsset.get(key) ?? [];
-      current.push(maintenanceLogQualityScore(log));
-      logQualityByAsset.set(key, current);
+      const current = objectiveQualityByAsset.get(key) ?? [];
+      current.push(maintenanceLogObjectiveScore(log));
+      objectiveQualityByAsset.set(key, current);
+      if (!mechanicOpinionByAsset.has(key) && Number.isFinite(Number(log.mechanic_self_score))) {
+        mechanicOpinionByAsset.set(key, clampPercent(Number(log.mechanic_self_score)));
+      }
     }
 
     const rows: AssetHealthRow[] = [];
@@ -856,10 +861,12 @@ export default function OpsPage({
       const key = `Vehicle:${v.id}`;
       const openCount = openRequestCountByAsset.get(key) ?? 0;
       const pmStatus = pmStatusByAsset.get(key) ?? "On Track";
-      const qualityRows = (logQualityByAsset.get(key) ?? []).slice(0, 6);
-      const mechanicScore = qualityRows.length
+      const qualityRows = (objectiveQualityByAsset.get(key) ?? []).slice(0, 6);
+      const objectiveMechanicScore = qualityRows.length
         ? Math.round(qualityRows.reduce((sum, val) => sum + val, 0) / qualityRows.length)
         : 75;
+      const mechanicOpinionScore = mechanicOpinionByAsset.get(key) ?? objectiveMechanicScore;
+      const mechanicScore = combineMechanicScore(objectiveMechanicScore, mechanicOpinionScore);
 
       let operationalScore = 100;
       const status = (v.status ?? "").trim();
@@ -877,6 +884,8 @@ export default function OpsPage({
         assetName: v.name || v.id,
         healthScore,
         operationalScore,
+        objectiveMechanicScore,
+        mechanicOpinionScore,
         mechanicScore,
         openRequests: openCount,
         pmStatus,
@@ -888,10 +897,12 @@ export default function OpsPage({
       const key = `Equipment:${e.id}`;
       const openCount = openRequestCountByAsset.get(key) ?? 0;
       const pmStatus = pmStatusByAsset.get(key) ?? "On Track";
-      const qualityRows = (logQualityByAsset.get(key) ?? []).slice(0, 6);
-      const mechanicScore = qualityRows.length
+      const qualityRows = (objectiveQualityByAsset.get(key) ?? []).slice(0, 6);
+      const objectiveMechanicScore = qualityRows.length
         ? Math.round(qualityRows.reduce((sum, val) => sum + val, 0) / qualityRows.length)
         : 75;
+      const mechanicOpinionScore = mechanicOpinionByAsset.get(key) ?? objectiveMechanicScore;
+      const mechanicScore = combineMechanicScore(objectiveMechanicScore, mechanicOpinionScore);
 
       let operationalScore = 100;
       const status = (e.status ?? "").trim();
@@ -909,6 +920,8 @@ export default function OpsPage({
         assetName: e.name || e.id,
         healthScore,
         operationalScore,
+        objectiveMechanicScore,
+        mechanicOpinionScore,
         mechanicScore,
         openRequests: openCount,
         pmStatus,
@@ -1156,7 +1169,7 @@ export default function OpsPage({
       const createdBy = log.created_by ?? "Unknown";
       const existing = counts.get(createdBy);
       const display = createdBy === "Unknown" ? "Unknown" : profileNameById[createdBy] || createdBy;
-      const quality = maintenanceLogQualityScore(log);
+      const quality = maintenanceLogObjectiveScore(log);
       if (existing) {
         existing.count += 1;
         existing.qualityTotal += quality;
@@ -1232,7 +1245,8 @@ export default function OpsPage({
           <div style={{ marginTop: 16, ...cardStyle() }}>
             <div style={{ fontWeight: 900, marginBottom: 10 }}>Asset Health Blend</div>
             <div style={{ opacity: 0.75, marginBottom: 10 }}>
-              Health score blends operational status (80%) and mechanic score (20%), with a legacy asset allowance by age.
+              Health score blends operational status (80%) and blended mechanic score (20%).
+              Blended mechanic score = objective quality score (80%) + mechanic opinion (20%), with a legacy asset allowance by age.
             </div>
             {assetHealthRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No assets loaded.</div>
@@ -1245,7 +1259,9 @@ export default function OpsPage({
                       <th style={thStyle}>Type</th>
                       <th style={thStyle}>Health</th>
                       <th style={thStyle}>Operational</th>
-                      <th style={thStyle}>Mechanic</th>
+                      <th style={thStyle}>Mechanic (Objective)</th>
+                      <th style={thStyle}>Mechanic Opinion</th>
+                      <th style={thStyle}>Mechanic (Blended)</th>
                       <th style={thStyle}>Mechanic Band</th>
                       <th style={thStyle}>Open Requests</th>
                       <th style={thStyle}>PM Status</th>
@@ -1263,6 +1279,8 @@ export default function OpsPage({
                         <td style={tdStyle}>{row.assetType}</td>
                         <td style={tdStyle}>{row.healthScore}%</td>
                         <td style={tdStyle}>{row.operationalScore}%</td>
+                        <td style={tdStyle}>{row.objectiveMechanicScore}%</td>
+                        <td style={tdStyle}>{row.mechanicOpinionScore}%</td>
                         <td style={tdStyle}>{row.mechanicScore}%</td>
                         <td style={tdStyle}>{mechanicScoreBand(row.mechanicScore)}</td>
                         <td style={tdStyle}>{row.openRequests}</td>

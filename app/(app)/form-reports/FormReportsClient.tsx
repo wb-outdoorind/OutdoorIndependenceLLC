@@ -137,12 +137,6 @@ function mechanicScoreBand(score: number) {
   return "Good";
 }
 
-function combineMechanicScore(objectiveScore: number, mechanicSelfScore?: number | null) {
-  if (!Number.isFinite(Number(mechanicSelfScore))) return objectiveScore;
-  const self = clampPercent(Number(mechanicSelfScore));
-  return clampPercent(objectiveScore * 0.8 + self * 0.2);
-}
-
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
@@ -151,8 +145,7 @@ function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) objectiveScore -= 8;
   if (notesLength === 0) objectiveScore -= 8;
-  const objective = clampPercent(objectiveScore);
-  return combineMechanicScore(objective, log.mechanic_self_score);
+  return clampPercent(objectiveScore);
 }
 
 function parseInspectionMeta(checklist: unknown) {

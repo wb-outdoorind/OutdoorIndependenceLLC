@@ -60,6 +60,8 @@ type MaintenanceLogPreviewRow = {
 type AssetHealthSummary = {
   healthScore: number;
   operationalScore: number;
+  objectiveMechanicScore: number;
+  mechanicOpinionScore: number;
   mechanicScore: number;
   openRequests: number;
   pmStatus: "On Track" | "Due Soon" | "Overdue";
@@ -174,7 +176,7 @@ function legacyAssetAllowance(year: number | null | undefined) {
   return 0;
 }
 
-function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
+function maintenanceLogObjectiveScore(log: MaintenanceLogPreviewRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
   if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
@@ -182,8 +184,16 @@ function maintenanceLogQualityScore(log: MaintenanceLogPreviewRow) {
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) objectiveScore -= 8;
   if (notesLength === 0) objectiveScore -= 8;
-  const objective = clampPercent(objectiveScore);
-  return combineMechanicScore(objective, log.mechanic_self_score);
+  return clampPercent(objectiveScore);
+}
+
+function latestMechanicOpinionScore(logs: MaintenanceLogPreviewRow[]) {
+  for (const log of logs) {
+    if (Number.isFinite(Number(log.mechanic_self_score))) {
+      return clampPercent(Number(log.mechanic_self_score));
+    }
+  }
+  return null;
 }
 
 function trendDirection(points: number[]) {
@@ -686,11 +696,13 @@ export default function VehicleDetailPage() {
     }
 
     const recentLogs = logPreviewRows.slice(0, 6);
-    const mechanicScore = recentLogs.length
+    const objectiveMechanicScore = recentLogs.length
       ? Math.round(
-          recentLogs.reduce((sum, row) => sum + maintenanceLogQualityScore(row), 0) / recentLogs.length
+          recentLogs.reduce((sum, row) => sum + maintenanceLogObjectiveScore(row), 0) / recentLogs.length
         )
       : 75;
+    const mechanicOpinionScore = latestMechanicOpinionScore(logPreviewRows) ?? objectiveMechanicScore;
+    const mechanicScore = combineMechanicScore(objectiveMechanicScore, mechanicOpinionScore);
 
     let operationalScore = 100;
     const status = (vehicle?.status ?? "").trim();
@@ -706,6 +718,8 @@ export default function VehicleDetailPage() {
     return {
       healthScore,
       operationalScore,
+      objectiveMechanicScore,
+      mechanicOpinionScore,
       mechanicScore,
       openRequests: openRequestCountForHealth,
       pmStatus,
@@ -777,9 +791,12 @@ export default function VehicleDetailPage() {
     const chronological = [...logPreviewRows]
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       .slice(-8);
-    const mechanicPoints = chronological.map((row) => maintenanceLogQualityScore(row));
-    const healthPoints = mechanicPoints.map((mechanic) =>
-      clampPercent(vehicleHealthSummary.operationalScore * 0.8 + mechanic * 0.2)
+    const mechanicPoints = chronological.map((row) => maintenanceLogObjectiveScore(row));
+    const healthPoints = mechanicPoints.map((mechanicObjective) =>
+      clampPercent(
+        vehicleHealthSummary.operationalScore * 0.8 +
+          combineMechanicScore(mechanicObjective, vehicleHealthSummary.mechanicOpinionScore) * 0.2
+      )
     );
     return {
       mechanicPoints,
@@ -787,7 +804,7 @@ export default function VehicleDetailPage() {
       mechanicTrend: trendDirection(mechanicPoints),
       healthTrend: trendDirection(healthPoints),
     };
-  }, [logPreviewRows, vehicleHealthSummary.operationalScore]);
+  }, [logPreviewRows, vehicleHealthSummary.mechanicOpinionScore, vehicleHealthSummary.operationalScore]);
 
   async function saveMechanicScore() {
     const latestLog = logPreviewRows[0];
@@ -797,7 +814,7 @@ export default function VehicleDetailPage() {
     }
     const parsed = Number(mechanicScoreDraft);
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
-      setMechanicScoreError("Score must be a number between 0 and 100.");
+      setMechanicScoreError("Opinion score must be a number between 0 and 100.");
       return;
     }
 
@@ -1189,67 +1206,84 @@ export default function VehicleDetailPage() {
             <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.operationalScore}%</div>
           </div>
           {canViewMechanicScore ? (
-            <div>
-              <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score</div>
-              <div style={{ fontWeight: 900, fontSize: 20 }}>
-                {canEditMechanicScore ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMechanicScoreError(null);
-                      setMechanicScoreDraft(String(vehicleHealthSummary.mechanicScore));
-                      setIsEditingMechanicScore((prev) => !prev);
-                    }}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: "inherit",
-                      font: "inherit",
-                      fontWeight: 900,
-                      cursor: "pointer",
-                      padding: 0,
-                      textDecoration: "underline",
-                    }}
-                  >
-                    {vehicleHealthSummary.mechanicScore}%
-                  </button>
-                ) : (
-                  `${vehicleHealthSummary.mechanicScore}%`
-                )}
-              </div>
-              <div style={{ opacity: 0.75, fontSize: 12 }}>
-                {mechanicScoreBand(vehicleHealthSummary.mechanicScore)}
-                {canEditMechanicScore ? " · click score to edit" : ""}
-              </div>
-              {canEditMechanicScore && isEditingMechanicScore ? (
-                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <input
-                    value={mechanicScoreDraft}
-                    onChange={(e) => setMechanicScoreDraft(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="0-100"
-                    style={{ ...detailInputStyle, maxWidth: 120, padding: 8 }}
-                  />
-                  <button type="button" onClick={saveMechanicScore} style={editPrimaryButtonStyle} disabled={mechanicScoreSaving}>
-                    {mechanicScoreSaving ? "Saving..." : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditingMechanicScore(false);
-                      setMechanicScoreError(null);
-                    }}
-                    style={editSecondaryButtonStyle}
-                    disabled={mechanicScoreSaving}
-                  >
-                    Cancel
-                  </button>
-                  {mechanicScoreError ? (
-                    <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
-                  ) : null}
+            <>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Objective)</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>
+                  {vehicleHealthSummary.objectiveMechanicScore}%
                 </div>
-              ) : null}
-            </div>
+                <div style={{ opacity: 0.75, fontSize: 12 }}>
+                  {mechanicScoreBand(vehicleHealthSummary.objectiveMechanicScore)}
+                </div>
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Opinion</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>
+                  {canEditMechanicScore ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMechanicScoreError(null);
+                        setMechanicScoreDraft(String(vehicleHealthSummary.mechanicOpinionScore));
+                        setIsEditingMechanicScore((prev) => !prev);
+                      }}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "inherit",
+                        font: "inherit",
+                        fontWeight: 900,
+                        cursor: "pointer",
+                        padding: 0,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {vehicleHealthSummary.mechanicOpinionScore}%
+                    </button>
+                  ) : (
+                    `${vehicleHealthSummary.mechanicOpinionScore}%`
+                  )}
+                </div>
+                <div style={{ opacity: 0.75, fontSize: 12 }}>
+                  {canEditMechanicScore ? "click score to edit" : "set by mechanic"}
+                </div>
+                {canEditMechanicScore && isEditingMechanicScore ? (
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input
+                      value={mechanicScoreDraft}
+                      onChange={(e) => setMechanicScoreDraft(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="0-100"
+                      style={{ ...detailInputStyle, maxWidth: 120, padding: 8 }}
+                    />
+                    <button type="button" onClick={saveMechanicScore} style={editPrimaryButtonStyle} disabled={mechanicScoreSaving}>
+                      {mechanicScoreSaving ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingMechanicScore(false);
+                        setMechanicScoreError(null);
+                      }}
+                      style={editSecondaryButtonStyle}
+                      disabled={mechanicScoreSaving}
+                    >
+                      Cancel
+                    </button>
+                    {mechanicScoreError ? (
+                      <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Blended)</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.mechanicScore}%</div>
+                <div style={{ opacity: 0.75, fontSize: 12 }}>
+                  {mechanicScoreBand(vehicleHealthSummary.mechanicScore)}
+                </div>
+              </div>
+            </>
           ) : null}
           <div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
