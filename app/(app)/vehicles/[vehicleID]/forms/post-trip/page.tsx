@@ -77,9 +77,9 @@ If any unsafe condition, damage, or mechanical issue is identified:
     },
     {
       id: "plow",
-      title: "Plow Inspection",
-      applicableLabel: "Plow Inspection Applicable",
-      nameFieldLabel: "Plow Type",
+      title: "Attachment Inspection",
+      applicableLabel: "Attachment Inspection Applicable",
+      nameFieldLabel: "Attachment",
       vehicleTypes: ["truck", "loader", "skidsteer"], // 🚫 car does NOT see plows
       items: [
         { key: "mounted", label: "Plow securely mounted" },

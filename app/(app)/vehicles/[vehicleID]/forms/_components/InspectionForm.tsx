@@ -89,12 +89,16 @@ type Role =
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
   trailer: "Trailer Loadout Equipment",
-  plow: "Plow Selection",
+  plow: "Attachment Selection",
   salter: "Salter Selection",
 };
 
 function isSectionEquipmentPicker(sectionId: string) {
   return Boolean(SECTION_EQUIPMENT_PICKERS[sectionId]);
+}
+
+function sectionUsesLoadoutBucket(sectionId: string) {
+  return sectionId === "truck" || sectionId === "trailer" || sectionId === "salter";
 }
 
 function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
@@ -898,7 +902,7 @@ export default function InspectionForm({
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
       }
-      if (st?.applicable && isSectionEquipmentPicker(sec.id)) {
+      if (st?.applicable && sectionUsesLoadoutBucket(sec.id)) {
         const selected = sectionEquipmentIds[sec.id] ?? [];
         if (selected.length === 0) {
           return alert(`Select at least one item for ${sec.title}.`);
@@ -1430,7 +1434,7 @@ export default function InspectionForm({
                   </div>
                 ) : null}
 
-                {st.applicable && isSectionEquipmentPicker(sec.id) && sec.id !== "truck" && sec.id !== "trailer" ? (
+                {st.applicable && isSectionEquipmentPicker(sec.id) && sectionUsesLoadoutBucket(sec.id) && sec.id !== "truck" && sec.id !== "trailer" ? (
                   <div
                     style={{
                       marginTop: 12,

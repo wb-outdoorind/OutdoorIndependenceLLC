@@ -112,10 +112,10 @@ const sections: InspectionSection[] = [
   },
   {
     id: "plow",
-    title: "Plow Inspection",
-    applicableLabel: "Plow Inspection Applicable",
-    nameFieldLabel: "Plow Name",
-    vehicleTypes: ["truck"],
+    title: "Attachment Inspection",
+    applicableLabel: "Attachment Inspection Applicable",
+    nameFieldLabel: "Attachment",
+    vehicleTypes: ["truck", "loader", "skidsteer"],
 
     items: [
       { key: "plow_mounted", label: "Plow securely mounted" },
