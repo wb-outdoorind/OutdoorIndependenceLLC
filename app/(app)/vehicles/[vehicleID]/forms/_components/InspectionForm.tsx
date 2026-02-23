@@ -97,6 +97,10 @@ function isSectionEquipmentPicker(sectionId: string) {
   return Boolean(SECTION_EQUIPMENT_PICKERS[sectionId]);
 }
 
+function isAlwaysRequiredSection(sectionId: string) {
+  return sectionId === "truck" || sectionId === "skid_loader";
+}
+
 function sectionUsesLoadoutBucket(sectionId: string) {
   return sectionId === "truck" || sectionId === "trailer" || sectionId === "salter";
 }
@@ -392,13 +396,21 @@ export default function InspectionForm({
           for (const it of sec.items) {
             if (!items[it.key]) items[it.key] = "";
           }
-          base[sec.id] = { ...existing, items };
+          base[sec.id] = {
+            ...existing,
+            applicable: isAlwaysRequiredSection(sec.id) ? true : existing.applicable,
+            items,
+          };
           continue;
         }
 
         const items: Record<string, ChoiceOrBlank> = {};
         for (const it of sec.items) items[it.key] = "";
-        base[sec.id] = { applicable: false, name: "", items };
+        base[sec.id] = {
+          applicable: isAlwaysRequiredSection(sec.id) ? true : false,
+          name: "",
+          items,
+        };
       }
 
       // Drop sections that are not visible for this vehicle type
@@ -627,7 +639,10 @@ export default function InspectionForm({
   function setApplicable(secId: string, applicable: boolean) {
     setSectionState((prev) => ({
       ...prev,
-      [secId]: { ...prev[secId], applicable },
+      [secId]: {
+        ...prev[secId],
+        applicable: isAlwaysRequiredSection(secId) ? true : applicable,
+      },
     }));
   }
 
@@ -1227,15 +1242,21 @@ export default function InspectionForm({
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
-                      cursor: "pointer",
+                      cursor: isAlwaysRequiredSection(sec.id) ? "default" : "pointer",
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={!!st.applicable}
-                      onChange={(e) => setApplicable(sec.id, e.target.checked)}
-                    />
-                    <span style={{ fontWeight: 800 }}>Applicable</span>
+                    {isAlwaysRequiredSection(sec.id) ? (
+                      <span style={{ fontWeight: 800, opacity: 0.88 }}>Required</span>
+                    ) : (
+                      <>
+                        <input
+                          type="checkbox"
+                          checked={!!st.applicable}
+                          onChange={(e) => setApplicable(sec.id, e.target.checked)}
+                        />
+                        <span style={{ fontWeight: 800 }}>Applicable</span>
+                      </>
+                    )}
                   </label>
                 </div>
 
