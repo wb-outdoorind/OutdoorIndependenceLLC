@@ -586,7 +586,7 @@ export default function VehiclePreventativeMaintenanceForm() {
           <h2 style={{ marginTop: 0, marginBottom: 10 }}>Inspection Results</h2>
           <div style={gridStyle}>
             <Field label="Vehicle PM Result *">
-              <select value={pmResult} onChange={(e) => setPmResult(e.target.value as PMResult)} style={inputStyle} required>
+              <select value={pmResult} onChange={(e) => setPmResult(e.target.value as PMResult)} style={{ ...inputStyle, ...answerSelectToneStyle(pmResult) }} required>
                 <option value="">Select...</option>
                 <option value="pass">Pass</option>
                 <option value="pass_with_repairs">Pass with repairs needed</option>
@@ -677,7 +677,7 @@ function SectionChecklist({
           <select
             value={checks[item.key] ?? ""}
             onChange={(e) => onChange(item.key, e.target.value as PMChoice)}
-            style={{ ...inputStyle, maxWidth: 180 }}
+            style={{ ...inputStyle, maxWidth: 180, ...answerSelectToneStyle(checks[item.key] ?? "") }}
             required
           >
             <option value="">Select...</option>
@@ -693,7 +693,7 @@ function SectionChecklist({
 
 function YesNoSelect({ value, onChange }: { value: YesNo; onChange: (value: YesNo) => void }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value as YesNo)} style={inputStyle} required>
+    <select value={value} onChange={(e) => onChange(e.target.value as YesNo)} style={{ ...inputStyle, ...answerSelectToneStyle(value) }} required>
       <option value="">Select...</option>
       <option value="yes">Yes</option>
       <option value="no">No</option>
@@ -770,3 +770,20 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
+function answerSelectToneStyle(value: string): React.CSSProperties {
+  const v = value.trim().toLowerCase();
+  if (v === "pass" || v === "yes" || v.startsWith("yes ")) {
+    return {
+      borderColor: "rgba(53, 156, 84, 0.75)",
+      background: "rgba(53, 156, 84, 0.18)",
+    };
+  }
+  if (v === "fail" || v === "no" || v.startsWith("no ")) {
+    return {
+      borderColor: "rgba(202, 64, 64, 0.75)",
+      background: "rgba(202, 64, 64, 0.18)",
+    };
+  }
+  return {};
+}

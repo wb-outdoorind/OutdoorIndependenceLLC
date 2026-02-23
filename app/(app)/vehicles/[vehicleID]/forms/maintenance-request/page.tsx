@@ -423,7 +423,7 @@ export default function MaintenanceRequestPage() {
                 onChange={(e) =>
                   setDrivabilityStatus(e.target.value as DrivabilityStatus)
                 }
-                style={inputStyle()}
+                style={{ ...inputStyle(), ...answerSelectToneStyle(drivabilityStatus) }}
               >
                 <option value="">Select...</option>
                 <option>Yes – Drivable</option>
@@ -538,7 +538,7 @@ export default function MaintenanceRequestPage() {
               <select
                 value={mitigationApplied}
                 onChange={(e) => setMitigationApplied(e.target.value as TriState)}
-                style={inputStyle()}
+                style={{ ...inputStyle(), ...answerSelectToneStyle(mitigationApplied) }}
               >
                 <option value="">Select...</option>
                 <option>Yes</option>
@@ -551,7 +551,7 @@ export default function MaintenanceRequestPage() {
               <select
                 value={affectsNextShift}
                 onChange={(e) => setAffectsNextShift(e.target.value as TriState)}
-                style={inputStyle()}
+                style={{ ...inputStyle(), ...answerSelectToneStyle(affectsNextShift) }}
               >
                 <option value="">Select...</option>
                 <option>Yes</option>
@@ -564,7 +564,7 @@ export default function MaintenanceRequestPage() {
               <select
                 value={downtimeExpected}
                 onChange={(e) => setDowntimeExpected(e.target.value as TriState)}
-                style={inputStyle()}
+                style={{ ...inputStyle(), ...answerSelectToneStyle(downtimeExpected) }}
               >
                 <option value="">Select...</option>
                 <option>Yes</option>
@@ -657,4 +657,21 @@ function secondaryButtonStyle(): React.CSSProperties {
     opacity: 0.9,
     cursor: "pointer",
   };
+}
+
+function answerSelectToneStyle(value: string): React.CSSProperties {
+  const v = value.trim().toLowerCase();
+  if (v === "pass" || v === "yes" || v.startsWith("yes ")) {
+    return {
+      borderColor: "rgba(53, 156, 84, 0.75)",
+      background: "rgba(53, 156, 84, 0.18)",
+    };
+  }
+  if (v === "fail" || v === "no" || v.startsWith("no ")) {
+    return {
+      borderColor: "rgba(202, 64, 64, 0.75)",
+      background: "rgba(202, 64, 64, 0.18)",
+    };
+  }
+  return {};
 }

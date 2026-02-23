@@ -88,7 +88,7 @@ type Role =
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
-  trailer: "Trailer Loadout Equipment",
+  trailer: "Trailer Identification",
   plow: "Attachment Selection",
   salter: "Salter Selection",
 };
@@ -238,6 +238,23 @@ function secondaryButtonStyle(): React.CSSProperties {
   };
 }
 
+function answerSelectToneStyle(value: string): React.CSSProperties {
+  const v = value.trim().toLowerCase();
+  if (v === "pass" || v === "yes" || v.startsWith("yes ")) {
+    return {
+      borderColor: "rgba(53, 156, 84, 0.75)",
+      background: "rgba(53, 156, 84, 0.18)",
+    };
+  }
+  if (v === "fail" || v === "no" || v.startsWith("no ")) {
+    return {
+      borderColor: "rgba(202, 64, 64, 0.75)",
+      background: "rgba(202, 64, 64, 0.18)",
+    };
+  }
+  return {};
+}
+
 function ChoiceToggle({
   value,
   onChange,
@@ -245,13 +262,19 @@ function ChoiceToggle({
   value: ChoiceOrBlank;
   onChange: (v: Choice) => void;
 }) {
-  const pill = (active: boolean): React.CSSProperties => ({
+  const pill = (state: Choice, active: boolean): React.CSSProperties => ({
     padding: "6px 10px",
     borderRadius: 999,
     border: active
-      ? "1px solid rgba(255,255,255,0.26)"
+      ? state === "pass"
+        ? "1px solid rgba(53, 156, 84, 0.8)"
+        : "1px solid rgba(202, 64, 64, 0.8)"
       : "1px solid rgba(255,255,255,0.14)",
-    background: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
+    background: active
+      ? state === "pass"
+        ? "rgba(53, 156, 84, 0.25)"
+        : "rgba(202, 64, 64, 0.25)"
+      : "rgba(255,255,255,0.03)",
     fontSize: 12,
     fontWeight: 800,
     cursor: "pointer",
@@ -260,10 +283,10 @@ function ChoiceToggle({
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <span style={pill(value === "pass")} onClick={() => onChange("pass")}>
+      <span style={pill("pass", value === "pass")} onClick={() => onChange("pass")}>
         Pass
       </span>
-      <span style={pill(value === "fail")} onClick={() => onChange("fail")}>
+      <span style={pill("fail", value === "fail")} onClick={() => onChange("fail")}>
         Fail
       </span>
     </div>
@@ -2060,7 +2083,7 @@ export default function InspectionForm({
                             background: "rgba(255,255,255,0.02)",
                           }}
                         >
-                          <div style={{ fontWeight: 700 }}>Trailer Loadout - Equipment and Vehicles *</div>
+                          <div style={{ fontWeight: 700 }}>Trailer Identification - Equipment and Vehicles *</div>
                           <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
                             Add loadout equipment and loadout vehicles. Linked vehicles must complete their own{" "}
                             {type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} inspection before this form can submit.
@@ -2496,7 +2519,7 @@ export default function InspectionForm({
                     e.target.value as StoredInspectionRecord["inspectionStatus"] | ""
                   )
                 }
-                style={inputStyle()}
+                style={{ ...inputStyle(), ...answerSelectToneStyle(inspectionStatus) }}
               >
                 <option value="">Select status...</option>
                 <option value="Pass">Pass</option>
@@ -2584,6 +2607,11 @@ export default function InspectionForm({
             type="button"
             onClick={() => {
               if (!confirmLeaveForm()) return;
+              const returnTo = (searchParams.get("returnTo") || "").trim();
+              if (returnTo && returnTo.startsWith("/")) {
+                router.replace(returnTo);
+                return;
+              }
               router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
             }}
             style={secondaryButtonStyle()}
