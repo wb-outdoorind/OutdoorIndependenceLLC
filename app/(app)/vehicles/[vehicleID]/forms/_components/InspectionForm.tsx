@@ -68,6 +68,13 @@ type EquipmentOption = {
   asset_qr: string | null;
 };
 
+type VehicleOption = {
+  id: string;
+  name: string | null;
+  type: string | null;
+  status: string | null;
+};
+
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   trailer: "Trailer Loadout Equipment",
   plow: "Plow Selection",
@@ -298,12 +305,21 @@ export default function InspectionForm({
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [vehicleOptions, setVehicleOptions] = useState<VehicleOption[]>([]);
+  const [vehicleLoading, setVehicleLoading] = useState(false);
   const [sectionEquipmentIds, setSectionEquipmentIds] = useState<Record<string, string[]>>({});
   const [sectionEquipmentSearch, setSectionEquipmentSearch] = useState<Record<string, string>>({});
   const [pickerOpenSectionId, setPickerOpenSectionId] = useState<string | null>(null);
   const [pickerModeBySection, setPickerModeBySection] = useState<Record<string, "search" | "scan">>({});
   const [pickerScanValueBySection, setPickerScanValueBySection] = useState<Record<string, string>>({});
   const [pickerErrorBySection, setPickerErrorBySection] = useState<Record<string, string>>({});
+  const [trailerVehicleIds, setTrailerVehicleIds] = useState<string[]>([]);
+  const [trailerVehicleLinks, setTrailerVehicleLinks] = useState<Record<string, string>>({});
+  const [trailerVehiclePickerOpen, setTrailerVehiclePickerOpen] = useState(false);
+  const [trailerVehiclePickerMode, setTrailerVehiclePickerMode] = useState<"search" | "scan">("search");
+  const [trailerVehicleSearch, setTrailerVehicleSearch] = useState("");
+  const [trailerVehicleScanValue, setTrailerVehicleScanValue] = useState("");
+  const [trailerVehicleError, setTrailerVehicleError] = useState("");
   const [sectionSelectOpenId, setSectionSelectOpenId] = useState<string | null>(null);
   const [sectionSelectModeById, setSectionSelectModeById] = useState<Record<string, "search" | "scan">>({});
   const [sectionSelectSearchById, setSectionSelectSearchById] = useState<Record<string, string>>({});
@@ -412,6 +428,8 @@ export default function InspectionForm({
         employeeSignature?: string;
         managerSignature?: string;
         sectionEquipmentIds?: Record<string, string[]>;
+        trailerVehicleIds?: string[];
+        trailerVehicleLinks?: Record<string, string>;
       };
       if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
       if (typeof draft.mileage === "string") setMileage(draft.mileage);
@@ -427,6 +445,12 @@ export default function InspectionForm({
       if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
       if (draft.sectionEquipmentIds && typeof draft.sectionEquipmentIds === "object") {
         setSectionEquipmentIds(draft.sectionEquipmentIds);
+      }
+      if (Array.isArray(draft.trailerVehicleIds)) {
+        setTrailerVehicleIds(draft.trailerVehicleIds);
+      }
+      if (draft.trailerVehicleLinks && typeof draft.trailerVehicleLinks === "object") {
+        setTrailerVehicleLinks(draft.trailerVehicleLinks);
       }
     } catch (error) {
       console.error("Failed to restore inspection draft:", error);
@@ -455,6 +479,16 @@ export default function InspectionForm({
   }, [searchParams]);
 
   useEffect(() => {
+    const linkedInspectionId = (searchParams.get("linkedInspectionId") || "").trim();
+    const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
+    if (!linkedInspectionId || !linkedVehicleId) return;
+    setTrailerVehicleLinks((prev) => ({
+      ...prev,
+      [linkedVehicleId]: linkedInspectionId,
+    }));
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!vehicleId) return;
     let active = true;
     void (async () => {
@@ -473,6 +507,31 @@ export default function InspectionForm({
         return;
       }
       setEquipmentOptions((data ?? []) as EquipmentOption[]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [vehicleId]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    void (async () => {
+      setVehicleLoading(true);
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("id,name,type,status")
+        .order("name", { ascending: true })
+        .limit(500);
+      if (!active) return;
+      setVehicleLoading(false);
+      if (error) {
+        console.error("Failed loading vehicle options:", error);
+        setVehicleOptions([]);
+        return;
+      }
+      setVehicleOptions((data ?? []) as VehicleOption[]);
     })();
     return () => {
       active = false;
@@ -652,8 +711,70 @@ export default function InspectionForm({
       notes,
       employeeSignature,
       managerSignature,
+      trailerVehicleIds,
+      trailerVehicleLinks,
     };
     localStorage.setItem(inspectionDraftKey(vehicleId, type), JSON.stringify(draft));
+  }
+
+  function addTrailerVehicle(id: string) {
+    if (id === vehicleId) {
+      setTrailerVehicleError("Current vehicle is already this inspection context. Select a different vehicle.");
+      return;
+    }
+    setTrailerVehicleIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setTrailerVehicleError("");
+  }
+
+  function removeTrailerVehicle(id: string) {
+    setTrailerVehicleIds((prev) => prev.filter((x) => x !== id));
+    setTrailerVehicleLinks((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function findVehicleByQr(rawValue: string) {
+    const value = rawValue.trim();
+    if (!value) return null;
+    let lastSegment = "";
+    try {
+      const u = new URL(value);
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length) lastSegment = decodeURIComponent(parts[parts.length - 1]);
+    } catch {
+      // not URL
+    }
+    const candidates = [value, value.toLowerCase(), lastSegment, lastSegment.toLowerCase()].filter(Boolean);
+    for (const candidate of candidates) {
+      const found = vehicleOptions.find((row) => {
+        const id = row.id.trim();
+        const name = (row.name ?? "").trim();
+        return (
+          id === candidate ||
+          id.toLowerCase() === candidate.toLowerCase() ||
+          name === candidate ||
+          name.toLowerCase() === candidate.toLowerCase()
+        );
+      });
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function openVehicleInspectionForLink(targetVehicleId: string) {
+    if (!vehicleId) return;
+    saveDraft();
+    const returnTo =
+      typeof window !== "undefined"
+        ? window.location.pathname
+        : `/vehicles/${encodeURIComponent(vehicleId)}/forms/${type}`;
+    const q = new URLSearchParams({
+      returnTo,
+      linkedVehicleId: targetVehicleId,
+    });
+    router.push(`/vehicles/${encodeURIComponent(targetVehicleId)}/forms/${type}?${q.toString()}`);
   }
 
   function openFullRequestForm(sectionId: string, item: InspectionItem, sectionTitle: string) {
@@ -743,6 +864,17 @@ export default function InspectionForm({
           return alert(`Select at least one item for ${sec.title}.`);
         }
       }
+      if (sec.id === "trailer" && st?.applicable) {
+        for (const linkedVehicleId of trailerVehicleIds) {
+          const linkedInspectionId = (trailerVehicleLinks[linkedVehicleId] || "").trim();
+          if (!linkedInspectionId) {
+            const v = vehicleOptions.find((row) => row.id === linkedVehicleId);
+            return alert(
+              `Complete the ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} inspection for linked vehicle "${v?.name ?? linkedVehicleId}" before submitting.`
+            );
+          }
+        }
+      }
       if (st?.applicable) {
         for (const it of sec.items) {
           const value = st.items?.[it.key] as ChoiceOrBlank;
@@ -818,6 +950,15 @@ export default function InspectionForm({
               };
             })()
           : null,
+      trailerLoadoutVehicles: trailerVehicleIds.map((id) => {
+        const v = vehicleOptions.find((row) => row.id === id);
+        return {
+          id,
+          name: v?.name ?? id,
+          type: v?.type ?? null,
+          linkedInspectionId: trailerVehicleLinks[id] ?? null,
+        };
+      }),
       type,
     };
 
@@ -884,6 +1025,21 @@ export default function InspectionForm({
     }
 
     localStorage.removeItem(inspectionDraftKey(vehicleId, type));
+
+    const returnTo = (searchParams.get("returnTo") || "").trim();
+    const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
+    if (insertedInspection?.id && returnTo && linkedVehicleId && typeof window !== "undefined") {
+      try {
+        const back = new URL(returnTo, window.location.origin);
+        back.searchParams.set("linkedInspectionId", insertedInspection.id);
+        back.searchParams.set("linkedVehicleId", linkedVehicleId);
+        router.replace(`${back.pathname}${back.search}`);
+        return;
+      } catch (error) {
+        console.error("Failed to build return URL for linked vehicle inspection:", error);
+      }
+    }
+
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
@@ -1424,6 +1580,220 @@ export default function InspectionForm({
                     <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
                       Selected: <strong>{(sectionEquipmentIds[sec.id] ?? []).length}</strong>
                     </div>
+                  </div>
+                ) : null}
+
+                {st.applicable && sec.id === "trailer" ? (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>Trailer Loadout Vehicles</div>
+                    <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
+                      Add each vehicle in this trailer loadout. Added vehicles must complete their own{" "}
+                      {type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} inspection before this form can submit.
+                    </div>
+                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                      {trailerVehicleIds.length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.72 }}>No vehicles added yet.</div>
+                      ) : (
+                        trailerVehicleIds.map((id) => {
+                          const row = vehicleOptions.find((opt) => opt.id === id);
+                          const linked = (trailerVehicleLinks[id] || "").trim();
+                          return (
+                            <div
+                              key={id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 8,
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 10,
+                                padding: 8,
+                                background: "rgba(255,255,255,0.02)",
+                              }}
+                            >
+                              <div style={{ display: "grid", gap: 4 }}>
+                                <div>
+                                  <strong>{row?.name ?? id}</strong>
+                                  <span style={{ opacity: 0.72 }}>
+                                    {" "}
+                                    · {row?.type ?? "Unspecified"}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 12, opacity: linked ? 0.95 : 0.72 }}>
+                                  {linked
+                                    ? `Linked ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}: ${linked}`
+                                    : `No linked ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} yet`}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  style={buttonStyle()}
+                                  onClick={() => openVehicleInspectionForLink(id)}
+                                >
+                                  {linked
+                                    ? `Update ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}`
+                                    : `Complete ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}`}
+                                </button>
+                                <button
+                                  type="button"
+                                  style={secondaryButtonStyle()}
+                                  onClick={() => removeTrailerVehicle(id)}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        style={buttonStyle()}
+                        onClick={() => {
+                          setTrailerVehiclePickerOpen(true);
+                          setTrailerVehicleError("");
+                        }}
+                      >
+                        Add Vehicle
+                      </button>
+                    </div>
+                    {trailerVehiclePickerOpen ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: 12,
+                          padding: 10,
+                          background: "rgba(255,255,255,0.02)",
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            style={trailerVehiclePickerMode === "scan" ? secondaryButtonStyle() : buttonStyle()}
+                            onClick={() => {
+                              setTrailerVehiclePickerMode("search");
+                              setTrailerVehicleError("");
+                            }}
+                          >
+                            Search
+                          </button>
+                          <button
+                            type="button"
+                            style={trailerVehiclePickerMode === "scan" ? buttonStyle() : secondaryButtonStyle()}
+                            onClick={() => {
+                              setTrailerVehiclePickerMode("scan");
+                              setTrailerVehicleError("");
+                            }}
+                          >
+                            Scan QR
+                          </button>
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle()}
+                            onClick={() => setTrailerVehiclePickerOpen(false)}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        {trailerVehiclePickerMode === "search" ? (
+                          <>
+                            <input
+                              value={trailerVehicleSearch}
+                              onChange={(e) => setTrailerVehicleSearch(e.target.value)}
+                              placeholder="Search vehicles..."
+                              style={inputStyle()}
+                            />
+                            <div
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 10,
+                                padding: 10,
+                                maxHeight: 200,
+                                overflowY: "auto",
+                                display: "grid",
+                                gap: 8,
+                              }}
+                            >
+                              {vehicleLoading ? (
+                                <div style={{ opacity: 0.72 }}>Loading vehicles...</div>
+                              ) : (
+                                (() => {
+                                  const q = trailerVehicleSearch.trim().toLowerCase();
+                                  const visible = vehicleOptions
+                                    .filter((row) => row.id !== vehicleId)
+                                    .filter((row) => {
+                                      if (!q) return true;
+                                      const hay = `${row.name ?? ""} ${row.type ?? ""} ${row.id}`.toLowerCase();
+                                      return hay.includes(q);
+                                    });
+                                  if (!visible.length) {
+                                    return <div style={{ opacity: 0.72 }}>No matching vehicles found.</div>;
+                                  }
+                                  return visible.map((row) => (
+                                    <button
+                                      key={row.id}
+                                      type="button"
+                                      style={{ textAlign: "left", ...secondaryButtonStyle() }}
+                                      onClick={() => addTrailerVehicle(row.id)}
+                                    >
+                                      <strong>{row.name ?? row.id}</strong>
+                                      <span style={{ opacity: 0.72 }}>
+                                        {" "}
+                                        · {row.type ?? "Unspecified"}
+                                      </span>
+                                    </button>
+                                  ));
+                                })()
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              value={trailerVehicleScanValue}
+                              onChange={(e) => setTrailerVehicleScanValue(e.target.value)}
+                              placeholder="Scan or paste vehicle QR value"
+                              style={inputStyle()}
+                            />
+                            <button
+                              type="button"
+                              style={buttonStyle()}
+                              onClick={() => {
+                                const found = findVehicleByQr(trailerVehicleScanValue);
+                                if (!found) {
+                                  setTrailerVehicleError("No matching vehicle found.");
+                                  return;
+                                }
+                                addTrailerVehicle(found.id);
+                                setTrailerVehicleScanValue("");
+                              }}
+                            >
+                              Add Vehicle
+                            </button>
+                            <div style={{ fontSize: 12, opacity: 0.72 }}>
+                              Use your scanner/camera app and paste or scan into this field.
+                            </div>
+                          </>
+                        )}
+                        {trailerVehicleError ? (
+                          <div style={{ fontSize: 12, color: "#ff9d9d" }}>{trailerVehicleError}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
