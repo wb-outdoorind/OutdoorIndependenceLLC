@@ -76,6 +76,7 @@ type VehicleOption = {
 };
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
+  truck: "Truck Loadout Equipment",
   trailer: "Trailer Loadout Equipment",
   plow: "Plow Selection",
   salter: "Salter Selection",
@@ -87,6 +88,9 @@ function isSectionEquipmentPicker(sectionId: string) {
 
 function equipmentMatchesSection(sectionId: string, row: EquipmentOption) {
   const hay = `${row.name ?? ""} ${row.equipment_type ?? ""}`.toLowerCase();
+  if (sectionId === "truck") {
+    return !hay.includes("trailer");
+  }
   if (sectionId === "trailer") {
     return !hay.includes("trailer");
   }
