@@ -999,6 +999,99 @@ export default function FormReportsClient() {
     setQueueError(`Bulk ${action.replaceAll("_", " ")} complete. Updated ${updated}, skipped ${skipped}.`);
   }
 
+  function printFlaggedQueueReport() {
+    const openedAt = new Date().toLocaleString();
+    const rowsHtml = flaggedQueueRows
+      .map((item) => {
+        const asset = item.row.vehicle_id
+          ? `Vehicle ${item.row.vehicle_id}`
+          : item.row.equipment_id
+            ? `Equipment ${item.row.equipment_id}`
+            : "No linked asset";
+        const latestEvent = item.recentEvents[0];
+        const latestEventLabel = latestEvent
+          ? `${new Date(latestEvent.created_at).toLocaleString()} - ${escapeHtml(
+              latestEvent.event_type.replaceAll("_", " ")
+            )}`
+          : "None";
+        return `<tr>
+  <td>${escapeHtml(item.row.form_type)}</td>
+  <td>${escapeHtml(item.row.form_id)}</td>
+  <td>${escapeHtml(new Date(item.row.submitted_at).toLocaleString())}</td>
+  <td>${escapeHtml(item.submittedByLabel)}</td>
+  <td>${escapeHtml(asset)}</td>
+  <td>${escapeHtml(item.reviewStatus.replaceAll("_", " "))}</td>
+  <td>${escapeHtml(item.ownerName)}</td>
+  <td>${escapeHtml(item.row.accountability_reason || "")}</td>
+  <td>${escapeHtml(String(item.row.missing_count ?? 0))}</td>
+  <td>${escapeHtml(latestEventLabel)}</td>
+</tr>`;
+      })
+      .join("");
+
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Flagged Queue Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 8px 0; font-size: 22px; }
+    .meta { margin-bottom: 14px; font-size: 12px; color: #333; }
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .card { border: 1px solid #bbb; border-radius: 6px; padding: 8px; }
+    .card .label { font-size: 11px; color: #444; }
+    .card .value { font-size: 18px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #bbb; padding: 6px; text-align: left; vertical-align: top; }
+    th { background: #efefef; }
+    @media print {
+      @page { size: auto; margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Outdoor Independence LLC - Flagged Queue Report</h1>
+  <div class="meta">Generated: ${escapeHtml(openedAt)} | Rows: ${flaggedQueueRows.length}</div>
+  <div class="summary">
+    <div class="card"><div class="label">Open Flags</div><div class="value">${flaggedQueueSummary.openCount}</div></div>
+    <div class="card"><div class="label">Avg Resolve Time (h)</div><div class="value">${flaggedQueueSummary.avgResolveHours}</div></div>
+    <div class="card"><div class="label">Unresolved >48h</div><div class="value">${flaggedQueueSummary.unresolvedOlderThan48h}</div></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Form Type</th>
+        <th>Form ID</th>
+        <th>Submitted</th>
+        <th>Teammate</th>
+        <th>Asset</th>
+        <th>Status</th>
+        <th>Owner</th>
+        <th>Reason</th>
+        <th>Missing</th>
+        <th>Latest Activity</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || `<tr><td colspan="10">No flagged items in current filter.</td></tr>`}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1200,height=800");
+    if (!printWindow) {
+      setQueueError("Popup blocked. Allow popups to print the report.");
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
   function renderQueueActions(item: {
     row: GradeRow;
     review: FormGradeReviewRow | undefined;
@@ -1377,6 +1470,9 @@ export default function FormReportsClient() {
             <button type="button" style={smallButtonStyle()} disabled={bulkBusy} onClick={() => void bulkApplyQueueAction("resolve")}>
               {bulkBusy ? "Working..." : "Bulk Resolve"}
             </button>
+            <button type="button" style={smallButtonStyle()} onClick={printFlaggedQueueReport}>
+              Print Report (PDF)
+            </button>
           </div>
           <div style={{ marginTop: 8 }}>
             <input
@@ -1739,4 +1835,13 @@ function smallButtonStyle(): React.CSSProperties {
     fontSize: 12,
     fontWeight: 700,
   };
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
