@@ -55,6 +55,12 @@ type ProfileRow = {
   role: string | null;
 };
 
+type FormGradeLikeRow = {
+  id: number;
+  grade_id: number;
+  user_id: string;
+};
+
 type PersonScoreRow = {
   key: string;
   userId: string | null;
@@ -191,6 +197,10 @@ export default function FormReportsClient() {
   const [vehicleRequests, setVehicleRequests] = useState<RequestRow[]>([]);
   const [equipmentRequests, setEquipmentRequests] = useState<RequestRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [gradeLikes, setGradeLikes] = useState<FormGradeLikeRow[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [likeError, setLikeError] = useState<string | null>(null);
+  const [likingGradeIds, setLikingGradeIds] = useState<number[]>([]);
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   useEffect(() => {
@@ -207,6 +217,8 @@ export default function FormReportsClient() {
         vehicleReqRes,
         equipmentReqRes,
         profilesRes,
+        likesRes,
+        authRes,
       ] = await Promise.all([
         supabase
           .from("form_submission_grades")
@@ -243,6 +255,11 @@ export default function FormReportsClient() {
           .select("id,full_name,email,role")
           .eq("status", "Active")
           .order("full_name", { ascending: true }),
+        supabase
+          .from("form_submission_grade_likes")
+          .select("id,grade_id,user_id")
+          .limit(5000),
+        supabase.auth.getUser(),
       ]);
 
       if (!alive) return;
@@ -276,6 +293,13 @@ export default function FormReportsClient() {
       setVehicleRequests((vehicleReqRes.data ?? []) as RequestRow[]);
       setEquipmentRequests((equipmentReqRes.data ?? []) as RequestRow[]);
       setProfiles((profilesRes.data ?? []) as ProfileRow[]);
+      if (likesRes.error) {
+        setLikeError(likesRes.error.message);
+      } else {
+        setLikeError(null);
+        setGradeLikes((likesRes.data ?? []) as FormGradeLikeRow[]);
+      }
+      setCurrentUserId(authRes.data.user?.id ?? null);
       setLoading(false);
     })();
     return () => {
@@ -507,6 +531,23 @@ export default function FormReportsClient() {
       .slice(0, 20);
   }, [nameById, periodLogs, selectedIdentitySet, selectedPerson]);
 
+  const likeCountByGrade = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const row of gradeLikes) {
+      map.set(row.grade_id, (map.get(row.grade_id) || 0) + 1);
+    }
+    return map;
+  }, [gradeLikes]);
+
+  const likedGradeIdSet = useMemo(() => {
+    const set = new Set<number>();
+    if (!currentUserId) return set;
+    for (const row of gradeLikes) {
+      if (row.user_id === currentUserId) set.add(row.grade_id);
+    }
+    return set;
+  }, [currentUserId, gradeLikes]);
+
   const globalRisk = useMemo(() => {
     if (!nowMs) {
       return { slaBreaches: 0, unacknowledged: 0, repeatFailures: 0, openRequests: 0 };
@@ -548,6 +589,46 @@ export default function FormReportsClient() {
     const flags = periodGrades.filter((row) => row.accountability_flag).length;
     return { submissions, avgScore, flags };
   }, [periodGrades]);
+
+  async function toggleFlagLike(gradeId: number) {
+    if (!currentUserId) {
+      setLikeError("You must be signed in to like a flagged form.");
+      return;
+    }
+    if (likingGradeIds.includes(gradeId)) return;
+    setLikeError(null);
+    setLikingGradeIds((prev) => [...prev, gradeId]);
+    const supabase = createSupabaseBrowser();
+    const isLiked = likedGradeIdSet.has(gradeId);
+    if (isLiked) {
+      const { error } = await supabase
+        .from("form_submission_grade_likes")
+        .delete()
+        .eq("grade_id", gradeId)
+        .eq("user_id", currentUserId);
+      setLikingGradeIds((prev) => prev.filter((id) => id !== gradeId));
+      if (error) {
+        setLikeError(error.message);
+        return;
+      }
+      setGradeLikes((prev) =>
+        prev.filter((row) => !(row.grade_id === gradeId && row.user_id === currentUserId))
+      );
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("form_submission_grade_likes")
+      .insert({ grade_id: gradeId, user_id: currentUserId })
+      .select("id,grade_id,user_id")
+      .single();
+    setLikingGradeIds((prev) => prev.filter((id) => id !== gradeId));
+    if (error || !data) {
+      setLikeError(error?.message || "Failed to like flagged form.");
+      return;
+    }
+    setGradeLikes((prev) => [data as FormGradeLikeRow, ...prev]);
+  }
 
   return (
     <main style={{ maxWidth: 1260, margin: "0 auto", paddingBottom: 40 }}>
@@ -654,6 +735,7 @@ export default function FormReportsClient() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
               <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontWeight: 800, marginBottom: 8 }}>Submitted Graded Forms</div>
+                {likeError ? <div style={{ color: "#ff9d9d", marginBottom: 8 }}>{likeError}</div> : null}
                 {!selectedFormRows.length ? (
                   <div style={{ opacity: 0.75 }}>No graded forms in this period.</div>
                 ) : (
@@ -675,6 +757,33 @@ export default function FormReportsClient() {
                           {row.has_na ? " · Contains N/A" : ""}
                           {row.accountability_flag ? " · Flagged" : ""}
                         </div>
+                        {row.accountability_flag ? (
+                          <div style={{ marginTop: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => void toggleFlagLike(row.id)}
+                              disabled={likingGradeIds.includes(row.id)}
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.16)",
+                                background: likedGradeIdSet.has(row.id)
+                                  ? "rgba(126,255,167,0.18)"
+                                  : "rgba(255,255,255,0.04)",
+                                color: "inherit",
+                                borderRadius: 999,
+                                padding: "6px 10px",
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {likingGradeIds.includes(row.id)
+                                ? "Saving..."
+                                : `${likedGradeIdSet.has(row.id) ? "Liked" : "Like"} · ${
+                                    likeCountByGrade.get(row.id) || 0
+                                  }`}
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
