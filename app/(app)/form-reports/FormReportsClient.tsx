@@ -62,6 +62,17 @@ type FormGradeLikeRow = {
   user_id: string;
 };
 
+type FormGradeReviewRow = {
+  id: number;
+  grade_id: number;
+  review_status: "open" | "in_review" | "resolved";
+  owner_id: string | null;
+  resolution_note: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type PersonScoreRow = {
   key: string;
   userId: string | null;
@@ -199,9 +210,15 @@ export default function FormReportsClient() {
   const [equipmentRequests, setEquipmentRequests] = useState<RequestRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [gradeLikes, setGradeLikes] = useState<FormGradeLikeRow[]>([]);
+  const [gradeReviews, setGradeReviews] = useState<FormGradeReviewRow[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [likingGradeIds, setLikingGradeIds] = useState<number[]>([]);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [queueBusyGradeIds, setQueueBusyGradeIds] = useState<number[]>([]);
+  const [queueStatusFilter, setQueueStatusFilter] = useState<"all" | "unresolved" | "resolved">("unresolved");
+  const [queueAssetFilter, setQueueAssetFilter] = useState<"all" | "vehicle" | "equipment">("all");
+  const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   useEffect(() => {
@@ -219,6 +236,7 @@ export default function FormReportsClient() {
         equipmentReqRes,
         profilesRes,
         likesRes,
+        reviewsRes,
         authRes,
       ] = await Promise.all([
         supabase
@@ -260,6 +278,10 @@ export default function FormReportsClient() {
           .from("form_submission_grade_likes")
           .select("id,grade_id,user_id")
           .limit(5000),
+        supabase
+          .from("form_submission_grade_reviews")
+          .select("id,grade_id,review_status,owner_id,resolution_note,resolved_at,created_at,updated_at")
+          .limit(5000),
         supabase.auth.getUser(),
       ]);
 
@@ -300,6 +322,12 @@ export default function FormReportsClient() {
         setLikeError(null);
         setGradeLikes((likesRes.data ?? []) as FormGradeLikeRow[]);
       }
+      if (reviewsRes.error) {
+        setQueueError(reviewsRes.error.message);
+      } else {
+        setQueueError(null);
+        setGradeReviews((reviewsRes.data ?? []) as FormGradeReviewRow[]);
+      }
       setCurrentUserId(authRes.data.user?.id ?? null);
       setLoading(false);
     })();
@@ -312,6 +340,16 @@ export default function FormReportsClient() {
     const map: Record<string, string> = {};
     for (const p of profiles) {
       map[p.id] = p.full_name?.trim() || p.email?.trim() || p.id;
+    }
+    return map;
+  }, [profiles]);
+
+  const profileIdByIdentity = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of profiles) {
+      map.set(normalizedPersonKey(p.id), p.id);
+      if (p.full_name) map.set(normalizedPersonKey(p.full_name), p.id);
+      if (p.email) map.set(normalizedPersonKey(p.email), p.id);
     }
     return map;
   }, [profiles]);
@@ -549,6 +587,86 @@ export default function FormReportsClient() {
     return set;
   }, [currentUserId, gradeLikes]);
 
+  const reviewByGradeId = useMemo(() => {
+    const map = new Map<number, FormGradeReviewRow>();
+    for (const row of gradeReviews) {
+      map.set(row.grade_id, row);
+    }
+    return map;
+  }, [gradeReviews]);
+
+  const flaggedQueueRows = useMemo(() => {
+    const rows = periodGrades
+      .filter((row) => row.accountability_flag)
+      .map((row) => {
+        const review = reviewByGradeId.get(row.id);
+        const reviewStatus = review?.review_status ?? "open";
+        const submittedByLabel = row.submitted_by?.trim() || "Unknown";
+        const submittedProfileId = profileIdByIdentity.get(normalizedPersonKey(row.submitted_by)) ?? null;
+        const assetType = row.vehicle_id ? "vehicle" : row.equipment_id ? "equipment" : "none";
+        return {
+          row,
+          review,
+          reviewStatus,
+          submittedByLabel,
+          submittedProfileId,
+          ownerName: review?.owner_id ? nameById[review.owner_id] || review.owner_id : "Unassigned",
+          assetType,
+        };
+      })
+      .filter((item) => {
+        if (queueStatusFilter === "resolved" && item.reviewStatus !== "resolved") return false;
+        if (queueStatusFilter === "unresolved" && item.reviewStatus === "resolved") return false;
+        if (queueAssetFilter !== "all" && item.assetType !== queueAssetFilter) return false;
+        if (queueTeammateFilter !== "all" && item.submittedByLabel !== queueTeammateFilter) return false;
+        return true;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.row.submitted_at).getTime() - new Date(a.row.submitted_at).getTime()
+      );
+    return rows;
+  }, [nameById, periodGrades, profileIdByIdentity, queueAssetFilter, queueStatusFilter, queueTeammateFilter, reviewByGradeId]);
+
+  const flaggedTeammateOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of periodGrades) {
+      if (!row.accountability_flag) continue;
+      set.add(row.submitted_by?.trim() || "Unknown");
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [periodGrades]);
+
+  const flaggedQueueSummary = useMemo(() => {
+    const allFlagged = periodGrades.filter((row) => row.accountability_flag);
+    const openCount = allFlagged.filter((row) => {
+      const status = reviewByGradeId.get(row.id)?.review_status ?? "open";
+      return status !== "resolved";
+    }).length;
+    const unresolvedOlderThan48h = allFlagged.filter((row) => {
+      const review = reviewByGradeId.get(row.id);
+      const status = review?.review_status ?? "open";
+      if (status === "resolved") return false;
+      const basisTime = review?.created_at ?? row.submitted_at;
+      const hours = (nowMs - new Date(basisTime).getTime()) / (1000 * 60 * 60);
+      return hours > 48;
+    }).length;
+    const resolvedWithDuration = allFlagged
+      .map((row) => {
+        const review = reviewByGradeId.get(row.id);
+        if (!review?.resolved_at) return null;
+        const hours =
+          (new Date(review.resolved_at).getTime() - new Date(review.created_at).getTime()) /
+          (1000 * 60 * 60);
+        return hours >= 0 ? hours : null;
+      })
+      .filter((v): v is number => typeof v === "number");
+    const avgResolveHours = resolvedWithDuration.length
+      ? Math.round((resolvedWithDuration.reduce((sum, v) => sum + v, 0) / resolvedWithDuration.length) * 10) / 10
+      : 0;
+    return { openCount, unresolvedOlderThan48h, avgResolveHours };
+  }, [nowMs, periodGrades, reviewByGradeId]);
+
   const globalRisk = useMemo(() => {
     if (!nowMs) {
       return { slaBreaches: 0, unacknowledged: 0, repeatFailures: 0, openRequests: 0 };
@@ -631,6 +749,39 @@ export default function FormReportsClient() {
     setGradeLikes((prev) => [data as FormGradeLikeRow, ...prev]);
   }
 
+  async function upsertGradeReview(
+    gradeId: number,
+    patch: Partial<Pick<FormGradeReviewRow, "review_status" | "owner_id" | "resolution_note" | "resolved_at">>
+  ) {
+    if (queueBusyGradeIds.includes(gradeId)) return;
+    setQueueError(null);
+    setQueueBusyGradeIds((prev) => [...prev, gradeId]);
+    const existing = reviewByGradeId.get(gradeId);
+    const payload = {
+      grade_id: gradeId,
+      review_status: (patch.review_status ?? existing?.review_status ?? "open") as "open" | "in_review" | "resolved",
+      owner_id: patch.owner_id !== undefined ? patch.owner_id : existing?.owner_id ?? null,
+      resolution_note:
+        patch.resolution_note !== undefined ? patch.resolution_note : existing?.resolution_note ?? null,
+      resolved_at: patch.resolved_at !== undefined ? patch.resolved_at : existing?.resolved_at ?? null,
+    };
+    const supabase = createSupabaseBrowser();
+    const { data, error } = await supabase
+      .from("form_submission_grade_reviews")
+      .upsert(payload, { onConflict: "grade_id" })
+      .select("id,grade_id,review_status,owner_id,resolution_note,resolved_at,created_at,updated_at")
+      .single();
+    setQueueBusyGradeIds((prev) => prev.filter((id) => id !== gradeId));
+    if (error || !data) {
+      setQueueError(error?.message || "Failed to update flagged queue item.");
+      return;
+    }
+    setGradeReviews((prev) => {
+      const filtered = prev.filter((row) => row.grade_id !== gradeId);
+      return [data as FormGradeReviewRow, ...filtered];
+    });
+  }
+
   return (
     <main style={{ maxWidth: 1260, margin: "0 auto", paddingBottom: 40 }}>
       <h1 style={{ marginBottom: 6 }}>Accountability Center</h1>
@@ -658,6 +809,139 @@ export default function FormReportsClient() {
           <Stat label="Unacknowledged >24h" value={String(globalRisk.unacknowledged)} />
           <Stat label="Repeat Failures" value={String(globalRisk.repeatFailures)} />
         </div>
+      </section>
+
+      <section style={{ marginTop: 16, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 6 }}>Flagged Queue</div>
+        <div style={{ opacity: 0.75, marginBottom: 10 }}>
+          Triage flagged forms with assignment and resolution workflow.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
+          <Stat label="Open Flags" value={String(flaggedQueueSummary.openCount)} />
+          <Stat label="Avg Resolve Time (h)" value={String(flaggedQueueSummary.avgResolveHours)} />
+          <Stat label="Unresolved >48h" value={String(flaggedQueueSummary.unresolvedOlderThan48h)} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 10 }}>
+          <select
+            value={queueStatusFilter}
+            onChange={(e) => setQueueStatusFilter(e.target.value as "all" | "unresolved" | "resolved")}
+            style={inputStyle()}
+          >
+            <option value="unresolved">Unresolved</option>
+            <option value="resolved">Resolved</option>
+            <option value="all">All</option>
+          </select>
+          <select
+            value={queueAssetFilter}
+            onChange={(e) => setQueueAssetFilter(e.target.value as "all" | "vehicle" | "equipment")}
+            style={inputStyle()}
+          >
+            <option value="all">All Assets</option>
+            <option value="vehicle">Vehicle</option>
+            <option value="equipment">Equipment</option>
+          </select>
+          <select value={queueTeammateFilter} onChange={(e) => setQueueTeammateFilter(e.target.value)} style={inputStyle()}>
+            <option value="all">All Teammates</option>
+            {flaggedTeammateOptions.map((option) => (
+              <option key={`flagged-tm-${option}`} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </div>
+        {queueError ? <div style={{ color: "#ff9d9d", marginBottom: 8 }}>{queueError}</div> : null}
+
+        {!flaggedQueueRows.length ? (
+          <div style={{ opacity: 0.75 }}>No flagged items in this filter.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {flaggedQueueRows.map((item) => (
+              <div key={`flagged-queue-${item.row.id}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800 }}>
+                    {item.row.form_type} · #{item.row.form_id}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>
+                    Status: {item.reviewStatus.replace("_", " ")} · Owner: {item.ownerName}
+                  </div>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.82 }}>
+                  Submitted: {new Date(item.row.submitted_at).toLocaleString()} · By{" "}
+                  {item.submittedProfileId ? (
+                    <Link href={`/employees/${item.submittedProfileId}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                      {item.submittedByLabel}
+                    </Link>
+                  ) : (
+                    item.submittedByLabel
+                  )}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12, opacity: 0.82 }}>
+                  {item.row.vehicle_id ? (
+                    <Link href={`/vehicles/${item.row.vehicle_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                      Vehicle: {item.row.vehicle_id}
+                    </Link>
+                  ) : item.row.equipment_id ? (
+                    <Link href={`/equipment/${item.row.equipment_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                      Equipment: {item.row.equipment_id}
+                    </Link>
+                  ) : (
+                    "No linked asset"
+                  )}
+                  {item.row.accountability_reason ? ` · Reason: ${item.row.accountability_reason}` : ""}
+                </div>
+                {item.review?.resolution_note ? (
+                  <div style={{ marginTop: 4, fontSize: 12, opacity: 0.82 }}>
+                    Resolution note: {item.review.resolution_note}
+                  </div>
+                ) : null}
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    disabled={!currentUserId || queueBusyGradeIds.includes(item.row.id)}
+                    onClick={() =>
+                      void upsertGradeReview(item.row.id, {
+                        owner_id: currentUserId,
+                        review_status: item.reviewStatus === "resolved" ? "in_review" : item.reviewStatus,
+                      })
+                    }
+                    style={smallButtonStyle()}
+                  >
+                    Assign to me
+                  </button>
+                  <button
+                    type="button"
+                    disabled={queueBusyGradeIds.includes(item.row.id)}
+                    onClick={() =>
+                      void upsertGradeReview(item.row.id, {
+                        review_status: "in_review",
+                        resolved_at: null,
+                      })
+                    }
+                    style={smallButtonStyle()}
+                  >
+                    Mark in review
+                  </button>
+                  <button
+                    type="button"
+                    disabled={queueBusyGradeIds.includes(item.row.id)}
+                    onClick={() =>
+                      void upsertGradeReview(item.row.id, {
+                        review_status: "resolved",
+                        owner_id: item.review?.owner_id ?? currentUserId ?? null,
+                        resolved_at: new Date().toISOString(),
+                        resolution_note: item.review?.resolution_note ?? "Resolved in flagged queue.",
+                      })
+                    }
+                    style={smallButtonStyle()}
+                  >
+                    Resolve
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
@@ -896,4 +1180,17 @@ function MiniStat({ label, value }: { label: string; value: string }) {
       <div style={{ fontWeight: 800 }}>{value}</div>
     </div>
   );
+}
+
+function smallButtonStyle(): React.CSSProperties {
+  return {
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.04)",
+    color: "inherit",
+    borderRadius: 999,
+    padding: "6px 10px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+  };
 }
