@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AccountabilityTrackerPanel from "@/components/accountability/AccountabilityTrackerPanel";
 
@@ -675,38 +676,47 @@ export default function FormReportsClient() {
             {unifiedScoreboard.map((row) => {
               const selected = row.key === effectiveSelectedPersonKey;
               return (
-                <button
-                  key={row.key}
-                  type="button"
-                  onClick={() => setSelectedPersonKey(row.key)}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(220px, 1.5fr) repeat(7, minmax(90px, 1fr))",
-                    gap: 8,
-                    border: selected
-                      ? "1px solid rgba(126,255,167,0.45)"
-                      : "1px solid rgba(255,255,255,0.12)",
-                    borderRadius: 10,
-                    padding: 10,
-                    alignItems: "center",
-                    background: selected ? "rgba(126,255,167,0.10)" : "rgba(255,255,255,0.02)",
-                    color: "inherit",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 800 }}>{row.name}</div>
-                    <div style={{ opacity: 0.7, fontSize: 12 }}>{row.role || "No role set"}</div>
-                  </div>
-                  <MiniStat label="Overall" value={`${row.overallScore}%`} />
-                  <MiniStat label="Forms" value={String(row.forms)} />
-                  <MiniStat label="Form Avg" value={`${row.avgFormScore}%`} />
-                  <MiniStat label="On-Time" value={`${row.onTimeRate}%`} />
-                  <MiniStat label="Flags" value={String(row.formFlags)} />
-                  <MiniStat label="Logs" value={String(row.logs)} />
-                  <MiniStat label="Mech Obj" value={`${row.mechanicObjectiveScore}%`} />
-                </button>
+                <div key={row.key} style={{ display: "grid", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPersonKey(row.key)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(220px, 1.5fr) repeat(7, minmax(90px, 1fr))",
+                      gap: 8,
+                      border: selected
+                        ? "1px solid rgba(126,255,167,0.45)"
+                        : "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      padding: 10,
+                      alignItems: "center",
+                      background: selected ? "rgba(126,255,167,0.10)" : "rgba(255,255,255,0.02)",
+                      color: "inherit",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800 }}>{row.name}</div>
+                      <div style={{ opacity: 0.7, fontSize: 12 }}>{row.role || "No role set"}</div>
+                    </div>
+                    <MiniStat label="Overall" value={`${row.overallScore}%`} />
+                    <MiniStat label="Forms" value={String(row.forms)} />
+                    <MiniStat label="Form Avg" value={`${row.avgFormScore}%`} />
+                    <MiniStat label="On-Time" value={`${row.onTimeRate}%`} />
+                    <MiniStat label="Flags" value={String(row.formFlags)} />
+                    <MiniStat label="Logs" value={String(row.logs)} />
+                    <MiniStat label="Mech Obj" value={`${row.mechanicObjectiveScore}%`} />
+                  </button>
+                  {row.userId ? (
+                    <Link
+                      href={`/employees/${row.userId}`}
+                      style={{ fontSize: 12, color: "#9fcbff", textDecoration: "underline", justifySelf: "start" }}
+                    >
+                      Open employee profile
+                    </Link>
+                  ) : null}
+                </div>
               );
             })}
           </div>
@@ -721,6 +731,16 @@ export default function FormReportsClient() {
           <div style={{ opacity: 0.75 }}>No employee selected.</div>
         ) : (
           <div style={{ display: "grid", gap: 14 }}>
+            {selectedPerson.userId ? (
+              <div>
+                <Link
+                  href={`/employees/${selectedPerson.userId}`}
+                  style={{ fontSize: 13, color: "#9fcbff", textDecoration: "underline" }}
+                >
+                  Go to employee detail page
+                </Link>
+              </div>
+            ) : null}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <Stat label="Overall Score" value={`${selectedPerson.overallScore}%`} />
               <Stat label="Form Score" value={`${selectedPerson.avgFormScore}%`} />

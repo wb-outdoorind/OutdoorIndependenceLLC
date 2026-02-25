@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type ProfileRow = {
@@ -718,7 +719,15 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
             {filteredEmployeeTrackingRows.map((row) => (
               <div key={`tracking-${row.teammateId}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 800 }}>{row.name}</div>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <div style={{ fontWeight: 800 }}>{row.name}</div>
+                    <Link
+                      href={`/employees/${row.teammateId}`}
+                      style={{ fontSize: 12, color: "#9fcbff", textDecoration: "underline", width: "fit-content" }}
+                    >
+                      Open employee profile
+                    </Link>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setOccurrenceForm((prev) => ({ ...prev, teammate_id: row.teammateId }))}
@@ -975,7 +984,14 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
                   </div>
                 </div>
                 <div style={{ marginTop: 6, fontSize: 13, opacity: 0.88 }}>
-                  Teammate: {byId[row.teammate_id] || row.teammate_id} · Manager: {byId[row.manager_id] || row.manager_id}
+                  Teammate:{" "}
+                  <Link href={`/employees/${row.teammate_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                    {byId[row.teammate_id] || row.teammate_id}
+                  </Link>
+                  {" · "}Manager:{" "}
+                  <Link href={`/employees/${row.manager_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                    {byId[row.manager_id] || row.manager_id}
+                  </Link>
                 </div>
                 <div style={{ marginTop: 6, fontSize: 13, opacity: 0.82 }}>
                   Occurred: {row.occurrence_date} · Falls off: {row.falloff_date} · Meeting: {row.meeting_date || "—"}
