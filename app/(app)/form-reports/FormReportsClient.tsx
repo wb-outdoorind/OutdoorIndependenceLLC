@@ -859,6 +859,17 @@ export default function FormReportsClient() {
         .single();
       if (!eventError && eventData) {
         setGradeReviewEvents((prev) => [eventData as FormGradeReviewEventRow, ...prev]);
+        await fetch("/api/form-reports/queue-notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            gradeId,
+            eventId: (eventData as FormGradeReviewEventRow).id,
+            eventType,
+            fromOwnerId: existing?.owner_id ?? null,
+            toOwnerId: (data as FormGradeReviewRow).owner_id ?? null,
+          }),
+        });
       } else if (eventError) {
         setQueueError(eventError.message);
       }

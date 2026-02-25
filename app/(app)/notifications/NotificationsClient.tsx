@@ -142,6 +142,9 @@ function notificationHref(row: NotificationRow) {
   if (row.kind === "trend_actions_digest" && row.entity_id) {
     return `/notifications/digest/${encodeURIComponent(row.entity_id)}`;
   }
+  if (row.kind.startsWith("flagged_queue_") && row.entity_id) {
+    return `/form-reports?flagged=${encodeURIComponent(row.entity_id)}`;
+  }
   return null;
 }
 
@@ -160,6 +163,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [customTo, setCustomTo] = useState(() => toDateInputValue(new Date()));
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
+  const [queueEventsEnabled, setQueueEventsEnabled] = useState(true);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
@@ -196,6 +200,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     if (prefsJson?.prefs) {
       setEmailEnabled(prefsJson.prefs.emailEnabled !== false);
       setSmsEnabled(prefsJson.prefs.smsEnabled === true);
+      setQueueEventsEnabled(prefsJson.prefs.queueEventsEnabled !== false);
     }
     if (shouldLoadRuns && runsRes.ok) {
       setDigestRuns((runsJson.runs ?? []) as DigestRunRow[]);
@@ -275,7 +280,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setRows((prev) => prev.map((row) => ({ ...row, is_read: true })));
   }
 
-  async function savePrefs(nextEmailEnabled: boolean, nextSmsEnabled: boolean) {
+  async function savePrefs(
+    nextEmailEnabled: boolean,
+    nextSmsEnabled: boolean,
+    nextQueueEventsEnabled: boolean
+  ) {
     setPrefsSaving(true);
     const res = await fetch("/api/notifications", {
       method: "POST",
@@ -284,6 +293,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         action: "prefs",
         emailEnabled: nextEmailEnabled,
         smsEnabled: nextSmsEnabled,
+        queueEventsEnabled: nextQueueEventsEnabled,
       }),
     });
     if (!res.ok) {
@@ -292,6 +302,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }
     setEmailEnabled(nextEmailEnabled);
     setSmsEnabled(nextSmsEnabled);
+    setQueueEventsEnabled(nextQueueEventsEnabled);
     setPrefsSaving(false);
   }
 
@@ -361,7 +372,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
               type="checkbox"
               checked={emailEnabled}
               disabled={prefsSaving}
-              onChange={(e) => void savePrefs(e.target.checked, smsEnabled)}
+              onChange={(e) => void savePrefs(e.target.checked, smsEnabled, queueEventsEnabled)}
             />
             Email alerts
           </label>
@@ -370,9 +381,18 @@ export default function NotificationsClient({ role }: { role: string | null }) {
               type="checkbox"
               checked={smsEnabled}
               disabled={prefsSaving}
-              onChange={(e) => void savePrefs(emailEnabled, e.target.checked)}
+              onChange={(e) => void savePrefs(emailEnabled, e.target.checked, queueEventsEnabled)}
             />
             SMS alerts
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={queueEventsEnabled}
+              disabled={prefsSaving}
+              onChange={(e) => void savePrefs(emailEnabled, smsEnabled, e.target.checked)}
+            />
+            Queue event alerts
           </label>
         </div>
       </div>

@@ -39,6 +39,7 @@ export async function POST(req: Request) {
     ids?: number[];
     emailEnabled?: boolean;
     smsEnabled?: boolean;
+    queueEventsEnabled?: boolean;
   };
 
   const action = body.action;
@@ -69,10 +70,16 @@ export async function POST(req: Request) {
   if (action === "prefs") {
     const emailEnabled = body.emailEnabled !== false;
     const smsEnabled = body.smsEnabled === true;
+    const queueEventsEnabled = body.queueEventsEnabled !== false;
     const { error } = await admin
       .from("user_notification_prefs")
       .upsert(
-        { user_id: userId, email_enabled: emailEnabled, sms_enabled: smsEnabled },
+        {
+          user_id: userId,
+          email_enabled: emailEnabled,
+          sms_enabled: smsEnabled,
+          queue_events_enabled: queueEventsEnabled,
+        },
         { onConflict: "user_id" }
       );
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -81,7 +88,7 @@ export async function POST(req: Request) {
 
   const { data: prefs, error: prefsError } = await admin
     .from("user_notification_prefs")
-    .select("email_enabled,sms_enabled")
+    .select("email_enabled,sms_enabled,queue_events_enabled")
     .eq("user_id", userId)
     .maybeSingle();
   if (prefsError) return NextResponse.json({ error: prefsError.message }, { status: 500 });
@@ -89,6 +96,7 @@ export async function POST(req: Request) {
     prefs: {
       emailEnabled: prefs?.email_enabled ?? true,
       smsEnabled: prefs?.sms_enabled ?? false,
+      queueEventsEnabled: prefs?.queue_events_enabled ?? true,
     },
   });
 }
