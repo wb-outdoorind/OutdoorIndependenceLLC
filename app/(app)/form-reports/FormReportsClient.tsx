@@ -219,6 +219,7 @@ export default function FormReportsClient() {
   const [queueStatusFilter, setQueueStatusFilter] = useState<"all" | "unresolved" | "resolved">("unresolved");
   const [queueAssetFilter, setQueueAssetFilter] = useState<"all" | "vehicle" | "equipment">("all");
   const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
+  const [queueMineOnly, setQueueMineOnly] = useState(false);
   const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
@@ -354,6 +355,13 @@ export default function FormReportsClient() {
     }
     return map;
   }, [profiles]);
+
+  const currentUserRole = useMemo(() => {
+    if (!currentUserId) return null;
+    return profiles.find((p) => p.id === currentUserId)?.role ?? null;
+  }, [currentUserId, profiles]);
+  const canOverrideQueueOwnership =
+    currentUserRole === "owner" || currentUserRole === "operations_manager";
 
   const periodGrades = useMemo(
     () => grades.filter((row) => inPeriod(row.submitted_at, period)),
@@ -620,6 +628,7 @@ export default function FormReportsClient() {
         if (queueStatusFilter === "unresolved" && item.reviewStatus === "resolved") return false;
         if (queueAssetFilter !== "all" && item.assetType !== queueAssetFilter) return false;
         if (queueTeammateFilter !== "all" && item.submittedByLabel !== queueTeammateFilter) return false;
+        if (queueMineOnly && currentUserId && item.review?.owner_id !== currentUserId) return false;
         return true;
       })
       .sort(
@@ -627,7 +636,7 @@ export default function FormReportsClient() {
           new Date(b.row.submitted_at).getTime() - new Date(a.row.submitted_at).getTime()
       );
     return rows;
-  }, [nameById, periodGrades, profileIdByIdentity, queueAssetFilter, queueStatusFilter, queueTeammateFilter, reviewByGradeId]);
+  }, [currentUserId, nameById, periodGrades, profileIdByIdentity, queueAssetFilter, queueMineOnly, queueStatusFilter, queueTeammateFilter, reviewByGradeId]);
 
   const flaggedTeammateOptions = useMemo(() => {
     const set = new Set<string>();
@@ -850,6 +859,10 @@ export default function FormReportsClient() {
               </option>
             ))}
           </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <input type="checkbox" checked={queueMineOnly} onChange={(e) => setQueueMineOnly(e.target.checked)} />
+            Mine only
+          </label>
         </div>
         {queueError ? <div style={{ color: "#ff9d9d", marginBottom: 8 }}>{queueError}</div> : null}
 
@@ -929,13 +942,47 @@ export default function FormReportsClient() {
                   </button>
                   <button
                     type="button"
-                    disabled={queueBusyGradeIds.includes(item.row.id)}
+                    disabled={
+                      !item.review?.owner_id ||
+                      queueBusyGradeIds.includes(item.row.id) ||
+                      !(
+                        (currentUserId && item.review?.owner_id === currentUserId) ||
+                        canOverrideQueueOwnership
+                      )
+                    }
                     onClick={() =>
                       void upsertGradeReview(item.row.id, {
-                        review_status: "in_review",
+                        owner_id: null,
+                        review_status: "open",
                         resolved_at: null,
                       })
                     }
+                    style={smallButtonStyle()}
+                  >
+                    Release ownership
+                  </button>
+                  <button
+                    type="button"
+                    disabled={queueBusyGradeIds.includes(item.row.id)}
+                    onClick={() => {
+                      if (!item.review?.owner_id) {
+                        setQueueError("Assign an owner before moving an item to in review.");
+                        return;
+                      }
+                      if (
+                        !(
+                          (currentUserId && item.review?.owner_id === currentUserId) ||
+                          canOverrideQueueOwnership
+                        )
+                      ) {
+                        setQueueError("Only the owner can move this item to in review.");
+                        return;
+                      }
+                      void upsertGradeReview(item.row.id, {
+                        review_status: "in_review",
+                        resolved_at: null,
+                      });
+                    }}
                     style={smallButtonStyle()}
                   >
                     Mark in review
@@ -953,9 +1000,22 @@ export default function FormReportsClient() {
                         setQueueError("Resolution note is required before resolving a flagged item.");
                         return;
                       }
+                      if (!item.review?.owner_id) {
+                        setQueueError("Assign an owner before resolving a flagged item.");
+                        return;
+                      }
+                      if (
+                        !(
+                          (currentUserId && item.review?.owner_id === currentUserId) ||
+                          canOverrideQueueOwnership
+                        )
+                      ) {
+                        setQueueError("Only the owner can resolve this item.");
+                        return;
+                      }
                       void upsertGradeReview(item.row.id, {
                         review_status: "resolved",
-                        owner_id: item.review?.owner_id ?? currentUserId ?? null,
+                        owner_id: item.review.owner_id,
                         resolved_at: new Date().toISOString(),
                         resolution_note: note,
                       });
