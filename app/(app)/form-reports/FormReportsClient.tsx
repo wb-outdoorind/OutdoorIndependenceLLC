@@ -18,8 +18,11 @@ type GradeRow = {
   score: number;
   is_complete: boolean;
   has_na: boolean;
+  missing_count: number;
+  missing_fields: unknown;
   accountability_flag: boolean;
   accountability_reason: string | null;
+  metadata: unknown;
 };
 
 type MaintenanceLogScoreRow = {
@@ -236,6 +239,7 @@ export default function FormReportsClient() {
   const [queueMineOnly, setQueueMineOnly] = useState(false);
   const [queueRecentActivityOnly, setQueueRecentActivityOnly] = useState(false);
   const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
+  const [queueModalGradeId, setQueueModalGradeId] = useState<number | null>(null);
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   useEffect(() => {
@@ -259,7 +263,7 @@ export default function FormReportsClient() {
       ] = await Promise.all([
         supabase
           .from("form_submission_grades")
-          .select("id,form_type,form_id,submitted_at,submitted_by,vehicle_id,equipment_id,score,is_complete,has_na,accountability_flag,accountability_reason")
+          .select("id,form_type,form_id,submitted_at,submitted_by,vehicle_id,equipment_id,score,is_complete,has_na,missing_count,missing_fields,accountability_flag,accountability_reason,metadata")
           .order("submitted_at", { ascending: false })
           .limit(1500),
         supabase
@@ -644,8 +648,8 @@ export default function FormReportsClient() {
     return map;
   }, [gradeReviewEvents]);
 
-  const flaggedQueueRows = useMemo(() => {
-    const rows = periodGrades
+  const allFlaggedQueueRows = useMemo(() => {
+    return periodGrades
       .filter((row) => row.accountability_flag)
       .map((row) => {
         const review = reviewByGradeId.get(row.id);
@@ -664,7 +668,11 @@ export default function FormReportsClient() {
           assetType,
           recentEvents,
         };
-      })
+      });
+  }, [nameById, periodGrades, profileIdByIdentity, reviewByGradeId, reviewEventsByGradeId]);
+
+  const flaggedQueueRows = useMemo(() => {
+    return allFlaggedQueueRows
       .filter((item) => {
         if (queueStatusFilter === "resolved" && item.reviewStatus !== "resolved") return false;
         if (queueStatusFilter === "unresolved" && item.reviewStatus === "resolved") return false;
@@ -684,8 +692,12 @@ export default function FormReportsClient() {
         (a, b) =>
           new Date(b.row.submitted_at).getTime() - new Date(a.row.submitted_at).getTime()
       );
-    return rows;
-  }, [currentUserId, nameById, nowMs, periodGrades, profileIdByIdentity, queueAssetFilter, queueMineOnly, queueRecentActivityOnly, queueStatusFilter, queueTeammateFilter, reviewByGradeId, reviewEventsByGradeId]);
+  }, [allFlaggedQueueRows, currentUserId, nowMs, queueAssetFilter, queueMineOnly, queueRecentActivityOnly, queueStatusFilter, queueTeammateFilter]);
+
+  const selectedFlaggedQueueItem = useMemo(() => {
+    if (!queueModalGradeId) return null;
+    return allFlaggedQueueRows.find((row) => row.row.id === queueModalGradeId) ?? null;
+  }, [allFlaggedQueueRows, queueModalGradeId]);
 
   const flaggedTeammateOptions = useMemo(() => {
     const set = new Set<string>();
@@ -767,6 +779,24 @@ export default function FormReportsClient() {
     const flags = periodGrades.filter((row) => row.accountability_flag).length;
     return { submissions, avgScore, flags };
   }, [periodGrades]);
+
+  const selectedFlaggedMissingFields = useMemo(() => {
+    if (!selectedFlaggedQueueItem) return [];
+    return Array.isArray(selectedFlaggedQueueItem.row.missing_fields)
+      ? selectedFlaggedQueueItem.row.missing_fields.map((v) => String(v))
+      : [];
+  }, [selectedFlaggedQueueItem]);
+
+  const selectedFlaggedMetadataText = useMemo(() => {
+    if (!selectedFlaggedQueueItem) return "";
+    const value = selectedFlaggedQueueItem.row.metadata;
+    if (!value || typeof value !== "object") return "";
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return "";
+    }
+  }, [selectedFlaggedQueueItem]);
 
   async function toggleFlagLike(gradeId: number) {
     if (!currentUserId) {
@@ -876,6 +906,117 @@ export default function FormReportsClient() {
     }
   }
 
+  function renderQueueActions(item: {
+    row: GradeRow;
+    review: FormGradeReviewRow | undefined;
+    reviewStatus: "open" | "in_review" | "resolved";
+  }) {
+    return (
+      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          disabled={!currentUserId || queueBusyGradeIds.includes(item.row.id)}
+          onClick={() =>
+            void upsertGradeReview(
+              item.row.id,
+              {
+                owner_id: currentUserId,
+                review_status: item.reviewStatus === "resolved" ? "in_review" : item.reviewStatus,
+              },
+              "assign"
+            )
+          }
+          style={smallButtonStyle()}
+        >
+          Assign to me
+        </button>
+        <button
+          type="button"
+          disabled={
+            !item.review?.owner_id ||
+            queueBusyGradeIds.includes(item.row.id) ||
+            !((currentUserId && item.review?.owner_id === currentUserId) || canOverrideQueueOwnership)
+          }
+          onClick={() =>
+            void upsertGradeReview(
+              item.row.id,
+              {
+                owner_id: null,
+                review_status: "open",
+                resolved_at: null,
+              },
+              "release"
+            )
+          }
+          style={smallButtonStyle()}
+        >
+          Release ownership
+        </button>
+        <button
+          type="button"
+          disabled={queueBusyGradeIds.includes(item.row.id)}
+          onClick={() => {
+            if (!item.review?.owner_id) {
+              setQueueError("Assign an owner before moving an item to in review.");
+              return;
+            }
+            if (
+              !((currentUserId && item.review?.owner_id === currentUserId) || canOverrideQueueOwnership)
+            ) {
+              setQueueError("Only the owner can move this item to in review.");
+              return;
+            }
+            void upsertGradeReview(
+              item.row.id,
+              {
+                review_status: "in_review",
+                resolved_at: null,
+              },
+              "mark_in_review"
+            );
+          }}
+          style={smallButtonStyle()}
+        >
+          Mark in review
+        </button>
+        <button
+          type="button"
+          disabled={queueBusyGradeIds.includes(item.row.id)}
+          onClick={() => {
+            const note = (queueResolutionDraftByGrade[item.row.id] ?? item.review?.resolution_note ?? "").trim();
+            if (!note) {
+              setQueueError("Resolution note is required before resolving a flagged item.");
+              return;
+            }
+            if (!item.review?.owner_id) {
+              setQueueError("Assign an owner before resolving a flagged item.");
+              return;
+            }
+            if (
+              !((currentUserId && item.review?.owner_id === currentUserId) || canOverrideQueueOwnership)
+            ) {
+              setQueueError("Only the owner can resolve this item.");
+              return;
+            }
+            void upsertGradeReview(
+              item.row.id,
+              {
+                review_status: "resolved",
+                owner_id: item.review.owner_id,
+                resolved_at: new Date().toISOString(),
+                resolution_note: note,
+              },
+              "resolve"
+            );
+          }}
+          style={smallButtonStyle()}
+        >
+          Resolve
+        </button>
+      </div>
+    );
+  }
+
   return (
     <main style={{ maxWidth: 1260, margin: "0 auto", paddingBottom: 40 }}>
       <h1 style={{ marginBottom: 6 }}>Accountability Center</h1>
@@ -904,6 +1045,159 @@ export default function FormReportsClient() {
           <Stat label="Repeat Failures" value={String(globalRisk.repeatFailures)} />
         </div>
       </section>
+
+      {selectedFlaggedQueueItem ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 1200,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setQueueModalGradeId(null)}
+        >
+          <div
+            style={{
+              width: "min(980px, 100%)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              border: "1px solid rgba(255,255,255,0.16)",
+              borderRadius: 14,
+              background: "rgba(14,16,20,0.98)",
+              padding: 14,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>
+                {selectedFlaggedQueueItem.row.form_type} · #{selectedFlaggedQueueItem.row.form_id}
+              </div>
+              <button type="button" style={smallButtonStyle()} onClick={() => setQueueModalGradeId(null)}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+              <Stat label="Status" value={selectedFlaggedQueueItem.reviewStatus.replaceAll("_", " ")} />
+              <Stat label="Owner" value={selectedFlaggedQueueItem.ownerName} />
+              <Stat label="Score" value={`${selectedFlaggedQueueItem.row.score}%`} />
+              <Stat label="Missing Count" value={String(selectedFlaggedQueueItem.row.missing_count ?? 0)} />
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 13, opacity: 0.86 }}>
+              Submitted: {new Date(selectedFlaggedQueueItem.row.submitted_at).toLocaleString()} · By{" "}
+              {selectedFlaggedQueueItem.submittedProfileId ? (
+                <Link href={`/employees/${selectedFlaggedQueueItem.submittedProfileId}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                  {selectedFlaggedQueueItem.submittedByLabel}
+                </Link>
+              ) : (
+                selectedFlaggedQueueItem.submittedByLabel
+              )}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 13, opacity: 0.86 }}>
+              {selectedFlaggedQueueItem.row.vehicle_id ? (
+                <Link href={`/vehicles/${selectedFlaggedQueueItem.row.vehicle_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                  Vehicle: {selectedFlaggedQueueItem.row.vehicle_id}
+                </Link>
+              ) : selectedFlaggedQueueItem.row.equipment_id ? (
+                <Link href={`/equipment/${selectedFlaggedQueueItem.row.equipment_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                  Equipment: {selectedFlaggedQueueItem.row.equipment_id}
+                </Link>
+              ) : (
+                "No linked asset"
+              )}
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <input
+                value={
+                  queueResolutionDraftByGrade[selectedFlaggedQueueItem.row.id] ??
+                  selectedFlaggedQueueItem.review?.resolution_note ??
+                  ""
+                }
+                onChange={(e) =>
+                  setQueueResolutionDraftByGrade((prev) => ({
+                    ...prev,
+                    [selectedFlaggedQueueItem.row.id]: e.target.value,
+                  }))
+                }
+                placeholder="Resolution note (required to resolve)"
+                style={inputStyle()}
+              />
+            </div>
+            {renderQueueActions(selectedFlaggedQueueItem)}
+
+            <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Accountability Reason</div>
+              <div style={{ fontSize: 13, opacity: 0.86 }}>
+                {selectedFlaggedQueueItem.row.accountability_reason || "No reason recorded."}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Missing Fields</div>
+              {selectedFlaggedMissingFields.length === 0 ? (
+                <div style={{ fontSize: 13, opacity: 0.75 }}>No missing fields recorded.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 4 }}>
+                  {selectedFlaggedMissingFields.map((field) => (
+                    <div key={`mf-${field}`} style={{ fontSize: 13, opacity: 0.86 }}>
+                      - {field}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Metadata</div>
+              {selectedFlaggedMetadataText ? (
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 10,
+                    padding: 10,
+                    fontSize: 12,
+                  }}
+                >
+                  {selectedFlaggedMetadataText}
+                </pre>
+              ) : (
+                <div style={{ fontSize: 13, opacity: 0.75 }}>No metadata recorded.</div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Full Activity Timeline</div>
+              {(selectedFlaggedQueueItem.recentEvents ?? []).length === 0 ? (
+                <div style={{ fontSize: 13, opacity: 0.75 }}>No events recorded yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {selectedFlaggedQueueItem.recentEvents.map((event) => (
+                    <div key={`modal-event-${event.id}`} style={{ fontSize: 13, opacity: 0.86 }}>
+                      {new Date(event.created_at).toLocaleString()} · {nameById[event.actor_id] || event.actor_id} ·{" "}
+                      {event.event_type.replaceAll("_", " ")}
+                      {event.from_status ? ` · from ${event.from_status.replaceAll("_", " ")}` : ""}
+                      {event.to_status ? ` · to ${event.to_status.replaceAll("_", " ")}` : ""}
+                      {event.note ? ` · ${event.note}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 6 }}>Flagged Queue</div>
@@ -1018,105 +1312,12 @@ export default function FormReportsClient() {
                     style={inputStyle()}
                   />
                 </div>
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    disabled={!currentUserId || queueBusyGradeIds.includes(item.row.id)}
-                    onClick={() =>
-                      void upsertGradeReview(item.row.id, {
-                        owner_id: currentUserId,
-                        review_status: item.reviewStatus === "resolved" ? "in_review" : item.reviewStatus,
-                      }, "assign")
-                    }
-                    style={smallButtonStyle()}
-                  >
-                    Assign to me
-                  </button>
-                  <button
-                    type="button"
-                    disabled={
-                      !item.review?.owner_id ||
-                      queueBusyGradeIds.includes(item.row.id) ||
-                      !(
-                        (currentUserId && item.review?.owner_id === currentUserId) ||
-                        canOverrideQueueOwnership
-                      )
-                    }
-                    onClick={() =>
-                      void upsertGradeReview(item.row.id, {
-                        owner_id: null,
-                        review_status: "open",
-                        resolved_at: null,
-                      }, "release")
-                    }
-                    style={smallButtonStyle()}
-                  >
-                    Release ownership
-                  </button>
-                  <button
-                    type="button"
-                    disabled={queueBusyGradeIds.includes(item.row.id)}
-                    onClick={() => {
-                      if (!item.review?.owner_id) {
-                        setQueueError("Assign an owner before moving an item to in review.");
-                        return;
-                      }
-                      if (
-                        !(
-                          (currentUserId && item.review?.owner_id === currentUserId) ||
-                          canOverrideQueueOwnership
-                        )
-                      ) {
-                        setQueueError("Only the owner can move this item to in review.");
-                        return;
-                      }
-                      void upsertGradeReview(item.row.id, {
-                        review_status: "in_review",
-                        resolved_at: null,
-                      }, "mark_in_review");
-                    }}
-                    style={smallButtonStyle()}
-                  >
-                    Mark in review
-                  </button>
-                  <button
-                    type="button"
-                    disabled={queueBusyGradeIds.includes(item.row.id)}
-                    onClick={() => {
-                      const note = (
-                        queueResolutionDraftByGrade[item.row.id] ??
-                        item.review?.resolution_note ??
-                        ""
-                      ).trim();
-                      if (!note) {
-                        setQueueError("Resolution note is required before resolving a flagged item.");
-                        return;
-                      }
-                      if (!item.review?.owner_id) {
-                        setQueueError("Assign an owner before resolving a flagged item.");
-                        return;
-                      }
-                      if (
-                        !(
-                          (currentUserId && item.review?.owner_id === currentUserId) ||
-                          canOverrideQueueOwnership
-                        )
-                      ) {
-                        setQueueError("Only the owner can resolve this item.");
-                        return;
-                      }
-                      void upsertGradeReview(item.row.id, {
-                        review_status: "resolved",
-                        owner_id: item.review.owner_id,
-                        resolved_at: new Date().toISOString(),
-                        resolution_note: note,
-                      }, "resolve");
-                    }}
-                    style={smallButtonStyle()}
-                  >
-                    Resolve
+                <div style={{ marginTop: 8 }}>
+                  <button type="button" style={smallButtonStyle()} onClick={() => setQueueModalGradeId(item.row.id)}>
+                    Open details
                   </button>
                 </div>
+                {renderQueueActions(item)}
                 {item.recentEvents.length > 0 ? (
                   <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 8 }}>
                     <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>Recent activity</div>
