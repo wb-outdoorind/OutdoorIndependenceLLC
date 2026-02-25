@@ -243,6 +243,7 @@ export default function FormReportsClient() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
   const [queueModalGradeId, setQueueModalGradeId] = useState<number | null>(null);
+  const [trackerLinkedFlagGradeId, setTrackerLinkedFlagGradeId] = useState<number | null>(null);
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   useEffect(() => {
@@ -1130,6 +1131,14 @@ export default function FormReportsClient() {
     printWindow.print();
   }
 
+  function linkFlagToAccountabilityForm(gradeId: number) {
+    setTrackerLinkedFlagGradeId(gradeId);
+    setQueueModalGradeId(null);
+    setTimeout(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }, 50);
+  }
+
   function renderQueueActions(item: {
     row: GradeRow;
     review: FormGradeReviewRow | undefined;
@@ -1354,6 +1363,15 @@ export default function FormReportsClient() {
                 placeholder="Resolution note (required to resolve)"
                 style={inputStyle()}
               />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                style={smallButtonStyle()}
+                onClick={() => linkFlagToAccountabilityForm(selectedFlaggedQueueItem.row.id)}
+              >
+                Link to Accountability Form
+              </button>
             </div>
             {renderQueueActions(selectedFlaggedQueueItem)}
 
@@ -1600,6 +1618,13 @@ export default function FormReportsClient() {
                   <button type="button" style={smallButtonStyle()} onClick={() => setQueueModalGradeId(item.row.id)}>
                     Open details
                   </button>
+                  <button
+                    type="button"
+                    style={{ ...smallButtonStyle(), marginLeft: 8 }}
+                    onClick={() => linkFlagToAccountabilityForm(item.row.id)}
+                  >
+                    Link to Accountability Form
+                  </button>
                 </div>
                 {renderQueueActions(item)}
                 {item.recentEvents.length > 0 ? (
@@ -1832,7 +1857,10 @@ export default function FormReportsClient() {
         )}
       </section>
 
-      <AccountabilityTrackerPanel profiles={profiles} />
+      <AccountabilityTrackerPanel
+        profiles={profiles}
+        preselectedLinkedFlagGradeId={trackerLinkedFlagGradeId}
+      />
     </main>
   );
 }

@@ -40,6 +40,18 @@ type AccountabilityFormRow = {
   form_date: string;
   disciplinary_step: ProgramStep;
   linked_occurrence_id: number | null;
+  linked_flag_grade_id: number | null;
+};
+
+type FlaggedGradeRow = {
+  id: number;
+  form_type: string;
+  form_id: string;
+  submitted_at: string;
+  submitted_by: string | null;
+  vehicle_id: string | null;
+  equipment_id: string | null;
+  accountability_reason: string | null;
 };
 
 type NewOccurrenceState = {
@@ -62,6 +74,7 @@ type NewFormState = {
   form_date: string;
   disciplinary_step: ProgramStep;
   linked_occurrence_id: string;
+  linked_flag_grade_id: string;
   supervisor_explanation: string;
   employee_response: string;
   action_plan: string;
@@ -193,6 +206,7 @@ function defaultForm(): NewFormState {
     form_date: today,
     disciplinary_step: "Step 1",
     linked_occurrence_id: "",
+    linked_flag_grade_id: "",
     supervisor_explanation: "",
     employee_response: "",
     action_plan: "",
@@ -228,13 +242,20 @@ function profileLabel(profile: ProfileRow) {
   return profile.full_name?.trim() || profile.email?.trim() || profile.id;
 }
 
-export default function AccountabilityTrackerPanel({ profiles }: { profiles: ProfileRow[] }) {
+export default function AccountabilityTrackerPanel({
+  profiles,
+  preselectedLinkedFlagGradeId,
+}: {
+  profiles: ProfileRow[];
+  preselectedLinkedFlagGradeId?: number | null;
+}) {
   const supabase = createSupabaseBrowser();
   const [todayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [occurrences, setOccurrences] = useState<OccurrenceRow[]>([]);
   const [forms, setForms] = useState<AccountabilityFormRow[]>([]);
+  const [flaggedGrades, setFlaggedGrades] = useState<FlaggedGradeRow[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<"all" | AccountabilityCategory>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "Active" | "Complete">("all");
   const [occurrenceForm, setOccurrenceForm] = useState<NewOccurrenceState>(defaultOccurrence());
@@ -265,7 +286,7 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [occRes, formRes, actionsRes] = await Promise.all([
+    const [occRes, formRes, actionsRes, flaggedRes] = await Promise.all([
       supabase
         .from("accountability_occurrences")
         .select("id,created_at,teammate_id,manager_id,category,occurrence_type,occurrence_date,falloff_date,status,step_of_program,meeting_date,linked_form_id,immediate_termination,notes")
@@ -273,7 +294,7 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
         .limit(500),
       supabase
         .from("accountability_forms")
-        .select("id,created_at,teammate_id,manager_id,category,form_date,disciplinary_step,linked_occurrence_id")
+        .select("id,created_at,teammate_id,manager_id,category,form_date,disciplinary_step,linked_occurrence_id,linked_flag_grade_id")
         .order("created_at", { ascending: false })
         .limit(500),
       supabase
@@ -281,15 +302,28 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
         .select("id,created_at,created_by,target_user_id,role_scope,action_type,status,note,due_date,resolved_at")
         .order("created_at", { ascending: false })
         .limit(300),
+      supabase
+        .from("form_submission_grades")
+        .select("id,form_type,form_id,submitted_at,submitted_by,vehicle_id,equipment_id,accountability_reason")
+        .eq("accountability_flag", true)
+        .order("submitted_at", { ascending: false })
+        .limit(500),
     ]);
-    if (occRes.error || formRes.error || actionsRes.error) {
-      setError(occRes.error?.message || formRes.error?.message || actionsRes.error?.message || "Failed to load tracker.");
+    if (occRes.error || formRes.error || actionsRes.error || flaggedRes.error) {
+      setError(
+        occRes.error?.message ||
+          formRes.error?.message ||
+          actionsRes.error?.message ||
+          flaggedRes.error?.message ||
+          "Failed to load tracker."
+      );
       setLoading(false);
       return;
     }
     setOccurrences((occRes.data ?? []) as OccurrenceRow[]);
     setForms((formRes.data ?? []) as AccountabilityFormRow[]);
     setActions((actionsRes.data ?? []) as AccountabilityActionRow[]);
+    setFlaggedGrades((flaggedRes.data ?? []) as FlaggedGradeRow[]);
     setLoading(false);
   }, [supabase]);
 
@@ -299,6 +333,10 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
     }, 0);
     return () => window.clearTimeout(timer);
   }, [refresh]);
+
+  const linkedFlagSelection =
+    disciplineForm.linked_flag_grade_id ||
+    (preselectedLinkedFlagGradeId ? String(preselectedLinkedFlagGradeId) : "");
 
   async function createOccurrence() {
     setError(null);
@@ -396,6 +434,7 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       form_date: disciplineForm.form_date,
       disciplinary_step: disciplineForm.disciplinary_step,
       linked_occurrence_id: disciplineForm.linked_occurrence_id ? Number(disciplineForm.linked_occurrence_id) : null,
+      linked_flag_grade_id: linkedFlagSelection ? Number(linkedFlagSelection) : null,
       reason_details: reasonDetails,
       supervisor_explanation: disciplineForm.supervisor_explanation.trim(),
       employee_response: disciplineForm.employee_response.trim(),
@@ -903,6 +942,18 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
               {occurrences.map((o) => (
                 <option key={`occ-${o.id}`} value={String(o.id)}>
                   Occurrence #{o.id} · {o.category} · {o.occurrence_type}
+                </option>
+              ))}
+            </select>
+            <select
+              value={linkedFlagSelection}
+              onChange={(e) => setDisciplineForm((p) => ({ ...p, linked_flag_grade_id: e.target.value }))}
+              style={inputStyle()}
+            >
+              <option value="">Linked flagged form (optional)</option>
+              {flaggedGrades.map((flag) => (
+                <option key={`flag-grade-${flag.id}`} value={String(flag.id)}>
+                  Flag #{flag.id} · {flag.form_type} #{flag.form_id} · {(flag.submitted_by || "Unknown")}
                 </option>
               ))}
             </select>
