@@ -55,27 +55,6 @@ type ProfileRow = {
   role: string | null;
 };
 
-type AccountabilityActionRow = {
-  id: number;
-  created_at: string;
-  created_by: string;
-  target_user_id: string | null;
-  role_scope: "teammate" | "mechanic" | "all";
-  action_type: "coaching" | "warning" | "critical" | "recognition";
-  status: "open" | "resolved" | "dismissed";
-  note: string;
-  due_date: string | null;
-  resolved_at: string | null;
-};
-
-type NewActionForm = {
-  target_user_id: string;
-  role_scope: "teammate" | "mechanic" | "all";
-  action_type: "coaching" | "warning" | "critical" | "recognition";
-  note: string;
-  due_date: string;
-};
-
 type PersonScoreRow = {
   key: string;
   userId: string | null;
@@ -212,18 +191,7 @@ export default function FormReportsClient() {
   const [vehicleRequests, setVehicleRequests] = useState<RequestRow[]>([]);
   const [equipmentRequests, setEquipmentRequests] = useState<RequestRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
-  const [actions, setActions] = useState<AccountabilityActionRow[]>([]);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSaving, setActionSaving] = useState(false);
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
-
-  const [newAction, setNewAction] = useState<NewActionForm>({
-    target_user_id: "",
-    role_scope: "teammate",
-    action_type: "coaching",
-    note: "",
-    due_date: "",
-  });
 
   useEffect(() => {
     let alive = true;
@@ -239,7 +207,6 @@ export default function FormReportsClient() {
         vehicleReqRes,
         equipmentReqRes,
         profilesRes,
-        actionsRes,
       ] = await Promise.all([
         supabase
           .from("form_submission_grades")
@@ -276,11 +243,6 @@ export default function FormReportsClient() {
           .select("id,full_name,email,role")
           .eq("status", "Active")
           .order("full_name", { ascending: true }),
-        supabase
-          .from("accountability_actions")
-          .select("id,created_at,created_by,target_user_id,role_scope,action_type,status,note,due_date,resolved_at")
-          .order("created_at", { ascending: false })
-          .limit(300),
       ]);
 
       if (!alive) return;
@@ -314,9 +276,6 @@ export default function FormReportsClient() {
       setVehicleRequests((vehicleReqRes.data ?? []) as RequestRow[]);
       setEquipmentRequests((equipmentReqRes.data ?? []) as RequestRow[]);
       setProfiles((profilesRes.data ?? []) as ProfileRow[]);
-      if (!actionsRes.error) {
-        setActions((actionsRes.data ?? []) as AccountabilityActionRow[]);
-      }
       setLoading(false);
     })();
     return () => {
@@ -590,62 +549,6 @@ export default function FormReportsClient() {
     return { submissions, avgScore, flags };
   }, [periodGrades]);
 
-  async function createAction() {
-    setActionError(null);
-    if (!newAction.note.trim()) {
-      setActionError("Action note is required.");
-      return;
-    }
-    const supabase = createSupabaseBrowser();
-    setActionSaving(true);
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError || !authData.user) {
-      setActionSaving(false);
-      setActionError("Unable to resolve current user.");
-      return;
-    }
-    const payload = {
-      created_by: authData.user.id,
-      target_user_id: newAction.target_user_id || null,
-      role_scope: newAction.role_scope,
-      action_type: newAction.action_type,
-      note: newAction.note.trim(),
-      status: "open" as const,
-      due_date: newAction.due_date || null,
-    };
-    const { data, error } = await supabase
-      .from("accountability_actions")
-      .insert(payload)
-      .select("id,created_at,created_by,target_user_id,role_scope,action_type,status,note,due_date,resolved_at")
-      .single();
-    setActionSaving(false);
-    if (error || !data) {
-      setActionError(error?.message || "Failed to create accountability action.");
-      return;
-    }
-    setActions((prev) => [data as AccountabilityActionRow, ...prev]);
-    setNewAction((prev) => ({ ...prev, note: "", due_date: "" }));
-  }
-
-  async function markActionStatus(actionId: number, status: "resolved" | "dismissed") {
-    const supabase = createSupabaseBrowser();
-    const patch =
-      status === "resolved"
-        ? { status, resolved_at: new Date().toISOString() }
-        : { status, resolved_at: null };
-    const { error } = await supabase
-      .from("accountability_actions")
-      .update(patch)
-      .eq("id", actionId);
-    if (error) {
-      setActionError(error.message);
-      return;
-    }
-    setActions((prev) =>
-      prev.map((row) => (row.id === actionId ? { ...row, ...patch } : row))
-    );
-  }
-
   return (
     <main style={{ maxWidth: 1260, margin: "0 auto", paddingBottom: 40 }}>
       <h1 style={{ marginBottom: 6 }}>Accountability Center</h1>
@@ -837,106 +740,6 @@ export default function FormReportsClient() {
       </section>
 
       <AccountabilityTrackerPanel profiles={profiles} />
-
-      <section style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Accountability Actions</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-          <select
-            value={newAction.target_user_id}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, target_user_id: e.target.value }))}
-            style={inputStyle()}
-          >
-            <option value="">Target user (optional)</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {(p.full_name || p.email || p.id) + (p.role ? ` (${p.role})` : "")}
-              </option>
-            ))}
-          </select>
-          <select
-            value={newAction.role_scope}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, role_scope: e.target.value as NewActionForm["role_scope"] }))}
-            style={inputStyle()}
-          >
-            <option value="teammate">Teammate</option>
-            <option value="mechanic">Mechanic</option>
-            <option value="all">All</option>
-          </select>
-          <select
-            value={newAction.action_type}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, action_type: e.target.value as NewActionForm["action_type"] }))}
-            style={inputStyle()}
-          >
-            <option value="coaching">Coaching</option>
-            <option value="warning">Warning</option>
-            <option value="critical">Critical</option>
-            <option value="recognition">Recognition</option>
-          </select>
-          <input
-            type="date"
-            value={newAction.due_date}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, due_date: e.target.value }))}
-            style={inputStyle()}
-          />
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <textarea
-            value={newAction.note}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, note: e.target.value }))}
-            rows={3}
-            placeholder="Action note (coaching detail, warning reason, required retraining, etc.)"
-            style={{ ...inputStyle(), resize: "vertical" }}
-          />
-        </div>
-        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void createAction()} style={buttonStyle()} disabled={actionSaving}>
-            {actionSaving ? "Saving..." : "Add Accountability Action"}
-          </button>
-          {actionError ? <span style={{ color: "#ff9d9d" }}>{actionError}</span> : null}
-        </div>
-
-        <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-          {actions.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No actions recorded yet.</div>
-          ) : (
-            actions.map((row) => (
-              <div
-                key={row.id}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 10,
-                  padding: 10,
-                  background: "rgba(255,255,255,0.02)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 800 }}>
-                    {row.action_type.toUpperCase()} · {row.role_scope.toUpperCase()} · {row.status.toUpperCase()}
-                  </div>
-                  <div style={{ opacity: 0.72, fontSize: 12 }}>
-                    {new Date(row.created_at).toLocaleString()}
-                    {row.due_date ? ` · due ${row.due_date}` : ""}
-                  </div>
-                </div>
-                <div style={{ marginTop: 6, opacity: 0.88 }}>{row.note}</div>
-                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>
-                  Target: {row.target_user_id ? nameById[row.target_user_id] || row.target_user_id : "General"}
-                </div>
-                {row.status === "open" ? (
-                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" style={secondaryButtonStyle()} onClick={() => void markActionStatus(row.id, "resolved")}>
-                      Mark Resolved
-                    </button>
-                    <button type="button" style={secondaryButtonStyle()} onClick={() => void markActionStatus(row.id, "dismissed")}>
-                      Dismiss
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
     </main>
   );
 }
@@ -964,28 +767,4 @@ function MiniStat({ label, value }: { label: string; value: string }) {
       <div style={{ fontWeight: 800 }}>{value}</div>
     </div>
   );
-}
-
-function buttonStyle(): React.CSSProperties {
-  return {
-    padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    color: "inherit",
-    fontWeight: 800,
-    cursor: "pointer",
-  };
-}
-
-function secondaryButtonStyle(): React.CSSProperties {
-  return {
-    padding: "8px 12px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "transparent",
-    color: "inherit",
-    fontWeight: 700,
-    cursor: "pointer",
-  };
 }

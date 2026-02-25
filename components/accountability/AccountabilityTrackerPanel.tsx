@@ -91,6 +91,27 @@ type NewFormState = {
   support_other: string;
 };
 
+type AccountabilityActionRow = {
+  id: number;
+  created_at: string;
+  created_by: string;
+  target_user_id: string | null;
+  role_scope: "teammate" | "mechanic" | "all";
+  action_type: "coaching" | "warning" | "critical" | "recognition";
+  status: "open" | "resolved" | "dismissed";
+  note: string;
+  due_date: string | null;
+  resolved_at: string | null;
+};
+
+type NewActionForm = {
+  target_user_id: string;
+  role_scope: "teammate" | "mechanic" | "all";
+  action_type: "coaching" | "warning" | "critical" | "recognition";
+  note: string;
+  due_date: string;
+};
+
 const CATEGORY_OPTIONS: Array<{ value: AccountabilityCategory; label: string }> = [
   { value: "attendance", label: "Attendance" },
   { value: "quality", label: "Quality" },
@@ -221,6 +242,16 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
   const [savingDisciplineForm, setSavingDisciplineForm] = useState(false);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [reminderMsg, setReminderMsg] = useState<string | null>(null);
+  const [actions, setActions] = useState<AccountabilityActionRow[]>([]);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [newAction, setNewAction] = useState<NewActionForm>({
+    target_user_id: "",
+    role_scope: "teammate",
+    action_type: "coaching",
+    note: "",
+    due_date: "",
+  });
 
   const byId = useMemo(() => {
     const m: Record<string, string> = {};
@@ -231,7 +262,7 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [occRes, formRes] = await Promise.all([
+    const [occRes, formRes, actionsRes] = await Promise.all([
       supabase
         .from("accountability_occurrences")
         .select("id,created_at,teammate_id,manager_id,category,occurrence_type,occurrence_date,falloff_date,status,step_of_program,meeting_date,linked_form_id,immediate_termination,notes")
@@ -242,14 +273,20 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
         .select("id,created_at,teammate_id,manager_id,category,form_date,disciplinary_step,linked_occurrence_id")
         .order("created_at", { ascending: false })
         .limit(500),
+      supabase
+        .from("accountability_actions")
+        .select("id,created_at,created_by,target_user_id,role_scope,action_type,status,note,due_date,resolved_at")
+        .order("created_at", { ascending: false })
+        .limit(300),
     ]);
-    if (occRes.error || formRes.error) {
-      setError(occRes.error?.message || formRes.error?.message || "Failed to load tracker.");
+    if (occRes.error || formRes.error || actionsRes.error) {
+      setError(occRes.error?.message || formRes.error?.message || actionsRes.error?.message || "Failed to load tracker.");
       setLoading(false);
       return;
     }
     setOccurrences((occRes.data ?? []) as OccurrenceRow[]);
     setForms((formRes.data ?? []) as AccountabilityFormRow[]);
+    setActions((actionsRes.data ?? []) as AccountabilityActionRow[]);
     setLoading(false);
   }, [supabase]);
 
@@ -417,6 +454,58 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
     );
   }
 
+  async function createAction() {
+    setActionError(null);
+    if (!newAction.note.trim()) {
+      setActionError("Action note is required.");
+      return;
+    }
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      setActionError("Unable to resolve current user.");
+      return;
+    }
+    setActionSaving(true);
+    const payload = {
+      created_by: authData.user.id,
+      target_user_id: newAction.target_user_id || null,
+      role_scope: newAction.role_scope,
+      action_type: newAction.action_type,
+      note: newAction.note.trim(),
+      status: "open" as const,
+      due_date: newAction.due_date || null,
+    };
+    const { data, error: insertError } = await supabase
+      .from("accountability_actions")
+      .insert(payload)
+      .select("id,created_at,created_by,target_user_id,role_scope,action_type,status,note,due_date,resolved_at")
+      .single();
+    setActionSaving(false);
+    if (insertError || !data) {
+      setActionError(insertError?.message || "Failed to create accountability action.");
+      return;
+    }
+    setActions((prev) => [data as AccountabilityActionRow, ...prev]);
+    setNewAction((prev) => ({ ...prev, note: "", due_date: "" }));
+  }
+
+  async function markActionStatus(actionId: number, status: "resolved" | "dismissed") {
+    setActionError(null);
+    const patch =
+      status === "resolved"
+        ? { status, resolved_at: new Date().toISOString() }
+        : { status, resolved_at: null };
+    const { error: updateError } = await supabase
+      .from("accountability_actions")
+      .update(patch)
+      .eq("id", actionId);
+    if (updateError) {
+      setActionError(updateError.message);
+      return;
+    }
+    setActions((prev) => prev.map((row) => (row.id === actionId ? { ...row, ...patch } : row)));
+  }
+
   const filteredOccurrences = useMemo(() => {
     return occurrences.filter((row) => {
       if (categoryFilter !== "all" && row.category !== categoryFilter) return false;
@@ -424,6 +513,123 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       return true;
     });
   }, [categoryFilter, occurrences, statusFilter]);
+
+  const employeeTrackingRows = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        teammateId: string;
+        name: string;
+        total: number;
+        active: number;
+        complete: number;
+        attendance: number;
+        quality: number;
+        safety: number;
+        procedural: number;
+        step1: number;
+        step2: number;
+        step3: number;
+        step4: number;
+        forms: number;
+        linkedForms: number;
+        openActions: number;
+        resolvedActions: number;
+      }
+    >();
+
+    for (const row of occurrences) {
+      const key = row.teammate_id;
+      const existing = map.get(key) ?? {
+        teammateId: row.teammate_id,
+        name: byId[row.teammate_id] || row.teammate_id,
+        total: 0,
+        active: 0,
+        complete: 0,
+        attendance: 0,
+        quality: 0,
+        safety: 0,
+        procedural: 0,
+        step1: 0,
+        step2: 0,
+        step3: 0,
+        step4: 0,
+        forms: 0,
+        linkedForms: 0,
+        openActions: 0,
+        resolvedActions: 0,
+      };
+      existing.total += 1;
+      if (row.status === "Active") existing.active += 1;
+      else existing.complete += 1;
+      if (row.category === "attendance") existing.attendance += 1;
+      if (row.category === "quality") existing.quality += 1;
+      if (row.category === "safety") existing.safety += 1;
+      if (row.category === "procedural") existing.procedural += 1;
+      if (row.step_of_program === "Step 1") existing.step1 += 1;
+      if (row.step_of_program === "Step 2") existing.step2 += 1;
+      if (row.step_of_program === "Step 3") existing.step3 += 1;
+      if (row.step_of_program === "Step 4") existing.step4 += 1;
+      map.set(key, existing);
+    }
+
+    for (const form of forms) {
+      const key = form.teammate_id;
+      const existing = map.get(key) ?? {
+        teammateId: key,
+        name: byId[key] || key,
+        total: 0,
+        active: 0,
+        complete: 0,
+        attendance: 0,
+        quality: 0,
+        safety: 0,
+        procedural: 0,
+        step1: 0,
+        step2: 0,
+        step3: 0,
+        step4: 0,
+        forms: 0,
+        linkedForms: 0,
+        openActions: 0,
+        resolvedActions: 0,
+      };
+      existing.forms += 1;
+      if (form.linked_occurrence_id) existing.linkedForms += 1;
+      map.set(key, existing);
+    }
+
+    for (const action of actions) {
+      if (!action.target_user_id) continue;
+      const existing = map.get(action.target_user_id);
+      if (existing) {
+        if (action.status === "open") existing.openActions += 1;
+        if (action.status === "resolved") existing.resolvedActions += 1;
+      } else {
+        map.set(action.target_user_id, {
+          teammateId: action.target_user_id,
+          name: byId[action.target_user_id] || action.target_user_id,
+          total: 0,
+          active: 0,
+          complete: 0,
+          attendance: 0,
+          quality: 0,
+          safety: 0,
+          procedural: 0,
+          step1: 0,
+          step2: 0,
+          step3: 0,
+          step4: 0,
+          forms: 0,
+          linkedForms: 0,
+          openActions: action.status === "open" ? 1 : 0,
+          resolvedActions: action.status === "resolved" ? 1 : 0,
+        });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.active - a.active || b.total - a.total || a.name.localeCompare(b.name));
+  }, [actions, byId, forms, occurrences]);
 
   const falloffPreview = calcFalloffDate(occurrenceForm.occurrence_date, occurrenceForm.step_of_program);
   const statusPreview =
@@ -435,9 +641,9 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
     <section style={{ marginTop: 16, ...sectionStyle() }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Accountability Tracker</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Accountability Tracker & Actions</div>
           <div style={{ opacity: 0.75, marginTop: 4 }}>
-            Track attendance, quality, safety, and procedural occurrences with linked accountability forms.
+            Track occurrences, disciplinary forms, actions, and per-employee accountability history in one place.
           </div>
         </div>
         <button type="button" onClick={() => void runReminderCheck()} style={buttonStyle()} disabled={reminderBusy}>
@@ -646,6 +852,33 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       </div>
 
       <div style={{ marginTop: 12, ...sectionStyle() }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Employee Accountability Tracking</div>
+        {!employeeTrackingRows.length ? (
+          <div style={{ opacity: 0.75 }}>No employee accountability data yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {employeeTrackingRows.map((row) => (
+              <div key={`tracking-${row.teammateId}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 800 }}>{row.name}</div>
+                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.86 }}>
+                  Total: {row.total} · Active: {row.active} · Complete: {row.complete}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Attendance: {row.attendance} · Quality: {row.quality} · Safety: {row.safety} · Procedural: {row.procedural}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Forms: {row.forms} · Linked Forms: {row.linkedForms} · Open Actions: {row.openActions} · Resolved Actions: {row.resolvedActions}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Step1: {row.step1} · Step2: {row.step2} · Step3: {row.step3} · Step4: {row.step4}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 12, ...sectionStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
           <div style={{ fontWeight: 800 }}>Occurrence Tracker</div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -697,6 +930,97 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
             ))}
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 12, ...sectionStyle() }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Accountability Actions</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          <select
+            value={newAction.target_user_id}
+            onChange={(e) => setNewAction((prev) => ({ ...prev, target_user_id: e.target.value }))}
+            style={inputStyle()}
+          >
+            <option value="">Target user (optional)</option>
+            {profiles.map((p) => (
+              <option key={`action-target-${p.id}`} value={p.id}>
+                {(p.full_name || p.email || p.id) + (p.role ? ` (${p.role})` : "")}
+              </option>
+            ))}
+          </select>
+          <select
+            value={newAction.role_scope}
+            onChange={(e) => setNewAction((prev) => ({ ...prev, role_scope: e.target.value as NewActionForm["role_scope"] }))}
+            style={inputStyle()}
+          >
+            <option value="teammate">Teammate</option>
+            <option value="mechanic">Mechanic</option>
+            <option value="all">All</option>
+          </select>
+          <select
+            value={newAction.action_type}
+            onChange={(e) => setNewAction((prev) => ({ ...prev, action_type: e.target.value as NewActionForm["action_type"] }))}
+            style={inputStyle()}
+          >
+            <option value="coaching">Coaching</option>
+            <option value="warning">Warning</option>
+            <option value="critical">Critical</option>
+            <option value="recognition">Recognition</option>
+          </select>
+          <input
+            type="date"
+            value={newAction.due_date}
+            onChange={(e) => setNewAction((prev) => ({ ...prev, due_date: e.target.value }))}
+            style={inputStyle()}
+          />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <textarea
+            value={newAction.note}
+            onChange={(e) => setNewAction((prev) => ({ ...prev, note: e.target.value }))}
+            rows={3}
+            placeholder="Action note (coaching detail, warning reason, required retraining, etc.)"
+            style={{ ...inputStyle(), resize: "vertical" }}
+          />
+        </div>
+        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => void createAction()} style={buttonStyle()} disabled={actionSaving}>
+            {actionSaving ? "Saving..." : "Add Accountability Action"}
+          </button>
+          {actionError ? <span style={{ color: "#ff9d9d" }}>{actionError}</span> : null}
+        </div>
+        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+          {actions.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No actions recorded yet.</div>
+          ) : (
+            actions.map((row) => (
+              <div key={`action-row-${row.id}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800 }}>
+                    {row.action_type.toUpperCase()} · {row.role_scope.toUpperCase()} · {row.status.toUpperCase()}
+                  </div>
+                  <div style={{ opacity: 0.72, fontSize: 12 }}>
+                    {new Date(row.created_at).toLocaleString()}
+                    {row.due_date ? ` · due ${row.due_date}` : ""}
+                  </div>
+                </div>
+                <div style={{ marginTop: 6, opacity: 0.9 }}>{row.note}</div>
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>
+                  Target: {row.target_user_id ? byId[row.target_user_id] || row.target_user_id : "General"}
+                </div>
+                {row.status === "open" ? (
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" style={buttonStyle()} onClick={() => void markActionStatus(row.id, "resolved")}>
+                      Mark Resolved
+                    </button>
+                    <button type="button" style={buttonStyle()} onClick={() => void markActionStatus(row.id, "dismissed")}>
+                      Dismiss
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </section>
   );
