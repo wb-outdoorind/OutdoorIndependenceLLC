@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import AccountabilityTrackerPanel from "@/components/accountability/AccountabilityTrackerPanel";
 
 type ScorePeriod = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
@@ -834,6 +835,8 @@ export default function FormReportsClient() {
           </div>
         )}
       </section>
+
+      <AccountabilityTrackerPanel profiles={profiles} />
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Accountability Actions</div>
