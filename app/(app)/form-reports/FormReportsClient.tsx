@@ -73,6 +73,19 @@ type FormGradeReviewRow = {
   updated_at: string;
 };
 
+type FormGradeReviewEventRow = {
+  id: number;
+  grade_id: number;
+  actor_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  from_owner_id: string | null;
+  to_owner_id: string | null;
+  note: string | null;
+  created_at: string;
+};
+
 type PersonScoreRow = {
   key: string;
   userId: string | null;
@@ -211,6 +224,7 @@ export default function FormReportsClient() {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [gradeLikes, setGradeLikes] = useState<FormGradeLikeRow[]>([]);
   const [gradeReviews, setGradeReviews] = useState<FormGradeReviewRow[]>([]);
+  const [gradeReviewEvents, setGradeReviewEvents] = useState<FormGradeReviewEventRow[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [likingGradeIds, setLikingGradeIds] = useState<number[]>([]);
@@ -220,6 +234,7 @@ export default function FormReportsClient() {
   const [queueAssetFilter, setQueueAssetFilter] = useState<"all" | "vehicle" | "equipment">("all");
   const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
   const [queueMineOnly, setQueueMineOnly] = useState(false);
+  const [queueRecentActivityOnly, setQueueRecentActivityOnly] = useState(false);
   const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
@@ -239,6 +254,7 @@ export default function FormReportsClient() {
         profilesRes,
         likesRes,
         reviewsRes,
+        eventsRes,
         authRes,
       ] = await Promise.all([
         supabase
@@ -284,6 +300,11 @@ export default function FormReportsClient() {
           .from("form_submission_grade_reviews")
           .select("id,grade_id,review_status,owner_id,resolution_note,resolved_at,created_at,updated_at")
           .limit(5000),
+        supabase
+          .from("form_submission_grade_review_events")
+          .select("id,grade_id,actor_id,event_type,from_status,to_status,from_owner_id,to_owner_id,note,created_at")
+          .order("created_at", { ascending: false })
+          .limit(10000),
         supabase.auth.getUser(),
       ]);
 
@@ -329,6 +350,11 @@ export default function FormReportsClient() {
       } else {
         setQueueError(null);
         setGradeReviews((reviewsRes.data ?? []) as FormGradeReviewRow[]);
+      }
+      if (eventsRes.error) {
+        setQueueError(eventsRes.error.message);
+      } else {
+        setGradeReviewEvents((eventsRes.data ?? []) as FormGradeReviewEventRow[]);
       }
       setCurrentUserId(authRes.data.user?.id ?? null);
       setLoading(false);
@@ -604,6 +630,20 @@ export default function FormReportsClient() {
     return map;
   }, [gradeReviews]);
 
+  const reviewEventsByGradeId = useMemo(() => {
+    const map = new Map<number, FormGradeReviewEventRow[]>();
+    for (const row of gradeReviewEvents) {
+      const arr = map.get(row.grade_id) ?? [];
+      arr.push(row);
+      map.set(row.grade_id, arr);
+    }
+    for (const [key, rows] of map) {
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      map.set(key, rows);
+    }
+    return map;
+  }, [gradeReviewEvents]);
+
   const flaggedQueueRows = useMemo(() => {
     const rows = periodGrades
       .filter((row) => row.accountability_flag)
@@ -613,6 +653,7 @@ export default function FormReportsClient() {
         const submittedByLabel = row.submitted_by?.trim() || "Unknown";
         const submittedProfileId = profileIdByIdentity.get(normalizedPersonKey(row.submitted_by)) ?? null;
         const assetType = row.vehicle_id ? "vehicle" : row.equipment_id ? "equipment" : "none";
+        const recentEvents = reviewEventsByGradeId.get(row.id) ?? [];
         return {
           row,
           review,
@@ -621,6 +662,7 @@ export default function FormReportsClient() {
           submittedProfileId,
           ownerName: review?.owner_id ? nameById[review.owner_id] || review.owner_id : "Unassigned",
           assetType,
+          recentEvents,
         };
       })
       .filter((item) => {
@@ -629,6 +671,13 @@ export default function FormReportsClient() {
         if (queueAssetFilter !== "all" && item.assetType !== queueAssetFilter) return false;
         if (queueTeammateFilter !== "all" && item.submittedByLabel !== queueTeammateFilter) return false;
         if (queueMineOnly && currentUserId && item.review?.owner_id !== currentUserId) return false;
+        if (queueRecentActivityOnly) {
+          const hasRecent = item.recentEvents.some(
+            (event) =>
+              (nowMs - new Date(event.created_at).getTime()) / (1000 * 60 * 60) <= 24 * 7
+          );
+          if (!hasRecent) return false;
+        }
         return true;
       })
       .sort(
@@ -636,7 +685,7 @@ export default function FormReportsClient() {
           new Date(b.row.submitted_at).getTime() - new Date(a.row.submitted_at).getTime()
       );
     return rows;
-  }, [currentUserId, nameById, periodGrades, profileIdByIdentity, queueAssetFilter, queueMineOnly, queueStatusFilter, queueTeammateFilter, reviewByGradeId]);
+  }, [currentUserId, nameById, nowMs, periodGrades, profileIdByIdentity, queueAssetFilter, queueMineOnly, queueRecentActivityOnly, queueStatusFilter, queueTeammateFilter, reviewByGradeId, reviewEventsByGradeId]);
 
   const flaggedTeammateOptions = useMemo(() => {
     const set = new Set<string>();
@@ -761,7 +810,8 @@ export default function FormReportsClient() {
 
   async function upsertGradeReview(
     gradeId: number,
-    patch: Partial<Pick<FormGradeReviewRow, "review_status" | "owner_id" | "resolution_note" | "resolved_at">>
+    patch: Partial<Pick<FormGradeReviewRow, "review_status" | "owner_id" | "resolution_note" | "resolved_at">>,
+    eventType: "assign" | "release" | "mark_in_review" | "resolve"
   ) {
     if (queueBusyGradeIds.includes(gradeId)) return;
     setQueueError(null);
@@ -790,6 +840,29 @@ export default function FormReportsClient() {
       const filtered = prev.filter((row) => row.grade_id !== gradeId);
       return [data as FormGradeReviewRow, ...filtered];
     });
+
+    if (currentUserId) {
+      const eventPayload = {
+        grade_id: gradeId,
+        actor_id: currentUserId,
+        event_type: eventType,
+        from_status: existing?.review_status ?? "open",
+        to_status: (data as FormGradeReviewRow).review_status,
+        from_owner_id: existing?.owner_id ?? null,
+        to_owner_id: (data as FormGradeReviewRow).owner_id,
+        note: patch.resolution_note ?? null,
+      };
+      const { data: eventData, error: eventError } = await supabase
+        .from("form_submission_grade_review_events")
+        .insert(eventPayload)
+        .select("id,grade_id,actor_id,event_type,from_status,to_status,from_owner_id,to_owner_id,note,created_at")
+        .single();
+      if (!eventError && eventData) {
+        setGradeReviewEvents((prev) => [eventData as FormGradeReviewEventRow, ...prev]);
+      } else if (eventError) {
+        setQueueError(eventError.message);
+      }
+    }
   }
 
   return (
@@ -863,6 +936,14 @@ export default function FormReportsClient() {
             <input type="checkbox" checked={queueMineOnly} onChange={(e) => setQueueMineOnly(e.target.checked)} />
             Mine only
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={queueRecentActivityOnly}
+              onChange={(e) => setQueueRecentActivityOnly(e.target.checked)}
+            />
+            Activity in last 7 days
+          </label>
         </div>
         {queueError ? <div style={{ color: "#ff9d9d", marginBottom: 8 }}>{queueError}</div> : null}
 
@@ -934,7 +1015,7 @@ export default function FormReportsClient() {
                       void upsertGradeReview(item.row.id, {
                         owner_id: currentUserId,
                         review_status: item.reviewStatus === "resolved" ? "in_review" : item.reviewStatus,
-                      })
+                      }, "assign")
                     }
                     style={smallButtonStyle()}
                   >
@@ -955,7 +1036,7 @@ export default function FormReportsClient() {
                         owner_id: null,
                         review_status: "open",
                         resolved_at: null,
-                      })
+                      }, "release")
                     }
                     style={smallButtonStyle()}
                   >
@@ -981,7 +1062,7 @@ export default function FormReportsClient() {
                       void upsertGradeReview(item.row.id, {
                         review_status: "in_review",
                         resolved_at: null,
-                      });
+                      }, "mark_in_review");
                     }}
                     style={smallButtonStyle()}
                   >
@@ -1018,13 +1099,29 @@ export default function FormReportsClient() {
                         owner_id: item.review.owner_id,
                         resolved_at: new Date().toISOString(),
                         resolution_note: note,
-                      });
+                      }, "resolve");
                     }}
                     style={smallButtonStyle()}
                   >
                     Resolve
                   </button>
                 </div>
+                {item.recentEvents.length > 0 ? (
+                  <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 8 }}>
+                    <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>Recent activity</div>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      {item.recentEvents.slice(0, 5).map((event) => (
+                        <div key={`event-${event.id}`} style={{ fontSize: 12, opacity: 0.82 }}>
+                          {new Date(event.created_at).toLocaleString()} ·{" "}
+                          {(nameById[event.actor_id] || event.actor_id)} ·{" "}
+                          {event.event_type.replaceAll("_", " ")}
+                          {event.to_status ? ` · ${event.to_status.replaceAll("_", " ")}` : ""}
+                          {event.note ? ` · ${event.note}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
