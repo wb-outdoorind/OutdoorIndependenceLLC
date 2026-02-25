@@ -219,6 +219,7 @@ export default function FormReportsClient() {
   const [queueStatusFilter, setQueueStatusFilter] = useState<"all" | "unresolved" | "resolved">("unresolved");
   const [queueAssetFilter, setQueueAssetFilter] = useState<"all" | "vehicle" | "equipment">("all");
   const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
+  const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
 
   useEffect(() => {
@@ -895,6 +896,23 @@ export default function FormReportsClient() {
                     Resolution note: {item.review.resolution_note}
                   </div>
                 ) : null}
+                <div style={{ marginTop: 8 }}>
+                  <input
+                    value={
+                      queueResolutionDraftByGrade[item.row.id] ??
+                      item.review?.resolution_note ??
+                      ""
+                    }
+                    onChange={(e) =>
+                      setQueueResolutionDraftByGrade((prev) => ({
+                        ...prev,
+                        [item.row.id]: e.target.value,
+                      }))
+                    }
+                    placeholder="Resolution note (required to resolve)"
+                    style={inputStyle()}
+                  />
+                </div>
                 <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
                     type="button"
@@ -925,14 +943,23 @@ export default function FormReportsClient() {
                   <button
                     type="button"
                     disabled={queueBusyGradeIds.includes(item.row.id)}
-                    onClick={() =>
+                    onClick={() => {
+                      const note = (
+                        queueResolutionDraftByGrade[item.row.id] ??
+                        item.review?.resolution_note ??
+                        ""
+                      ).trim();
+                      if (!note) {
+                        setQueueError("Resolution note is required before resolving a flagged item.");
+                        return;
+                      }
                       void upsertGradeReview(item.row.id, {
                         review_status: "resolved",
                         owner_id: item.review?.owner_id ?? currentUserId ?? null,
                         resolved_at: new Date().toISOString(),
-                        resolution_note: item.review?.resolution_note ?? "Resolved in flagged queue.",
-                      })
-                    }
+                        resolution_note: note,
+                      });
+                    }}
                     style={smallButtonStyle()}
                   >
                     Resolve
