@@ -245,6 +245,8 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
   const [actions, setActions] = useState<AccountabilityActionRow[]>([]);
   const [actionSaving, setActionSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [employeeQuery, setEmployeeQuery] = useState("");
+  const [actionStatusFilter, setActionStatusFilter] = useState<"all" | "open" | "resolved" | "dismissed">("open");
   const [newAction, setNewAction] = useState<NewActionForm>({
     target_user_id: "",
     role_scope: "teammate",
@@ -631,6 +633,33 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
     return Array.from(map.values()).sort((a, b) => b.active - a.active || b.total - a.total || a.name.localeCompare(b.name));
   }, [actions, byId, forms, occurrences]);
 
+  const filteredEmployeeTrackingRows = useMemo(() => {
+    const q = employeeQuery.trim().toLowerCase();
+    if (!q) return employeeTrackingRows;
+    return employeeTrackingRows.filter((row) => row.name.toLowerCase().includes(q));
+  }, [employeeQuery, employeeTrackingRows]);
+
+  const filteredActions = useMemo(() => {
+    return actions.filter((row) => (actionStatusFilter === "all" ? true : row.status === actionStatusFilter));
+  }, [actionStatusFilter, actions]);
+
+  const trackerSummary = useMemo(() => {
+    const activeOccurrences = occurrences.filter((row) => row.status === "Active").length;
+    const completeOccurrences = occurrences.filter((row) => row.status === "Complete").length;
+    const openActions = actions.filter((row) => row.status === "open").length;
+    const overdueActions = actions.filter(
+      (row) => row.status === "open" && row.due_date && row.due_date < todayDate
+    ).length;
+    return {
+      employeesTracked: employeeTrackingRows.length,
+      activeOccurrences,
+      completeOccurrences,
+      accountabilityForms: forms.length,
+      openActions,
+      overdueActions,
+    };
+  }, [actions, employeeTrackingRows.length, forms.length, occurrences, todayDate]);
+
   const falloffPreview = calcFalloffDate(occurrenceForm.occurrence_date, occurrenceForm.step_of_program);
   const statusPreview =
     falloffPreview && new Date(`${falloffPreview}T00:00:00`).getTime() < new Date(`${todayDate}T00:00:00`).getTime()
@@ -653,9 +682,72 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       {reminderMsg ? <div style={{ marginTop: 8, opacity: 0.85 }}>{reminderMsg}</div> : null}
       {error ? <div style={{ marginTop: 8, color: "#ff9d9d" }}>{error}</div> : null}
 
-      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div
+        style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 8,
+        }}
+      >
+        <SummaryPill label="Employees Tracked" value={String(trackerSummary.employeesTracked)} />
+        <SummaryPill label="Active Occurrences" value={String(trackerSummary.activeOccurrences)} />
+        <SummaryPill label="Complete Occurrences" value={String(trackerSummary.completeOccurrences)} />
+        <SummaryPill label="Accountability Forms" value={String(trackerSummary.accountabilityForms)} />
+        <SummaryPill label="Open Actions" value={String(trackerSummary.openActions)} />
+        <SummaryPill label="Overdue Actions" value={String(trackerSummary.overdueActions)} />
+      </div>
+
+      <div style={{ marginTop: 12, ...sectionStyle() }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>1) Employee Accountability Tracking</div>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 320px) 1fr", gap: 10, marginBottom: 8 }}>
+          <input
+            value={employeeQuery}
+            onChange={(e) => setEmployeeQuery(e.target.value)}
+            placeholder="Search employee"
+            style={inputStyle()}
+          />
+          <div style={{ opacity: 0.75, alignSelf: "center", fontSize: 13 }}>
+            Tip: click &quot;Use in New Occurrence&quot; to pre-fill the employee in the occurrence form.
+          </div>
+        </div>
+        {!filteredEmployeeTrackingRows.length ? (
+          <div style={{ opacity: 0.75 }}>No employee accountability data yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {filteredEmployeeTrackingRows.map((row) => (
+              <div key={`tracking-${row.teammateId}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800 }}>{row.name}</div>
+                  <button
+                    type="button"
+                    onClick={() => setOccurrenceForm((prev) => ({ ...prev, teammate_id: row.teammateId }))}
+                    style={buttonStyle()}
+                  >
+                    Use in New Occurrence
+                  </button>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.86 }}>
+                  Total: {row.total} · Active: {row.active} · Complete: {row.complete}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Attendance: {row.attendance} · Quality: {row.quality} · Safety: {row.safety} · Procedural: {row.procedural}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Forms: {row.forms} · Linked Forms: {row.linkedForms} · Open Actions: {row.openActions} · Resolved Actions: {row.resolvedActions}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
+                  Step1: {row.step1} · Step2: {row.step2} · Step3: {row.step3} · Step4: {row.step4}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
         <div style={sectionStyle()}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>New Occurrence</div>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>2) New Occurrence</div>
           <div style={{ display: "grid", gap: 8 }}>
             <select
               value={occurrenceForm.teammate_id}
@@ -761,7 +853,7 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
         </div>
 
         <div style={sectionStyle()}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Accountability Form</div>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>3) Accountability Form</div>
           <div style={{ display: "grid", gap: 8 }}>
             <select
               value={disciplineForm.teammate_id}
@@ -852,35 +944,8 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       </div>
 
       <div style={{ marginTop: 12, ...sectionStyle() }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>Employee Accountability Tracking</div>
-        {!employeeTrackingRows.length ? (
-          <div style={{ opacity: 0.75 }}>No employee accountability data yet.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 8 }}>
-            {employeeTrackingRows.map((row) => (
-              <div key={`tracking-${row.teammateId}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
-                <div style={{ fontWeight: 800 }}>{row.name}</div>
-                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.86 }}>
-                  Total: {row.total} · Active: {row.active} · Complete: {row.complete}
-                </div>
-                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
-                  Attendance: {row.attendance} · Quality: {row.quality} · Safety: {row.safety} · Procedural: {row.procedural}
-                </div>
-                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
-                  Forms: {row.forms} · Linked Forms: {row.linkedForms} · Open Actions: {row.openActions} · Resolved Actions: {row.resolvedActions}
-                </div>
-                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.82 }}>
-                  Step1: {row.step1} · Step2: {row.step2} · Step3: {row.step3} · Step4: {row.step4}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginTop: 12, ...sectionStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-          <div style={{ fontWeight: 800 }}>Occurrence Tracker</div>
+          <div style={{ fontWeight: 800 }}>4) Occurrence History</div>
           <div style={{ display: "flex", gap: 8 }}>
             <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as "all" | AccountabilityCategory)} style={{ ...inputStyle(), width: 180 }}>
               <option value="all">All categories</option>
@@ -933,7 +998,19 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
       </div>
 
       <div style={{ marginTop: 12, ...sectionStyle() }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>Accountability Actions</div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          <div style={{ fontWeight: 800 }}>5) Accountability Actions</div>
+          <select
+            value={actionStatusFilter}
+            onChange={(e) => setActionStatusFilter(e.target.value as "all" | "open" | "resolved" | "dismissed")}
+            style={{ ...inputStyle(), width: 200 }}
+          >
+            <option value="open">Open actions</option>
+            <option value="all">All actions</option>
+            <option value="resolved">Resolved actions</option>
+            <option value="dismissed">Dismissed actions</option>
+          </select>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
           <select
             value={newAction.target_user_id}
@@ -989,10 +1066,10 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
           {actionError ? <span style={{ color: "#ff9d9d" }}>{actionError}</span> : null}
         </div>
         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {actions.length === 0 ? (
+          {filteredActions.length === 0 ? (
             <div style={{ opacity: 0.75 }}>No actions recorded yet.</div>
           ) : (
-            actions.map((row) => (
+            filteredActions.map((row) => (
               <div key={`action-row-${row.id}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 800 }}>
@@ -1023,5 +1100,21 @@ export default function AccountabilityTrackerPanel({ profiles }: { profiles: Pro
         </div>
       </div>
     </section>
+  );
+}
+
+function SummaryPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(255,255,255,0.14)",
+        borderRadius: 12,
+        background: "rgba(255,255,255,0.03)",
+        padding: "10px 12px",
+      }}
+    >
+      <div style={{ opacity: 0.74, fontSize: 12 }}>{label}</div>
+      <div style={{ fontWeight: 900, marginTop: 2 }}>{value}</div>
+    </div>
   );
 }
