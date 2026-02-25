@@ -238,6 +238,9 @@ export default function FormReportsClient() {
   const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
   const [queueMineOnly, setQueueMineOnly] = useState(false);
   const [queueRecentActivityOnly, setQueueRecentActivityOnly] = useState(false);
+  const [queueSelectedGradeIds, setQueueSelectedGradeIds] = useState<number[]>([]);
+  const [bulkResolutionNote, setBulkResolutionNote] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [queueResolutionDraftByGrade, setQueueResolutionDraftByGrade] = useState<Record<number, string>>({});
   const [queueModalGradeId, setQueueModalGradeId] = useState<number | null>(null);
   const [selectedPersonKey, setSelectedPersonKey] = useState<string>("");
@@ -738,6 +741,11 @@ export default function FormReportsClient() {
     return { openCount, unresolvedOlderThan48h, avgResolveHours };
   }, [nowMs, periodGrades, reviewByGradeId]);
 
+  const visibleFlaggedGradeIds = useMemo(
+    () => flaggedQueueRows.map((item) => item.row.id),
+    [flaggedQueueRows]
+  );
+
   const globalRisk = useMemo(() => {
     if (!nowMs) {
       return { slaBreaches: 0, unacknowledged: 0, repeatFailures: 0, openRequests: 0 };
@@ -904,6 +912,91 @@ export default function FormReportsClient() {
         setQueueError(eventError.message);
       }
     }
+  }
+
+  async function bulkApplyQueueAction(action: "assign" | "mark_in_review" | "resolve") {
+    if (!queueSelectedGradeIds.length) {
+      setQueueError("Select at least one flagged queue item first.");
+      return;
+    }
+    if (action === "assign" && !currentUserId) {
+      setQueueError("You must be signed in to assign items.");
+      return;
+    }
+    if (action === "resolve" && !bulkResolutionNote.trim()) {
+      setQueueError("Bulk resolve requires a resolution note.");
+      return;
+    }
+
+    setQueueError(null);
+    setBulkBusy(true);
+    let updated = 0;
+    let skipped = 0;
+
+    for (const gradeId of queueSelectedGradeIds) {
+      const item = allFlaggedQueueRows.find((row) => row.row.id === gradeId);
+      if (!item) {
+        skipped += 1;
+        continue;
+      }
+      const isOwner = currentUserId && item.review?.owner_id === currentUserId;
+      const canManage = Boolean(isOwner || canOverrideQueueOwnership);
+
+      if (action === "assign") {
+        if (!currentUserId) {
+          skipped += 1;
+          continue;
+        }
+        await upsertGradeReview(
+          gradeId,
+          {
+            owner_id: currentUserId,
+            review_status: item.reviewStatus === "resolved" ? "in_review" : item.reviewStatus,
+          },
+          "assign"
+        );
+        updated += 1;
+        continue;
+      }
+
+      if (action === "mark_in_review") {
+        if (!item.review?.owner_id || !canManage) {
+          skipped += 1;
+          continue;
+        }
+        await upsertGradeReview(
+          gradeId,
+          {
+            review_status: "in_review",
+            resolved_at: null,
+          },
+          "mark_in_review"
+        );
+        updated += 1;
+        continue;
+      }
+
+      if (!item.review?.owner_id || !canManage) {
+        skipped += 1;
+        continue;
+      }
+      await upsertGradeReview(
+        gradeId,
+        {
+          review_status: "resolved",
+          owner_id: item.review.owner_id,
+          resolved_at: new Date().toISOString(),
+          resolution_note: bulkResolutionNote.trim(),
+        },
+        "resolve"
+      );
+      updated += 1;
+    }
+
+    setBulkBusy(false);
+    setQueueSelectedGradeIds([]);
+    if (action === "resolve") setBulkResolutionNote("");
+    setQueueError(`Bulk ${action.replaceAll("_", " ")} complete. Updated ${updated}, skipped ${skipped}.`);
   }
 
   function renderQueueActions(item: {
@@ -1250,6 +1343,50 @@ export default function FormReportsClient() {
             Activity in last 7 days
           </label>
         </div>
+        <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, opacity: 0.82 }}>
+              Selected: {queueSelectedGradeIds.length}
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={
+                  visibleFlaggedGradeIds.length > 0 &&
+                  visibleFlaggedGradeIds.every((id) => queueSelectedGradeIds.includes(id))
+                }
+                onChange={(e) =>
+                  setQueueSelectedGradeIds((prev) => {
+                    if (e.target.checked) {
+                      return Array.from(new Set([...prev, ...visibleFlaggedGradeIds]));
+                    }
+                    return prev.filter((id) => !visibleFlaggedGradeIds.includes(id));
+                  })
+                }
+              />
+              Select all visible
+            </label>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" style={smallButtonStyle()} disabled={bulkBusy} onClick={() => void bulkApplyQueueAction("assign")}>
+              {bulkBusy ? "Working..." : "Bulk Assign to Me"}
+            </button>
+            <button type="button" style={smallButtonStyle()} disabled={bulkBusy} onClick={() => void bulkApplyQueueAction("mark_in_review")}>
+              {bulkBusy ? "Working..." : "Bulk Mark In Review"}
+            </button>
+            <button type="button" style={smallButtonStyle()} disabled={bulkBusy} onClick={() => void bulkApplyQueueAction("resolve")}>
+              {bulkBusy ? "Working..." : "Bulk Resolve"}
+            </button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <input
+              value={bulkResolutionNote}
+              onChange={(e) => setBulkResolutionNote(e.target.value)}
+              placeholder="Bulk resolution note (required for bulk resolve)"
+              style={inputStyle()}
+            />
+          </div>
+        </div>
         {queueError ? <div style={{ color: "#ff9d9d", marginBottom: 8 }}>{queueError}</div> : null}
 
         {!flaggedQueueRows.length ? (
@@ -1259,8 +1396,21 @@ export default function FormReportsClient() {
             {flaggedQueueRows.map((item) => (
               <div key={`flagged-queue-${item.row.id}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 800 }}>
-                    {item.row.form_type} · #{item.row.form_id}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={queueSelectedGradeIds.includes(item.row.id)}
+                      onChange={(e) =>
+                        setQueueSelectedGradeIds((prev) =>
+                          e.target.checked
+                            ? Array.from(new Set([...prev, item.row.id]))
+                            : prev.filter((id) => id !== item.row.id)
+                        )
+                      }
+                    />
+                    <div style={{ fontWeight: 800 }}>
+                      {item.row.form_type} · #{item.row.form_id}
+                    </div>
                   </div>
                   <div style={{ fontSize: 12, opacity: 0.8 }}>
                     Status: {item.reviewStatus.replace("_", " ")} · Owner: {item.ownerName}
