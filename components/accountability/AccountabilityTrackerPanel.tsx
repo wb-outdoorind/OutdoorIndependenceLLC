@@ -269,6 +269,7 @@ export default function AccountabilityTrackerPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [employeeQuery, setEmployeeQuery] = useState("");
   const [actionStatusFilter, setActionStatusFilter] = useState<"all" | "open" | "resolved" | "dismissed">("open");
+  const [expandedLinkedFlagId, setExpandedLinkedFlagId] = useState<number | null>(null);
   const [newAction, setNewAction] = useState<NewActionForm>({
     target_user_id: "",
     role_scope: "teammate",
@@ -682,6 +683,19 @@ export default function AccountabilityTrackerPanel({
   const filteredActions = useMemo(() => {
     return actions.filter((row) => (actionStatusFilter === "all" ? true : row.status === actionStatusFilter));
   }, [actionStatusFilter, actions]);
+
+  const flaggedById = useMemo(() => {
+    const map = new Map<number, FlaggedGradeRow>();
+    for (const row of flaggedGrades) map.set(row.id, row);
+    return map;
+  }, [flaggedGrades]);
+
+  const formHistory = useMemo(() => {
+    return forms.map((row) => ({
+      ...row,
+      linkedFlag: row.linked_flag_grade_id ? flaggedById.get(row.linked_flag_grade_id) ?? null : null,
+    }));
+  }, [flaggedById, forms]);
 
   const trackerSummary = useMemo(() => {
     const activeOccurrences = occurrences.filter((row) => row.status === "Active").length;
@@ -1165,6 +1179,89 @@ export default function AccountabilityTrackerPanel({
             ))
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 12, ...sectionStyle() }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>6) Accountability Form History</div>
+        {formHistory.length === 0 ? (
+          <div style={{ opacity: 0.75 }}>No accountability forms created yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {formHistory.map((row) => (
+              <div key={`form-history-${row.id}`} style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800 }}>
+                    Form #{row.id} · {row.category} · {row.disciplinary_step}
+                  </div>
+                  <div style={{ opacity: 0.72, fontSize: 12 }}>
+                    {row.form_date}
+                  </div>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.88 }}>
+                  Teammate:{" "}
+                  <Link href={`/employees/${row.teammate_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                    {byId[row.teammate_id] || row.teammate_id}
+                  </Link>
+                  {" · "}Manager:{" "}
+                  <Link href={`/employees/${row.manager_id}`} style={{ color: "#9fcbff", textDecoration: "underline" }}>
+                    {byId[row.manager_id] || row.manager_id}
+                  </Link>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.82 }}>
+                  Linked occurrence: {row.linked_occurrence_id ? `#${row.linked_occurrence_id}` : "None"} · Linked flagged form:{" "}
+                  {row.linked_flag_grade_id ? `#${row.linked_flag_grade_id}` : "None"}
+                </div>
+                {row.linked_flag_grade_id ? (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      style={buttonStyle()}
+                      onClick={() =>
+                        setExpandedLinkedFlagId((prev) => (prev === row.linked_flag_grade_id ? null : row.linked_flag_grade_id))
+                      }
+                    >
+                      {expandedLinkedFlagId === row.linked_flag_grade_id ? "Hide linked flagged form" : "View linked flagged form"}
+                    </button>
+                    {expandedLinkedFlagId === row.linked_flag_grade_id ? (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 10,
+                          padding: 10,
+                          background: "rgba(255,255,255,0.02)",
+                        }}
+                      >
+                        {row.linkedFlag ? (
+                          <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                            <div>
+                              <strong>Flag #{row.linkedFlag.id}</strong> · {row.linkedFlag.form_type} #{row.linkedFlag.form_id}
+                            </div>
+                            <div>Submitted by: {row.linkedFlag.submitted_by || "Unknown"}</div>
+                            <div>
+                              Asset:{" "}
+                              {row.linkedFlag.vehicle_id
+                                ? `Vehicle ${row.linkedFlag.vehicle_id}`
+                                : row.linkedFlag.equipment_id
+                                  ? `Equipment ${row.linkedFlag.equipment_id}`
+                                  : "None"}
+                            </div>
+                            <div>Submitted at: {new Date(row.linkedFlag.submitted_at).toLocaleString()}</div>
+                            <div>Reason: {row.linkedFlag.accountability_reason || "No reason captured."}</div>
+                          </div>
+                        ) : (
+                          <div style={{ opacity: 0.75, fontSize: 13 }}>
+                            Linked flagged form record is no longer available in the current flagged queue dataset.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
