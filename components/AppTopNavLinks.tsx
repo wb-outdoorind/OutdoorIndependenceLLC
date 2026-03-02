@@ -1,13 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
+import {
+  canUseRoleView,
+  readRoleViewOverride,
+  roleLabel,
+  writeRoleViewOverride,
+  type AppRole,
+} from "@/lib/roleView";
 
 export default function AppTopNavLinks() {
   const pathname = usePathname();
+  const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLead, setIsLead] = useState(false);
+  const [actualRole, setActualRole] = useState<AppRole | null>(null);
+  const [viewAsRole, setViewAsRole] = useState<AppRole | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<
     Array<{ id: string; inspectionType: string; vehicleId: string; teammateName: string }>
   >([]);
@@ -50,7 +61,34 @@ export default function AppTopNavLinks() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!active || !authData.user) return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (!active) return;
+      setActualRole((profile?.role as AppRole | undefined) ?? "employee");
+      setViewAsRole(readRoleViewOverride());
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   if (pathname === "/settings") return null;
+
+  const showViewAsBadge = Boolean(
+    actualRole &&
+      canUseRoleView(actualRole) &&
+      viewAsRole &&
+      viewAsRole !== actualRole
+  );
 
   return (
     <nav className="app-topnav-links">
@@ -68,6 +106,44 @@ export default function AppTopNavLinks() {
       <Link href="/form-reports" className="app-topnav-link">Accountability Center</Link>
       <Link href="/approvals" className="app-topnav-link">Approvals</Link>
       <Link href="/settings" className="app-topnav-link">Settings</Link>
+      {showViewAsBadge ? (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(20, 69, 35, 0.3)",
+            padding: "8px 10px",
+            fontSize: 12,
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Viewing as: {roleLabel(viewAsRole)}
+          <button
+            type="button"
+            onClick={() => {
+              writeRoleViewOverride(null);
+              setViewAsRole(null);
+              router.refresh();
+            }}
+            style={{
+              border: "1px solid rgba(255,255,255,0.32)",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.08)",
+              color: "inherit",
+              padding: "2px 8px",
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Reset
+          </button>
+        </span>
+      ) : null}
       {isLead && pendingApprovals.length > 0 ? (
         <Link
           href={`/approvals?inspection=${encodeURIComponent(pendingApprovals[0].id)}`}
