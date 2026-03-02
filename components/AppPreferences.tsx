@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { normalizeRole, writeRoleViewOverride } from "@/lib/roleView";
 
 export type AppTheme = "dark" | "light";
 export type AppTextSize = "sm" | "md" | "lg";
@@ -40,8 +42,36 @@ export function saveTextSize(textSize: AppTextSize) {
 export default function AppPreferences() {
   useEffect(() => {
     applyPreferences(readTheme(), readTextSize());
+
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id ?? null;
+      if (!active || !userId) return;
+
+      const { data } = await supabase
+        .from("user_ui_preferences")
+        .select("theme,text_size,role_view_override")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!active || !data) return;
+
+      const theme = data.theme === "light" ? "light" : "dark";
+      const textSize =
+        data.text_size === "sm" || data.text_size === "md" || data.text_size === "lg"
+          ? data.text_size
+          : "md";
+      applyPreferences(theme, textSize);
+      saveTheme(theme);
+      saveTextSize(textSize);
+      writeRoleViewOverride(normalizeRole(data.role_view_override) ?? null);
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   return null;
 }
-

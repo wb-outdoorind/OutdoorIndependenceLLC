@@ -39,6 +39,7 @@ export default function SettingsPage() {
   const [savedMessage, setSavedMessage] = useState("");
   const [actualRole, setActualRole] = useState<string | null>(null);
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(() => readRoleViewOverride());
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const canViewAs = canUseRoleView(actualRole);
   const canViewRunbook =
@@ -57,6 +58,7 @@ export default function SettingsPage() {
           setActualRole("employee");
           return;
         }
+        setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -66,8 +68,41 @@ export default function SettingsPage() {
         const nextRole = (profile?.role as string | undefined) ?? "employee";
         if (!canUseRoleView(nextRole)) {
           writeRoleViewOverride(null);
+          void supabase
+            .from("user_ui_preferences")
+            .upsert(
+              {
+                user_id: authData.user.id,
+                role_view_override: null,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "user_id" }
+            );
         }
         setActualRole(nextRole);
+
+        const { data: prefs } = await supabase
+          .from("user_ui_preferences")
+          .select("theme,text_size,role_view_override")
+          .eq("user_id", authData.user.id)
+          .maybeSingle();
+        if (!active || !prefs) return;
+
+        const nextTheme = prefs.theme === "light" ? "light" : "dark";
+        const nextTextSize: AppTextSize =
+          prefs.text_size === "sm" || prefs.text_size === "md" || prefs.text_size === "lg"
+            ? prefs.text_size
+            : "md";
+        setTheme(nextTheme);
+        setTextSize(nextTextSize);
+        saveTheme(nextTheme);
+        saveTextSize(nextTextSize);
+        applyPreferences(nextTheme, nextTextSize);
+
+        const dbRoleView =
+          (prefs.role_view_override as AppRole | null | undefined) ?? null;
+        setViewAsRole(dbRoleView);
+        writeRoleViewOverride(dbRoleView);
       })();
     }, 0);
     return () => {
@@ -82,6 +117,17 @@ export default function SettingsPage() {
     saveTheme(nextTheme);
     saveTextSize(nextTextSize);
     applyPreferences(nextTheme, nextTextSize);
+    if (currentUserId) {
+      void createSupabaseBrowser().from("user_ui_preferences").upsert(
+        {
+          user_id: currentUserId,
+          theme: nextTheme,
+          text_size: nextTextSize,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+    }
     setSavedMessage("Saved.");
     window.setTimeout(() => setSavedMessage(""), 1200);
   }
@@ -89,6 +135,16 @@ export default function SettingsPage() {
   function applyRoleView(nextRole: AppRole | null) {
     setViewAsRole(nextRole);
     writeRoleViewOverride(nextRole);
+    if (currentUserId) {
+      void createSupabaseBrowser().from("user_ui_preferences").upsert(
+        {
+          user_id: currentUserId,
+          role_view_override: nextRole,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+    }
     setSavedMessage("Saved.");
     window.setTimeout(() => setSavedMessage(""), 1200);
   }

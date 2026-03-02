@@ -125,7 +125,12 @@ type QueueFilterPreset = {
   createdAt: string;
 };
 
-const QUEUE_PRESETS_STORAGE_KEY = "oi:flagged-queue-presets:v1";
+type QueuePresetDbRow = {
+  id: string;
+  name: string;
+  filters: QueueFilterPreset["filters"];
+  created_at: string;
+};
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -290,17 +295,7 @@ export default function FormReportsClient() {
   const [queueRecentActivityOnly, setQueueRecentActivityOnly] = useState(false);
   const [queuePresetName, setQueuePresetName] = useState("");
   const [queuePresetId, setQueuePresetId] = useState("");
-  const [queuePresets, setQueuePresets] = useState<QueueFilterPreset[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = localStorage.getItem(QUEUE_PRESETS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as QueueFilterPreset[];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [queuePresets, setQueuePresets] = useState<QueueFilterPreset[]>([]);
   const [queueSelectedGradeIds, setQueueSelectedGradeIds] = useState<number[]>([]);
   const [bulkResolutionNote, setBulkResolutionNote] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -434,6 +429,37 @@ export default function FormReportsClient() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("user_queue_filter_presets")
+        .select("id,name,filters,created_at")
+        .eq("user_id", currentUserId)
+        .order("created_at", { ascending: false })
+        .limit(25);
+      if (!active) return;
+      if (error) {
+        setQueueError(error.message);
+        return;
+      }
+      const rows = (data ?? []) as QueuePresetDbRow[];
+      setQueuePresets(
+        rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          filters: row.filters,
+          createdAt: row.created_at,
+        }))
+      );
+    })();
+    return () => {
+      active = false;
+    };
+  }, [currentUserId]);
 
   const nameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -1078,7 +1104,11 @@ export default function FormReportsClient() {
     setQueueError(`Bulk ${action.replaceAll("_", " ")} complete. Updated ${updated}, skipped ${skipped}.`);
   }
 
-  function saveQueuePreset() {
+  async function saveQueuePreset() {
+    if (!currentUserId) {
+      setQueueError("Sign in required to save presets.");
+      return;
+    }
     const name = queuePresetName.trim();
     if (!name) {
       setQueueError("Enter a preset name first.");
@@ -1099,14 +1129,35 @@ export default function FormReportsClient() {
       },
       createdAt: new Date().toISOString(),
     };
-    const next = queuePresetId
-      ? queuePresets.map((row) => (row.id === queuePresetId ? preset : row))
-      : [preset, ...queuePresets].slice(0, 25);
-    setQueuePresets(next);
-    setQueuePresetId(preset.id);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(QUEUE_PRESETS_STORAGE_KEY, JSON.stringify(next));
+    const supabase = createSupabaseBrowser();
+    const payload = {
+      id: queuePresetId || undefined,
+      user_id: currentUserId,
+      name: preset.name,
+      filters: preset.filters,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from("user_queue_filter_presets")
+      .upsert(payload, { onConflict: "id" })
+      .select("id,name,filters,created_at")
+      .single();
+    if (error || !data) {
+      setQueueError(error?.message || "Failed to save preset.");
+      return;
     }
+    const saved = data as QueuePresetDbRow;
+    const nextPreset: QueueFilterPreset = {
+      id: saved.id,
+      name: saved.name,
+      filters: saved.filters,
+      createdAt: saved.created_at,
+    };
+    const next = queuePresetId
+      ? queuePresets.map((row) => (row.id === queuePresetId ? nextPreset : row))
+      : [nextPreset, ...queuePresets].slice(0, 25);
+    setQueuePresets(next);
+    setQueuePresetId(nextPreset.id);
     setQueueError(null);
   }
 
@@ -1125,14 +1176,22 @@ export default function FormReportsClient() {
     setQueueDateTo(preset.filters.dateTo);
   }
 
-  function deleteQueuePreset() {
+  async function deleteQueuePreset() {
+    if (!currentUserId || !queuePresetId) return;
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("user_queue_filter_presets")
+      .delete()
+      .eq("id", queuePresetId)
+      .eq("user_id", currentUserId);
+    if (error) {
+      setQueueError(error.message);
+      return;
+    }
     if (!queuePresetId) return;
     const next = queuePresets.filter((row) => row.id !== queuePresetId);
     setQueuePresets(next);
     setQueuePresetId("");
-    if (typeof window !== "undefined") {
-      localStorage.setItem(QUEUE_PRESETS_STORAGE_KEY, JSON.stringify(next));
-    }
   }
 
   function exportFlaggedQueueCsv() {
@@ -1719,13 +1778,13 @@ export default function FormReportsClient() {
             placeholder="Preset name"
             style={inputStyle()}
           />
-          <button type="button" style={smallButtonStyle()} onClick={saveQueuePreset}>
+          <button type="button" style={smallButtonStyle()} onClick={() => void saveQueuePreset()}>
             Save Preset
           </button>
           <button
             type="button"
             style={smallButtonStyle()}
-            onClick={deleteQueuePreset}
+            onClick={() => void deleteQueuePreset()}
             disabled={!queuePresetId}
           >
             Delete Preset
