@@ -1003,6 +1003,19 @@ export default function InspectionForm({
     return null;
   }
 
+  async function resolveDraftUserId() {
+    if (draftUserId) return draftUserId;
+    const supabase = createSupabaseBrowser();
+    const { data: authData, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error("Failed to resolve auth user for inspection draft:", error);
+      return null;
+    }
+    const uid = authData.user?.id ?? null;
+    if (uid) setDraftUserId(uid);
+    return uid;
+  }
+
   async function saveDraft() {
     if (!vehicleId) return;
     const draft = {
@@ -1024,7 +1037,7 @@ export default function InspectionForm({
       trailerVehicleLinks,
     };
 
-    const uid = draftUserId;
+    const uid = await resolveDraftUserId();
     if (!uid) return;
 
     const supabase = createSupabaseBrowser();
@@ -1044,12 +1057,13 @@ export default function InspectionForm({
 
   async function clearDraft() {
     if (!vehicleId) return;
-    if (!draftUserId) return;
+    const uid = await resolveDraftUserId();
+    if (!uid) return;
     const supabase = createSupabaseBrowser();
     const { error } = await supabase
       .from("vehicle_inspection_drafts")
       .delete()
-      .eq("user_id", draftUserId)
+      .eq("user_id", uid)
       .eq("vehicle_id", vehicleId)
       .eq("inspection_type", type);
     if (error) {
@@ -1149,9 +1163,9 @@ export default function InspectionForm({
     router.push(`/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-request?${q.toString()}`);
   }
 
-  function openLinkCurrentRequestPage(sectionId: string, itemKey: string) {
+  async function openLinkCurrentRequestPage(sectionId: string, itemKey: string) {
     if (!vehicleId) return;
-    void saveDraft();
+    await saveDraft();
     const returnTo =
       typeof window !== "undefined"
         ? window.location.pathname
@@ -2769,7 +2783,7 @@ export default function InspectionForm({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => openLinkCurrentRequestPage(sec.id, it.key)}
+                        onClick={() => void openLinkCurrentRequestPage(sec.id, it.key)}
                                   style={secondaryButtonStyle()}
                                 >
                                   Link Current Request
@@ -2935,7 +2949,7 @@ export default function InspectionForm({
                           </button>
                           <button
                             type="button"
-                            onClick={() => openLinkCurrentRequestPage("exiting", it.key)}
+                    onClick={() => void openLinkCurrentRequestPage("exiting", it.key)}
                             style={secondaryButtonStyle()}
                           >
                             Link Current Request
