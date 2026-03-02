@@ -3,6 +3,7 @@ import Image from "next/image";
 import { cookies } from "next/headers";
 import { createServerSupabase } from "@/lib/supabase/server";
 import HomeDashboardCard from "@/components/home/HomeDashboardCard";
+import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 
 export const dynamic = "force-dynamic";
@@ -177,6 +178,7 @@ function parseInspectionMeta(checklist: unknown) {
 export default async function Home() {
   let lowStockCount = 0;
   let role: string | null = null;
+  let actualRole: string | null = null;
   let tiles = [...baseTiles];
   let dashboard: DashboardData | null = null;
   let teammateOpsStats: TeammateOpsStats | null = null;
@@ -196,6 +198,7 @@ export default async function Home() {
         .eq("id", authData.user.id)
         .maybeSingle();
       profile = (data as ProfileRow | null) ?? null;
+      actualRole = profile?.role ?? null;
       role = resolveEffectiveRole(profile?.role ?? null, requestedRole);
     }
 
@@ -666,6 +669,7 @@ export default async function Home() {
       <p style={{ opacity: 0.75, marginTop: 0 }}>
         Choose a section to manage assets and operations.
       </p>
+      <RoleViewBanner actualRole={actualRole} effectiveRole={role} />
 
       {dashboard ? (
         <HomeDashboardCard
