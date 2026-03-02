@@ -82,6 +82,7 @@ type Role =
   | "operations_manager"
   | "office_admin"
   | "mechanic"
+  | "apprentice"
   | "employee"
   | "team_lead_1"
   | "team_lead_2"
@@ -789,6 +790,8 @@ export default function VehicleDetailPage() {
     userRole === "mechanic";
   const canEditMechanicScore = userRole === "mechanic";
   const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
+  const canCreateMaintenanceRequest = userRole !== "apprentice";
+  const canCreateMaintenanceLog = canEditVehicle;
 
   const scoreTrend = useMemo(() => {
     const chronological = [...logPreviewRows]
@@ -1366,15 +1369,19 @@ export default function VehicleDetailPage() {
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
 
-          <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
-            <span>Maintenance Request</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canCreateMaintenanceRequest ? (
+            <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
+              <span>Maintenance Request</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
-          <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
-            <span>Maintenance Log</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canCreateMaintenanceLog ? (
+            <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
+              <span>Maintenance Log</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
           {canShowVehiclePmButton ? (
             <Link href={`/vehicles/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>

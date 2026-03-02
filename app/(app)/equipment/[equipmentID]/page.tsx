@@ -59,6 +59,7 @@ type Role =
   | "operations_manager"
   | "office_admin"
   | "mechanic"
+  | "apprentice"
   | "employee"
   | "team_lead_1"
   | "team_lead_2"
@@ -450,6 +451,8 @@ export default function EquipmentDetailPage() {
     userRole === "mechanic";
   const canEditMechanicScore = userRole === "mechanic";
   const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
+  const canCreateMaintenanceRequest = userRole !== "apprentice";
+  const canCreateMaintenanceLog = canViewMechanicScore;
 
   async function saveMechanicScore() {
     const latestLog = logPreviewRows[0];
@@ -807,15 +810,19 @@ export default function EquipmentDetailPage() {
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
-          <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
-            <span>Maintenance Request</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canCreateMaintenanceRequest ? (
+            <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
+              <span>Maintenance Request</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
-          <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
-            <span>Maintenance Log</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
+          {canCreateMaintenanceLog ? (
+            <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
+              <span>Maintenance Log</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          ) : null}
 
           {canShowPmButton ? (
             <Link href={`/equipment/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
