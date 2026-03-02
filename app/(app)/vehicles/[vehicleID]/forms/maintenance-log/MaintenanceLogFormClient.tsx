@@ -3,6 +3,7 @@
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { loadVehicleContext } from "@/lib/assetContext";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
@@ -195,11 +196,7 @@ export default function MaintenanceLogPage() {
     void (async () => {
       const supabase = createSupabaseBrowser();
 
-      const { data: vehicleRow, error: vehicleErr } = await supabase
-        .from("vehicles")
-        .select("mileage")
-        .eq("id", vehicleId)
-        .maybeSingle();
+      const { data: vehicleRow, error: vehicleErr } = await loadVehicleContext(supabase, vehicleId);
       if (!active) return;
       if (!vehicleErr) {
         const m = Number(vehicleRow?.mileage);

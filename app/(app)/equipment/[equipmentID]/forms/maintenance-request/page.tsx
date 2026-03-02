@@ -3,6 +3,7 @@
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { loadEquipmentContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
@@ -95,11 +96,7 @@ export default function EquipmentMaintenanceRequestPage() {
     let active = true;
     void (async () => {
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("equipment")
-        .select("name,equipment_type,current_hours")
-        .eq("id", equipmentId)
-        .maybeSingle();
+      const { data, error } = await loadEquipmentContext(supabase, equipmentId);
       if (!active) return;
       if (error) {
         console.error("Failed loading equipment context:", error);

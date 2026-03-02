@@ -3,6 +3,7 @@
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { loadVehicleContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
@@ -142,11 +143,7 @@ export default function MaintenanceRequestPage() {
 
     void (async () => {
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select("name,type,mileage")
-        .eq("id", vehicleId)
-        .maybeSingle();
+      const { data, error } = await loadVehicleContext(supabase, vehicleId);
       if (!active) return;
       if (error) {
         console.error("Failed loading vehicle context:", error);

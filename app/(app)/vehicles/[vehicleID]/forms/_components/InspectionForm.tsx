@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { loadVehicleContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
@@ -487,11 +488,7 @@ export default function InspectionForm({
     let active = true;
     void (async () => {
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select("type,mileage")
-        .eq("id", vehicleId)
-        .maybeSingle();
+      const { data, error } = await loadVehicleContext(supabase, vehicleId);
       if (!active) return;
       if (error) {
         console.error("Failed loading vehicle context for inspection form:", error);
@@ -571,7 +568,10 @@ export default function InspectionForm({
   }, [vehicleId, type]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
       setSectionState((prev) => {
         let changed = false;
         const next = { ...prev };
@@ -585,12 +585,17 @@ export default function InspectionForm({
         }
         return changed ? next : prev;
       });
-    }, 0);
-    return () => window.clearTimeout(timer);
+    })();
+    return () => {
+      active = false;
+    };
   }, [visibleSections]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
       // Keep trailer UI closed by default and never include current vehicle in trailer-linked list.
       setTrailerVehiclePickerOpen(false);
       setTrailerVehicleIds((prev) => prev.filter((id) => id !== vehicleId));
@@ -615,8 +620,10 @@ export default function InspectionForm({
         setTrailerVehicleIds([]);
         setTrailerVehicleLinks({});
       }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    })();
+    return () => {
+      active = false;
+    };
   }, [vehicleId, vehicleType]);
 
   useEffect(() => {
@@ -653,7 +660,10 @@ export default function InspectionForm({
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
       const linkedRequestId = (searchParams.get("linkedRequestId") || "").trim();
       const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
       const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
@@ -662,8 +672,10 @@ export default function InspectionForm({
         ...prev,
         [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
       }));
-    }, 0);
-    return () => window.clearTimeout(timer);
+    })();
+    return () => {
+      active = false;
+    };
   }, [searchParams]);
 
   useEffect(() => {
@@ -676,15 +688,22 @@ export default function InspectionForm({
       )
     );
     if (!linkedIds.length) {
-      const timer = window.setTimeout(() => setLinkedRequestStatusById({}), 0);
-      return () => window.clearTimeout(timer);
+      let active = true;
+      void (async () => {
+        await Promise.resolve();
+        if (!active) return;
+        setLinkedRequestStatusById({});
+      })();
+      return () => {
+        active = false;
+      };
     }
 
     let active = true;
     void (async () => {
       const supabase = createSupabaseBrowser();
       const { data, error } = await supabase
-        .from("vehicle_maintenance_requests")
+        .from("maintenance_requests")
         .select("id,status,urgency,created_at")
         .eq("vehicle_id", vehicleId)
         .in("id", linkedIds);
@@ -706,7 +725,10 @@ export default function InspectionForm({
   }, [failRequestLinks, vehicleId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
       const linkedInspectionId = (searchParams.get("linkedInspectionId") || "").trim();
       const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
       if (!linkedInspectionId || !linkedVehicleId) return;
@@ -714,8 +736,10 @@ export default function InspectionForm({
         ...prev,
         [linkedVehicleId]: linkedInspectionId,
       }));
-    }, 0);
-    return () => window.clearTimeout(timer);
+    })();
+    return () => {
+      active = false;
+    };
   }, [searchParams]);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { loadEquipmentContext } from "@/lib/assetContext";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
@@ -194,11 +195,7 @@ export default function EquipmentMaintenanceLogPage() {
     let active = true;
     void (async () => {
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("equipment")
-        .select("current_hours")
-        .eq("id", equipmentId)
-        .maybeSingle();
+      const { data, error } = await loadEquipmentContext(supabase, equipmentId);
       if (!active) return;
       if (error) {
         console.error("[equipment-maintenance-log] equipment context load error:", error);
