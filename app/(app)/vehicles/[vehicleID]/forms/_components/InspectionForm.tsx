@@ -60,6 +60,25 @@ type StoredInspectionRecord = {
   managerSignature?: string;
 };
 
+type InspectionDraftData = {
+  inspectionDate?: string;
+  mileage?: string;
+  employee?: string;
+  dashLightsOn?: string[];
+  sectionState?: StoredInspectionRecord["sections"];
+  itemExtraValues?: Record<string, string>;
+  failRequestLinks?: Record<string, string>;
+  exiting?: Record<string, ChoiceOrBlank>;
+  inspectionStatus?: "Pass" | "Fail - Maintenance Required" | "Out of Service" | "";
+  notes?: string;
+  employeeSignature?: string;
+  managerSignature?: string;
+  sectionEquipmentIds?: Record<string, string[]>;
+  trailerVehicleIds?: string[];
+  trailerVehicleLinks?: Record<string, string>;
+  leadApproverId?: string;
+};
+
 type ExtraFieldConfig = {
   label: string;
   placeholder: string;
@@ -472,6 +491,7 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
+  const [draftUserId, setDraftUserId] = useState<string | null>(null);
   const bypassLeadSignoff = canBypassLeadSignoff(currentUserRole);
 
   // Read vehicle metadata from local storage (with short retries for timing).
@@ -500,59 +520,74 @@ export default function InspectionForm({
 
   useEffect(() => {
     if (!vehicleId || restoredDraftRef.current) return;
-    const raw = localStorage.getItem(inspectionDraftKey(vehicleId, type));
-    if (!raw) {
-      restoredDraftRef.current = true;
-      return;
-    }
-    try {
-      const draft = JSON.parse(raw) as {
-        inspectionDate?: string;
-        mileage?: string;
-        employee?: string;
-        dashLightsOn?: string[];
-        sectionState?: StoredInspectionRecord["sections"];
-        itemExtraValues?: Record<string, string>;
-        failRequestLinks?: Record<string, string>;
-        exiting?: Record<string, ChoiceOrBlank>;
-        inspectionStatus?: "Pass" | "Fail - Maintenance Required" | "Out of Service" | "";
-        notes?: string;
-        employeeSignature?: string;
-        managerSignature?: string;
-        sectionEquipmentIds?: Record<string, string[]>;
-        trailerVehicleIds?: string[];
-        trailerVehicleLinks?: Record<string, string>;
-        leadApproverId?: string;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData.user?.id ?? null;
+      if (!active) return;
+      setDraftUserId(uid);
+
+      const applyDraft = (draft: InspectionDraftData) => {
+        if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
+        if (typeof draft.mileage === "string") setMileage(draft.mileage);
+        if (typeof draft.employee === "string") setEmployee(draft.employee);
+        if (Array.isArray(draft.dashLightsOn)) setDashLightsOn(draft.dashLightsOn);
+        if (draft.sectionState && typeof draft.sectionState === "object") setSectionState(draft.sectionState);
+        if (draft.itemExtraValues && typeof draft.itemExtraValues === "object") setItemExtraValues(draft.itemExtraValues);
+        if (draft.failRequestLinks && typeof draft.failRequestLinks === "object") setFailRequestLinks(draft.failRequestLinks);
+        if (draft.exiting && typeof draft.exiting === "object") setExiting(draft.exiting);
+        if (typeof draft.inspectionStatus === "string") setInspectionStatus(draft.inspectionStatus);
+        if (typeof draft.notes === "string") setNotes(draft.notes);
+        if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
+        if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
+        if (draft.sectionEquipmentIds && typeof draft.sectionEquipmentIds === "object") {
+          setSectionEquipmentIds(draft.sectionEquipmentIds);
+        }
+        if (Array.isArray(draft.trailerVehicleIds)) {
+          setTrailerVehicleIds(draft.trailerVehicleIds);
+        }
+        if (draft.trailerVehicleLinks && typeof draft.trailerVehicleLinks === "object") {
+          setTrailerVehicleLinks(draft.trailerVehicleLinks);
+        }
+        if (typeof draft.leadApproverId === "string") {
+          setLeadApproverId(draft.leadApproverId);
+        }
       };
-      if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
-      if (typeof draft.mileage === "string") setMileage(draft.mileage);
-      if (typeof draft.employee === "string") setEmployee(draft.employee);
-      if (Array.isArray(draft.dashLightsOn)) setDashLightsOn(draft.dashLightsOn);
-      if (draft.sectionState && typeof draft.sectionState === "object") setSectionState(draft.sectionState);
-      if (draft.itemExtraValues && typeof draft.itemExtraValues === "object") setItemExtraValues(draft.itemExtraValues);
-      if (draft.failRequestLinks && typeof draft.failRequestLinks === "object") setFailRequestLinks(draft.failRequestLinks);
-      if (draft.exiting && typeof draft.exiting === "object") setExiting(draft.exiting);
-      if (typeof draft.inspectionStatus === "string") setInspectionStatus(draft.inspectionStatus);
-      if (typeof draft.notes === "string") setNotes(draft.notes);
-      if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
-      if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
-      if (draft.sectionEquipmentIds && typeof draft.sectionEquipmentIds === "object") {
-        setSectionEquipmentIds(draft.sectionEquipmentIds);
+
+      if (uid) {
+        const { data, error } = await supabase
+          .from("vehicle_inspection_drafts")
+          .select("draft")
+          .eq("user_id", uid)
+          .eq("vehicle_id", vehicleId)
+          .eq("inspection_type", type)
+          .maybeSingle();
+        if (!active) return;
+        if (!error && data?.draft && typeof data.draft === "object") {
+          applyDraft(data.draft as InspectionDraftData);
+          restoredDraftRef.current = true;
+          return;
+        }
       }
-      if (Array.isArray(draft.trailerVehicleIds)) {
-        setTrailerVehicleIds(draft.trailerVehicleIds);
+
+      const raw = localStorage.getItem(inspectionDraftKey(vehicleId, type));
+      if (!raw) {
+        restoredDraftRef.current = true;
+        return;
       }
-      if (draft.trailerVehicleLinks && typeof draft.trailerVehicleLinks === "object") {
-        setTrailerVehicleLinks(draft.trailerVehicleLinks);
+      try {
+        applyDraft(JSON.parse(raw) as InspectionDraftData);
+      } catch (error) {
+        console.error("Failed to restore inspection draft:", error);
+      } finally {
+        restoredDraftRef.current = true;
       }
-      if (typeof draft.leadApproverId === "string") {
-        setLeadApproverId(draft.leadApproverId);
-      }
-    } catch (error) {
-      console.error("Failed to restore inspection draft:", error);
-    } finally {
-      restoredDraftRef.current = true;
-    }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [vehicleId, type]);
 
   useEffect(() => {
@@ -952,7 +987,7 @@ export default function InspectionForm({
     return null;
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!vehicleId) return;
     const draft = {
       inspectionDate,
@@ -973,6 +1008,39 @@ export default function InspectionForm({
       trailerVehicleLinks,
     };
     localStorage.setItem(inspectionDraftKey(vehicleId, type), JSON.stringify(draft));
+
+    const uid = draftUserId;
+    if (!uid) return;
+
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase.from("vehicle_inspection_drafts").upsert(
+      {
+        user_id: uid,
+        vehicle_id: vehicleId,
+        inspection_type: type,
+        draft,
+      },
+      { onConflict: "user_id,vehicle_id,inspection_type" }
+    );
+    if (error) {
+      console.error("Failed to save inspection draft:", error);
+    }
+  }
+
+  async function clearDraft() {
+    if (!vehicleId) return;
+    localStorage.removeItem(inspectionDraftKey(vehicleId, type));
+    if (!draftUserId) return;
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("vehicle_inspection_drafts")
+      .delete()
+      .eq("user_id", draftUserId)
+      .eq("vehicle_id", vehicleId)
+      .eq("inspection_type", type);
+    if (error) {
+      console.error("Failed to clear inspection draft:", error);
+    }
   }
 
   function addTrailerVehicle(id: string) {
@@ -1021,9 +1089,9 @@ export default function InspectionForm({
     return null;
   }
 
-  function openVehicleInspectionForLink(targetVehicleId: string) {
+  async function openVehicleInspectionForLink(targetVehicleId: string) {
     if (!vehicleId) return;
-    saveDraft();
+    await saveDraft();
     const returnTo =
       typeof window !== "undefined"
         ? window.location.pathname
@@ -1035,7 +1103,7 @@ export default function InspectionForm({
     router.push(`/vehicles/${encodeURIComponent(targetVehicleId)}/forms/${type}?${q.toString()}`);
   }
 
-  function openFullRequestForm(sectionId: string, item: InspectionItem, sectionTitle: string) {
+  async function openFullRequestForm(sectionId: string, item: InspectionItem, sectionTitle: string) {
     if (!vehicleId) return;
     if (currentUserRole === "apprentice") {
       alert("Apprentice role cannot submit maintenance requests. Link to an existing request instead.");
@@ -1047,7 +1115,7 @@ export default function InspectionForm({
       return;
     }
 
-    saveDraft();
+    await saveDraft();
     const returnTo =
       typeof window !== "undefined"
         ? window.location.pathname
@@ -1069,6 +1137,7 @@ export default function InspectionForm({
 
   function openLinkCurrentRequestPage(sectionId: string, itemKey: string) {
     if (!vehicleId) return;
+    void saveDraft();
     const returnTo =
       typeof window !== "undefined"
         ? window.location.pathname
@@ -1316,7 +1385,7 @@ export default function InspectionForm({
       }
     }
 
-    localStorage.removeItem(inspectionDraftKey(vehicleId, type));
+    await clearDraft();
 
     const returnTo = (searchParams.get("returnTo") || "").trim();
     const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
@@ -1979,7 +2048,7 @@ export default function InspectionForm({
                                 <button
                                   type="button"
                                   style={buttonStyle()}
-                                  onClick={() => openVehicleInspectionForLink(id)}
+                                  onClick={() => void openVehicleInspectionForLink(id)}
                                 >
                                   {linked
                                     ? `Update ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}`
@@ -2460,7 +2529,7 @@ export default function InspectionForm({
                                       </div>
                                     </div>
                                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                      <button type="button" style={buttonStyle()} onClick={() => openVehicleInspectionForLink(id)}>
+                                      <button type="button" style={buttonStyle()} onClick={() => void openVehicleInspectionForLink(id)}>
                                         {linked ? `Update ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}` : `Complete ${type === "pre-trip" ? "Pre-Trip" : "Post-Trip"}`}
                                       </button>
                                       <button type="button" style={secondaryButtonStyle()} onClick={() => removeTrailerVehicle(id)}>
@@ -2674,7 +2743,7 @@ export default function InspectionForm({
                               <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                                 <button
                                   type="button"
-                                  onClick={() => openFullRequestForm(sec.id, it, sec.title)}
+                                  onClick={() => void openFullRequestForm(sec.id, it, sec.title)}
                                   style={{
                                     ...buttonStyle(),
                                     opacity: currentUserRole === "apprentice" ? 0.6 : 1,
@@ -2840,7 +2909,7 @@ export default function InspectionForm({
                         <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             type="button"
-                            onClick={() => openFullRequestForm("exiting", it, "Exiting / Securing")}
+                            onClick={() => void openFullRequestForm("exiting", it, "Exiting / Securing")}
                             style={{
                               ...buttonStyle(),
                               opacity: currentUserRole === "apprentice" ? 0.6 : 1,
@@ -2994,6 +3063,7 @@ export default function InspectionForm({
             type="button"
             onClick={() => {
               if (!confirmLeaveForm()) return;
+              void clearDraft();
               const returnTo = (searchParams.get("returnTo") || "").trim();
               if (returnTo && returnTo.startsWith("/")) {
                 router.replace(returnTo);
