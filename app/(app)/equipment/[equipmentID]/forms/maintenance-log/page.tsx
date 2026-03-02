@@ -5,7 +5,12 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
-import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
+import {
+  confirmLeaveForm,
+  UnsavedChangesBanner,
+  useFormExitGuard,
+  useUnsavedChangesState,
+} from "@/lib/forms";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
@@ -79,7 +84,8 @@ function parseTitle(description: string | null) {
 
 export default function EquipmentMaintenanceLogPage() {
   const router = useRouter();
-  useFormExitGuard();
+  const { isDirty } = useUnsavedChangesState();
+  useFormExitGuard(isDirty);
   const params = useParams<{ equipmentID?: string }>();
   const sp = useSearchParams();
 
@@ -508,6 +514,7 @@ export default function EquipmentMaintenanceLogPage() {
         </div>
       ) : null}
 
+      <UnsavedChangesBanner isDirty={isDirty} />
       <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
         <div style={cardStyle}>
           <div style={{ fontWeight: 900, marginBottom: 12 }}>Service</div>

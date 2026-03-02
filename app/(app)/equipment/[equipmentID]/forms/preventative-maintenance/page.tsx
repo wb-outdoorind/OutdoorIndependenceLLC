@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import {
+  confirmLeaveForm,
+  getSignedInDisplayName,
+  UnsavedChangesBanner,
+  useFormExitGuard,
+  useUnsavedChangesState,
+} from "@/lib/forms";
 
 type Choice = "" | "pass" | "fail" | "na";
 type TrailerChoice = "" | "pass" | "fail" | "na";
@@ -361,7 +367,8 @@ function ChoiceToggle({ value, onChange }: { value: Choice; onChange: (v: Choice
 
 export default function EquipmentPreventativeMaintenancePage() {
   const router = useRouter();
-  useFormExitGuard();
+  const { isDirty } = useUnsavedChangesState();
+  useFormExitGuard(isDirty);
   const params = useParams<{ equipmentID: string }>();
   const equipmentId = decodeURIComponent(params.equipmentID);
 
@@ -878,6 +885,8 @@ export default function EquipmentPreventativeMaintenancePage() {
       ) : null}
 
       {isTrailerEquipment ? (
+        <>
+        <UnsavedChangesBanner isDirty={isDirty} />
         <form onSubmit={onSubmit} style={{ marginTop: 16, display: "grid", gap: 14 }}>
           <section style={cardStyle()}>
             <h2 style={{ marginTop: 0, marginBottom: 10 }}>General Information</h2>
@@ -1001,9 +1010,12 @@ export default function EquipmentPreventativeMaintenancePage() {
             >Discard & Return</button>
           </div>
         </form>
+        </>
       ) : null}
 
       {isMowerEquipment ? (
+        <>
+        <UnsavedChangesBanner isDirty={isDirty} />
         <form onSubmit={onSubmit} style={{ marginTop: 16, display: "grid", gap: 14 }}>
           <section style={cardStyle()}>
             <h2 style={{ marginTop: 0, marginBottom: 10 }}>General Details</h2>
@@ -1210,9 +1222,12 @@ export default function EquipmentPreventativeMaintenancePage() {
             >Discard & Return</button>
           </div>
         </form>
+        </>
       ) : null}
 
       {isApplicatorEquipment ? (
+        <>
+        <UnsavedChangesBanner isDirty={isDirty} />
         <form onSubmit={onSubmit} style={{ marginTop: 16, display: "grid", gap: 14 }}>
           <section style={cardStyle()}>
             <h2 style={{ marginTop: 0, marginBottom: 10 }}>General Details</h2>
@@ -1322,6 +1337,7 @@ export default function EquipmentPreventativeMaintenancePage() {
             >Discard & Return</button>
           </div>
         </form>
+        </>
       ) : null}
 
       {missingTemplate ? (
@@ -1340,6 +1356,8 @@ export default function EquipmentPreventativeMaintenancePage() {
       ) : null}
 
       {!isTrailerEquipment && !missingTemplate && template ? (
+        <>
+        <UnsavedChangesBanner isDirty={isDirty} />
         <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
           <div style={cardStyle()}>
             <div style={{ fontWeight: 900 }}>{template.name}</div>
@@ -1402,6 +1420,7 @@ export default function EquipmentPreventativeMaintenancePage() {
             >Discard & Return</button>
           </div>
         </form>
+        </>
       ) : null}
     </main>
   );

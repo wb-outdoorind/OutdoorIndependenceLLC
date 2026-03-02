@@ -3,7 +3,13 @@
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import {
+  confirmLeaveForm,
+  getSignedInDisplayName,
+  UnsavedChangesBanner,
+  useFormExitGuard,
+  useUnsavedChangesState,
+} from "@/lib/forms";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
@@ -64,7 +70,8 @@ function todayYYYYMMDD() {
 
 export default function EquipmentMaintenanceRequestPage() {
   const router = useRouter();
-  useFormExitGuard();
+  const { isDirty } = useUnsavedChangesState();
+  useFormExitGuard(isDirty);
   const params = useParams<{ equipmentID?: string }>();
   const equipmentId = params?.equipmentID ? decodeURIComponent(params.equipmentID) : "";
 
@@ -287,6 +294,7 @@ export default function EquipmentMaintenanceRequestPage() {
         </div>
       ) : null}
 
+      <UnsavedChangesBanner isDirty={isDirty} />
       <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
         <div style={cardStyle()}>
           <div style={{ fontWeight: 900, marginBottom: 12 }}>General</div>

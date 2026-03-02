@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { createElement, useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 export function useFormExitGuard(enabled = true) {
@@ -63,6 +63,52 @@ export function useFormExitGuard(enabled = true) {
 export function confirmLeaveForm() {
   return window.confirm(
     "Leave this form? Unsaved entries will be discarded, and you will not be able to return to this draft."
+  );
+}
+
+export function useUnsavedChangesState(enabled = true) {
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onInputLike = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const field = target.closest("input, textarea, select, [contenteditable='true']");
+      if (!field) return;
+      if (field.getAttribute("data-no-dirty-track") === "true") return;
+      setIsDirty(true);
+    };
+
+    document.addEventListener("input", onInputLike, true);
+    document.addEventListener("change", onInputLike, true);
+    return () => {
+      document.removeEventListener("input", onInputLike, true);
+      document.removeEventListener("change", onInputLike, true);
+    };
+  }, [enabled]);
+
+  return { isDirty, setIsDirty };
+}
+
+export function UnsavedChangesBanner({ isDirty }: { isDirty: boolean }) {
+  if (!isDirty) return null;
+  return createElement(
+    "div",
+    {
+      style: {
+        marginBottom: 12,
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid rgba(255,190,100,0.45)",
+        background: "rgba(255,190,100,0.14)",
+        color: "inherit",
+        fontSize: 12,
+        fontWeight: 700,
+      },
+    },
+    "Unsaved changes"
   );
 }
 

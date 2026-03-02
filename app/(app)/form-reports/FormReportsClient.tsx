@@ -107,6 +107,26 @@ type PersonScoreRow = {
   overallScore: number;
 };
 
+type QueueCategoryFilter = "all" | "inspection" | "maintenance_request" | "maintenance_log" | "other";
+
+type QueueFilterPreset = {
+  id: string;
+  name: string;
+  filters: {
+    status: "all" | "unresolved" | "resolved";
+    asset: "all" | "vehicle" | "equipment";
+    teammate: string;
+    mineOnly: boolean;
+    recentOnly: boolean;
+    category: QueueCategoryFilter;
+    dateFrom: string;
+    dateTo: string;
+  };
+  createdAt: string;
+};
+
+const QUEUE_PRESETS_STORAGE_KEY = "oi:flagged-queue-presets:v1";
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -173,6 +193,33 @@ function mechanicScoreBand(score: number) {
   return "Good";
 }
 
+function categoryFromFormType(formType: string) {
+  const normalized = (formType || "").trim().toLowerCase();
+  if (normalized.includes("inspection")) return "inspection";
+  if (normalized.includes("maintenance_request")) return "maintenance_request";
+  if (normalized.includes("maintenance_log")) return "maintenance_log";
+  return "other";
+}
+
+function csvCell(value: string | number | null | undefined) {
+  const raw = String(value ?? "");
+  if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, "\"\"")}"`;
+  return raw;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | null | undefined>>) {
+  const lines = [headers.map((h) => csvCell(h)).join(","), ...rows.map((row) => row.map((cell) => csvCell(cell)).join(","))];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
@@ -236,8 +283,24 @@ export default function FormReportsClient() {
   const [queueStatusFilter, setQueueStatusFilter] = useState<"all" | "unresolved" | "resolved">("unresolved");
   const [queueAssetFilter, setQueueAssetFilter] = useState<"all" | "vehicle" | "equipment">("all");
   const [queueTeammateFilter, setQueueTeammateFilter] = useState<string>("all");
+  const [queueCategoryFilter, setQueueCategoryFilter] = useState<QueueCategoryFilter>("all");
+  const [queueDateFrom, setQueueDateFrom] = useState("");
+  const [queueDateTo, setQueueDateTo] = useState("");
   const [queueMineOnly, setQueueMineOnly] = useState(false);
   const [queueRecentActivityOnly, setQueueRecentActivityOnly] = useState(false);
+  const [queuePresetName, setQueuePresetName] = useState("");
+  const [queuePresetId, setQueuePresetId] = useState("");
+  const [queuePresets, setQueuePresets] = useState<QueueFilterPreset[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(QUEUE_PRESETS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as QueueFilterPreset[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [queueSelectedGradeIds, setQueueSelectedGradeIds] = useState<number[]>([]);
   const [bulkResolutionNote, setBulkResolutionNote] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -681,7 +744,10 @@ export default function FormReportsClient() {
         if (queueStatusFilter === "resolved" && item.reviewStatus !== "resolved") return false;
         if (queueStatusFilter === "unresolved" && item.reviewStatus === "resolved") return false;
         if (queueAssetFilter !== "all" && item.assetType !== queueAssetFilter) return false;
+        if (queueCategoryFilter !== "all" && categoryFromFormType(item.row.form_type) !== queueCategoryFilter) return false;
         if (queueTeammateFilter !== "all" && item.submittedByLabel !== queueTeammateFilter) return false;
+        if (queueDateFrom && item.row.submitted_at.slice(0, 10) < queueDateFrom) return false;
+        if (queueDateTo && item.row.submitted_at.slice(0, 10) > queueDateTo) return false;
         if (queueMineOnly && currentUserId && item.review?.owner_id !== currentUserId) return false;
         if (queueRecentActivityOnly) {
           const hasRecent = item.recentEvents.some(
@@ -696,7 +762,19 @@ export default function FormReportsClient() {
         (a, b) =>
           new Date(b.row.submitted_at).getTime() - new Date(a.row.submitted_at).getTime()
       );
-  }, [allFlaggedQueueRows, currentUserId, nowMs, queueAssetFilter, queueMineOnly, queueRecentActivityOnly, queueStatusFilter, queueTeammateFilter]);
+  }, [
+    allFlaggedQueueRows,
+    currentUserId,
+    nowMs,
+    queueAssetFilter,
+    queueCategoryFilter,
+    queueDateFrom,
+    queueDateTo,
+    queueMineOnly,
+    queueRecentActivityOnly,
+    queueStatusFilter,
+    queueTeammateFilter,
+  ]);
 
   const selectedFlaggedQueueItem = useMemo(() => {
     if (!queueModalGradeId) return null;
@@ -1000,6 +1078,104 @@ export default function FormReportsClient() {
     setQueueError(`Bulk ${action.replaceAll("_", " ")} complete. Updated ${updated}, skipped ${skipped}.`);
   }
 
+  function saveQueuePreset() {
+    const name = queuePresetName.trim();
+    if (!name) {
+      setQueueError("Enter a preset name first.");
+      return;
+    }
+    const preset: QueueFilterPreset = {
+      id: queuePresetId || `preset-${Date.now()}`,
+      name,
+      filters: {
+        status: queueStatusFilter,
+        asset: queueAssetFilter,
+        teammate: queueTeammateFilter,
+        mineOnly: queueMineOnly,
+        recentOnly: queueRecentActivityOnly,
+        category: queueCategoryFilter,
+        dateFrom: queueDateFrom,
+        dateTo: queueDateTo,
+      },
+      createdAt: new Date().toISOString(),
+    };
+    const next = queuePresetId
+      ? queuePresets.map((row) => (row.id === queuePresetId ? preset : row))
+      : [preset, ...queuePresets].slice(0, 25);
+    setQueuePresets(next);
+    setQueuePresetId(preset.id);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(QUEUE_PRESETS_STORAGE_KEY, JSON.stringify(next));
+    }
+    setQueueError(null);
+  }
+
+  function applyQueuePreset(id: string) {
+    const preset = queuePresets.find((row) => row.id === id);
+    if (!preset) return;
+    setQueuePresetId(preset.id);
+    setQueuePresetName(preset.name);
+    setQueueStatusFilter(preset.filters.status);
+    setQueueAssetFilter(preset.filters.asset);
+    setQueueTeammateFilter(preset.filters.teammate);
+    setQueueMineOnly(preset.filters.mineOnly);
+    setQueueRecentActivityOnly(preset.filters.recentOnly);
+    setQueueCategoryFilter(preset.filters.category);
+    setQueueDateFrom(preset.filters.dateFrom);
+    setQueueDateTo(preset.filters.dateTo);
+  }
+
+  function deleteQueuePreset() {
+    if (!queuePresetId) return;
+    const next = queuePresets.filter((row) => row.id !== queuePresetId);
+    setQueuePresets(next);
+    setQueuePresetId("");
+    if (typeof window !== "undefined") {
+      localStorage.setItem(QUEUE_PRESETS_STORAGE_KEY, JSON.stringify(next));
+    }
+  }
+
+  function exportFlaggedQueueCsv() {
+    const rows = flaggedQueueRows.map((item) => {
+      const category = categoryFromFormType(item.row.form_type);
+      const asset = item.row.vehicle_id
+        ? `vehicle:${item.row.vehicle_id}`
+        : item.row.equipment_id
+          ? `equipment:${item.row.equipment_id}`
+          : "none";
+      return [
+        item.row.id,
+        item.row.form_type,
+        category,
+        item.row.form_id,
+        item.submittedByLabel,
+        item.row.submitted_at,
+        asset,
+        item.reviewStatus,
+        item.ownerName,
+        item.row.accountability_reason ?? "",
+        item.review?.resolution_note ?? "",
+      ];
+    });
+    downloadCsv(
+      `flagged-queue-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        "grade_id",
+        "form_type",
+        "category",
+        "form_id",
+        "teammate",
+        "submitted_at",
+        "asset",
+        "review_status",
+        "owner",
+        "reason",
+        "resolution_note",
+      ],
+      rows
+    );
+  }
+
   function printFlaggedQueueReport() {
     const openedAt = new Date().toLocaleString();
     const generatedBy =
@@ -1007,7 +1183,10 @@ export default function FormReportsClient() {
     const filterSummary = [
       `Status: ${queueStatusFilter}`,
       `Asset: ${queueAssetFilter}`,
+      `Category: ${queueCategoryFilter}`,
       `Teammate: ${queueTeammateFilter}`,
+      `Date from: ${queueDateFrom || "-"}`,
+      `Date to: ${queueDateTo || "-"}`,
       `Mine only: ${queueMineOnly ? "yes" : "no"}`,
       `Activity 7d: ${queueRecentActivityOnly ? "yes" : "no"}`,
     ].join(" | ");
@@ -1469,7 +1648,18 @@ export default function FormReportsClient() {
           >
             <option value="all">All Assets</option>
             <option value="vehicle">Vehicle</option>
-            <option value="equipment">Equipment</option>
+              <option value="equipment">Equipment</option>
+            </select>
+          <select
+            value={queueCategoryFilter}
+            onChange={(e) => setQueueCategoryFilter(e.target.value as QueueCategoryFilter)}
+            style={inputStyle()}
+          >
+            <option value="all">All Categories</option>
+            <option value="inspection">Inspection</option>
+            <option value="maintenance_request">Maintenance Request</option>
+            <option value="maintenance_log">Maintenance Log</option>
+            <option value="other">Other</option>
           </select>
           <select value={queueTeammateFilter} onChange={(e) => setQueueTeammateFilter(e.target.value)} style={inputStyle()}>
             <option value="all">All Teammates</option>
@@ -1491,6 +1681,58 @@ export default function FormReportsClient() {
             />
             Activity in last 7 days
           </label>
+          <input
+            type="date"
+            value={queueDateFrom}
+            onChange={(e) => setQueueDateFrom(e.target.value)}
+            style={inputStyle()}
+            placeholder="From date"
+          />
+          <input
+            type="date"
+            value={queueDateTo}
+            onChange={(e) => setQueueDateTo(e.target.value)}
+            style={inputStyle()}
+            placeholder="To date"
+          />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 10 }}>
+          <select
+            value={queuePresetId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setQueuePresetId(id);
+              if (id) applyQueuePreset(id);
+            }}
+            style={inputStyle()}
+          >
+            <option value="">Select saved preset</option>
+            {queuePresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          <input
+            value={queuePresetName}
+            onChange={(e) => setQueuePresetName(e.target.value)}
+            placeholder="Preset name"
+            style={inputStyle()}
+          />
+          <button type="button" style={smallButtonStyle()} onClick={saveQueuePreset}>
+            Save Preset
+          </button>
+          <button
+            type="button"
+            style={smallButtonStyle()}
+            onClick={deleteQueuePreset}
+            disabled={!queuePresetId}
+          >
+            Delete Preset
+          </button>
+          <button type="button" style={smallButtonStyle()} onClick={exportFlaggedQueueCsv}>
+            Export CSV
+          </button>
         </div>
         <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10, marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>

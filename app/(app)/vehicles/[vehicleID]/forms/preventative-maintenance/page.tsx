@@ -2,7 +2,13 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import {
+  confirmLeaveForm,
+  getSignedInDisplayName,
+  UnsavedChangesBanner,
+  useFormExitGuard,
+  useUnsavedChangesState,
+} from "@/lib/forms";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type PMChoice = "" | "pass" | "fail" | "na";
@@ -183,7 +189,8 @@ function addMonthsIso(dateIso: string, months: number) {
 
 export default function VehiclePreventativeMaintenanceForm() {
   const router = useRouter();
-  useFormExitGuard();
+  const { isDirty } = useUnsavedChangesState();
+  useFormExitGuard(isDirty);
   const params = useParams<{ vehicleID: string }>();
   const vehicleId = params.vehicleID;
 
@@ -421,6 +428,7 @@ export default function VehiclePreventativeMaintenanceForm() {
         maintenance needs. Any unsafe condition found must be documented and corrected before returning the vehicle to service.
       </div>
 
+      <UnsavedChangesBanner isDirty={isDirty} />
       <form onSubmit={onSubmit} style={{ marginTop: 16, display: "grid", gap: 14 }}>
         <section style={cardStyle}>
           <h2 style={{ marginTop: 0, marginBottom: 10 }}>Identification & Inspection Information</h2>

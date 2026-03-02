@@ -3,7 +3,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
-import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import {
+  confirmLeaveForm,
+  getSignedInDisplayName,
+  UnsavedChangesBanner,
+  useFormExitGuard,
+  useUnsavedChangesState,
+} from "@/lib/forms";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 export type Choice = "pass" | "fail";
@@ -74,6 +80,13 @@ type VehicleOption = {
   name: string | null;
   type: string | null;
   status: string | null;
+};
+
+type MaintenanceRequestStatusRow = {
+  id: string;
+  status: string | null;
+  urgency: string | null;
+  created_at: string;
 };
 
 type LeadOption = {
@@ -333,7 +346,8 @@ export default function InspectionForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  useFormExitGuard();
+  const { isDirty } = useUnsavedChangesState();
+  useFormExitGuard(isDirty);
 
   // ✅ Get vehicle ID from route param (folder is [vehicleID])
   const params = useParams<{ vehicleID?: string }>();
@@ -368,6 +382,9 @@ export default function InspectionForm({
   const [itemExtraValues, setItemExtraValues] = useState<Record<string, string>>({});
   const [diagCodeDraftByItem, setDiagCodeDraftByItem] = useState<Record<string, string>>({});
   const [failRequestLinks, setFailRequestLinks] = useState<Record<string, string>>({});
+  const [linkedRequestStatusById, setLinkedRequestStatusById] = useState<
+    Record<string, MaintenanceRequestStatusRow>
+  >({});
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [equipmentLoading, setEquipmentLoading] = useState(false);
   const [vehicleOptions, setVehicleOptions] = useState<VehicleOption[]>([]);
@@ -624,6 +641,45 @@ export default function InspectionForm({
       [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
     }));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    const linkedIds = Array.from(
+      new Set(
+        Object.values(failRequestLinks)
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    );
+    if (!linkedIds.length) {
+      setLinkedRequestStatusById({});
+      return;
+    }
+
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("vehicle_maintenance_requests")
+        .select("id,status,urgency,created_at")
+        .eq("vehicle_id", vehicleId)
+        .in("id", linkedIds);
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading linked request status:", error);
+        return;
+      }
+      const next: Record<string, MaintenanceRequestStatusRow> = {};
+      for (const row of (data ?? []) as MaintenanceRequestStatusRow[]) {
+        next[row.id] = row;
+      }
+      setLinkedRequestStatusById(next);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [failRequestLinks, vehicleId]);
 
   useEffect(() => {
     const linkedInspectionId = (searchParams.get("linkedInspectionId") || "").trim();
@@ -1302,6 +1358,7 @@ export default function InspectionForm({
         </div>
       ) : null}
 
+      <UnsavedChangesBanner isDirty={isDirty} />
       <form onSubmit={onSubmit} style={{ marginTop: 16 }}>
         {/* General Info */}
         <div style={cardStyle()}>
@@ -2603,6 +2660,15 @@ export default function InspectionForm({
                                 <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                                   Linked Request:{" "}
                                   <strong>{failRequestLinks[failLinkKey(sec.id, it.key)]}</strong>
+                                  {linkedRequestStatusById[failRequestLinks[failLinkKey(sec.id, it.key)]] ? (
+                                    <>
+                                      {" · "}
+                                      Status:{" "}
+                                      <strong>
+                                        {linkedRequestStatusById[failRequestLinks[failLinkKey(sec.id, it.key)]].status ?? "Open"}
+                                      </strong>
+                                    </>
+                                  ) : null}
                                 </div>
                               ) : null}
                               <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -2627,6 +2693,21 @@ export default function InspectionForm({
                                 >
                                   Link Current Request
                                 </button>
+                                {failRequestLinks[failLinkKey(sec.id, it.key)] ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      router.push(
+                                        `/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-log?requestId=${encodeURIComponent(
+                                          failRequestLinks[failLinkKey(sec.id, it.key)]
+                                        )}`
+                                      )
+                                    }
+                                    style={secondaryButtonStyle()}
+                                  >
+                                    Open Linked Request/Log
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
                           ) : null}
@@ -2745,6 +2826,15 @@ export default function InspectionForm({
                           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.92 }}>
                             Linked Request:{" "}
                             <strong>{failRequestLinks[failLinkKey("exiting", it.key)]}</strong>
+                            {linkedRequestStatusById[failRequestLinks[failLinkKey("exiting", it.key)]] ? (
+                              <>
+                                {" · "}
+                                Status:{" "}
+                                <strong>
+                                  {linkedRequestStatusById[failRequestLinks[failLinkKey("exiting", it.key)]].status ?? "Open"}
+                                </strong>
+                              </>
+                            ) : null}
                           </div>
                         ) : null}
                         <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -2769,6 +2859,21 @@ export default function InspectionForm({
                           >
                             Link Current Request
                           </button>
+                          {failRequestLinks[failLinkKey("exiting", it.key)] ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(
+                                  `/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-log?requestId=${encodeURIComponent(
+                                    failRequestLinks[failLinkKey("exiting", it.key)]
+                                  )}`
+                                )
+                              }
+                              style={secondaryButtonStyle()}
+                            >
+                              Open Linked Request/Log
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
