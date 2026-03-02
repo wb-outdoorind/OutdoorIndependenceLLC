@@ -224,10 +224,6 @@ function parseDiagnosticCodes(raw: string) {
     .filter(Boolean);
 }
 
-function inspectionDraftKey(vehicleId: string, type: InspectionType) {
-  return `inspection:draft:${type}:${vehicleId}`;
-}
-
 function todayYYYYMMDD() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -562,23 +558,11 @@ export default function InspectionForm({
         if (!active) return;
         if (!error && data?.draft && typeof data.draft === "object") {
           applyDraft(data.draft as InspectionDraftData);
-          restoredDraftRef.current = true;
-          return;
+        } else if (error) {
+          console.error("Failed to restore inspection draft:", error);
         }
       }
-
-      const raw = localStorage.getItem(inspectionDraftKey(vehicleId, type));
-      if (!raw) {
-        restoredDraftRef.current = true;
-        return;
-      }
-      try {
-        applyDraft(JSON.parse(raw) as InspectionDraftData);
-      } catch (error) {
-        console.error("Failed to restore inspection draft:", error);
-      } finally {
-        restoredDraftRef.current = true;
-      }
+      restoredDraftRef.current = true;
     })();
 
     return () => {
@@ -587,46 +571,52 @@ export default function InspectionForm({
   }, [vehicleId, type]);
 
   useEffect(() => {
-    setSectionState((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const sec of visibleSections) {
-        if (!isAlwaysRequiredSection(sec.id)) continue;
-        const existing = next[sec.id];
-        if (existing && !existing.applicable) {
-          next[sec.id] = { ...existing, applicable: true };
-          changed = true;
+    const timer = window.setTimeout(() => {
+      setSectionState((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const sec of visibleSections) {
+          if (!isAlwaysRequiredSection(sec.id)) continue;
+          const existing = next[sec.id];
+          if (existing && !existing.applicable) {
+            next[sec.id] = { ...existing, applicable: true };
+            changed = true;
+          }
         }
-      }
-      return changed ? next : prev;
-    });
+        return changed ? next : prev;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [visibleSections]);
 
   useEffect(() => {
-    // Keep trailer UI closed by default and never include current vehicle in trailer-linked list.
-    setTrailerVehiclePickerOpen(false);
-    setTrailerVehicleIds((prev) => prev.filter((id) => id !== vehicleId));
+    const timer = window.setTimeout(() => {
+      // Keep trailer UI closed by default and never include current vehicle in trailer-linked list.
+      setTrailerVehiclePickerOpen(false);
+      setTrailerVehicleIds((prev) => prev.filter((id) => id !== vehicleId));
 
-    // Trailer section should not be open by default for non-truck assets.
-    if (vehicleType !== "truck") {
-      setSectionState((prev) => {
-        const trailerState = prev.trailer;
-        if (!trailerState) return prev;
-        if (!trailerState.applicable && !(trailerState.name ?? "").trim()) return prev;
-        return {
-          ...prev,
-          trailer: { ...trailerState, applicable: false, name: "" },
-        };
-      });
-      setSectionEquipmentIds((prev) => {
-        if (!prev.trailer) return prev;
-        const next = { ...prev };
-        delete next.trailer;
-        return next;
-      });
-      setTrailerVehicleIds([]);
-      setTrailerVehicleLinks({});
-    }
+      // Trailer section should not be open by default for non-truck assets.
+      if (vehicleType !== "truck") {
+        setSectionState((prev) => {
+          const trailerState = prev.trailer;
+          if (!trailerState) return prev;
+          if (!trailerState.applicable && !(trailerState.name ?? "").trim()) return prev;
+          return {
+            ...prev,
+            trailer: { ...trailerState, applicable: false, name: "" },
+          };
+        });
+        setSectionEquipmentIds((prev) => {
+          if (!prev.trailer) return prev;
+          const next = { ...prev };
+          delete next.trailer;
+          return next;
+        });
+        setTrailerVehicleIds([]);
+        setTrailerVehicleLinks({});
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [vehicleId, vehicleType]);
 
   useEffect(() => {
@@ -663,14 +653,17 @@ export default function InspectionForm({
   }, []);
 
   useEffect(() => {
-    const linkedRequestId = (searchParams.get("linkedRequestId") || "").trim();
-    const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
-    const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
-    if (!linkedRequestId || !linkSectionId || !linkItemKey) return;
-    setFailRequestLinks((prev) => ({
-      ...prev,
-      [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
-    }));
+    const timer = window.setTimeout(() => {
+      const linkedRequestId = (searchParams.get("linkedRequestId") || "").trim();
+      const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
+      const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
+      if (!linkedRequestId || !linkSectionId || !linkItemKey) return;
+      setFailRequestLinks((prev) => ({
+        ...prev,
+        [failLinkKey(linkSectionId, linkItemKey)]: linkedRequestId,
+      }));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [searchParams]);
 
   useEffect(() => {
@@ -683,8 +676,8 @@ export default function InspectionForm({
       )
     );
     if (!linkedIds.length) {
-      setLinkedRequestStatusById({});
-      return;
+      const timer = window.setTimeout(() => setLinkedRequestStatusById({}), 0);
+      return () => window.clearTimeout(timer);
     }
 
     let active = true;
@@ -713,13 +706,16 @@ export default function InspectionForm({
   }, [failRequestLinks, vehicleId]);
 
   useEffect(() => {
-    const linkedInspectionId = (searchParams.get("linkedInspectionId") || "").trim();
-    const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
-    if (!linkedInspectionId || !linkedVehicleId) return;
-    setTrailerVehicleLinks((prev) => ({
-      ...prev,
-      [linkedVehicleId]: linkedInspectionId,
-    }));
+    const timer = window.setTimeout(() => {
+      const linkedInspectionId = (searchParams.get("linkedInspectionId") || "").trim();
+      const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
+      if (!linkedInspectionId || !linkedVehicleId) return;
+      setTrailerVehicleLinks((prev) => ({
+        ...prev,
+        [linkedVehicleId]: linkedInspectionId,
+      }));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [searchParams]);
 
   useEffect(() => {
@@ -1003,7 +999,6 @@ export default function InspectionForm({
       trailerVehicleIds,
       trailerVehicleLinks,
     };
-    localStorage.setItem(inspectionDraftKey(vehicleId, type), JSON.stringify(draft));
 
     const uid = draftUserId;
     if (!uid) return;
@@ -1025,7 +1020,6 @@ export default function InspectionForm({
 
   async function clearDraft() {
     if (!vehicleId) return;
-    localStorage.removeItem(inspectionDraftKey(vehicleId, type));
     if (!draftUserId) return;
     const supabase = createSupabaseBrowser();
     const { error } = await supabase
