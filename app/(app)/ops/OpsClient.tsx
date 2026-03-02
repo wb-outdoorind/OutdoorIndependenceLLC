@@ -65,8 +65,9 @@ type EquipmentPmEventRow = {
 
 type VehiclePmRecord = {
   id: string;
-  createdAt: string;
-  mileage: number;
+  vehicle_id: string;
+  created_at: string;
+  mileage: number | null;
 };
 
 type PmBoardRow = {
@@ -263,26 +264,6 @@ function downloadCsv(filename: string, headers: string[], rows: Array<Array<stri
   URL.revokeObjectURL(url);
 }
 
-function vehiclePmStorageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:vehicle_pm`;
-}
-
-function parseVehiclePmFromStorage(vehicleId: string): VehiclePmRecord | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(vehiclePmStorageKey(vehicleId));
-    if (!raw) return null;
-    const rows = JSON.parse(raw) as Array<VehiclePmRecord>;
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    const valid = rows
-      .filter((r) => Number.isFinite(Number(r.mileage)) && Number(r.mileage) >= 0)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return valid[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -305,6 +286,7 @@ export default function OpsPage({
 
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [equipment, setEquipment] = useState<EquipmentRow[]>([]);
+  const [vehiclePmEvents, setVehiclePmEvents] = useState<VehiclePmRecord[]>([]);
   const [equipmentPmEvents, setEquipmentPmEvents] = useState<EquipmentPmEventRow[]>([]);
   const [allRequests, setAllRequests] = useState<RequestRow[]>([]);
   const [allMaintenanceLogs, setAllMaintenanceLogs] = useState<MaintenanceLogRow[]>([]);
@@ -382,7 +364,7 @@ export default function OpsPage({
             .select(`id,${assetKey},created_at,updated_at,status,description,system_affected`);
         };
 
-        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
+        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehiclePmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
           supabase.from("vehicles").select("id,name,year,status,mileage,updated_at"),
           supabase.from("equipment").select("id,name,year,status,current_hours,updated_at"),
           fetchRequestsWithOptionalClosedAt("maintenance_requests", "vehicle_id"),
@@ -394,6 +376,10 @@ export default function OpsPage({
           supabase
             .from("equipment_pm_events")
             .select("id,equipment_id,created_at,hours")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("vehicle_pm_events")
+            .select("id,vehicle_id,created_at,mileage")
             .order("created_at", { ascending: false }),
           supabase
             .from("maintenance_logs")
@@ -412,6 +398,7 @@ export default function OpsPage({
           equipmentReqRes.error ||
           lowInvRes.error ||
           eqPmRes.error ||
+          vehiclePmRes.error ||
           vehicleLogsRes.error ||
           equipmentLogsRes.error
         ) {
@@ -422,6 +409,7 @@ export default function OpsPage({
             equipmentRequestsError: equipmentReqRes.error,
             lowInventoryError: lowInvRes.error,
             equipmentPmError: eqPmRes.error,
+            vehiclePmError: vehiclePmRes.error,
             vehicleLogsError: vehicleLogsRes.error,
             equipmentLogsError: equipmentLogsRes.error,
           });
@@ -432,6 +420,7 @@ export default function OpsPage({
               equipmentReqRes.error?.message ||
               lowInvRes.error?.message ||
               eqPmRes.error?.message ||
+              vehiclePmRes.error?.message ||
               vehicleLogsRes.error?.message ||
               equipmentLogsRes.error?.message ||
               "Failed to load operations overview."
@@ -443,6 +432,7 @@ export default function OpsPage({
         const vehicleRows = (vehiclesRes.data ?? []) as VehicleRow[];
         const equipmentRows = (equipmentRes.data ?? []) as EquipmentRow[];
         const eqPmRows = (eqPmRes.data ?? []) as EquipmentPmEventRow[];
+        const vehPmRows = (vehiclePmRes.data ?? []) as VehiclePmRecord[];
 
         const requestRows: RequestRow[] = [
           ...(((vehicleReqRes.data ?? []) as RequestRow[]) || []),
@@ -533,6 +523,7 @@ export default function OpsPage({
 
         setVehicles(vehicleRows);
         setEquipment(equipmentRows);
+        setVehiclePmEvents(vehPmRows);
         setEquipmentPmEvents(eqPmRows);
         setAllRequests(requestRows);
         setAllMaintenanceLogs(maintenanceLogRows);
@@ -562,6 +553,15 @@ export default function OpsPage({
 
   const pmBoardRows = useMemo(() => {
     const equipmentLastPm = new Map<string, { hours: number | null; date: string }>();
+    const vehicleLastPm = new Map<string, { mileage: number | null; date: string }>();
+    for (const row of vehiclePmEvents) {
+      if (!vehicleLastPm.has(row.vehicle_id)) {
+        vehicleLastPm.set(row.vehicle_id, {
+          mileage: row.mileage,
+          date: row.created_at,
+        });
+      }
+    }
     for (const row of equipmentPmEvents) {
       if (!equipmentLastPm.has(row.equipment_id)) {
         equipmentLastPm.set(row.equipment_id, {
@@ -577,8 +577,8 @@ export default function OpsPage({
       const current = Number(v.mileage ?? 0);
       if (!Number.isFinite(current) || current < 0) continue;
 
-      const lastPm = parseVehiclePmFromStorage(v.id);
-      const lastValue = lastPm?.mileage ?? 0;
+      const lastPm = vehicleLastPm.get(v.id);
+      const lastValue = Number(lastPm?.mileage ?? 0);
       const dueAt = lastValue + VEHICLE_PM_INTERVAL_MILES;
       const delta = dueAt - current;
 
@@ -594,8 +594,8 @@ export default function OpsPage({
         assetType: "Vehicle",
         currentValue: current,
         unit: "miles",
-        lastPmValue: lastPm?.mileage ?? null,
-        lastPmDate: lastPm?.createdAt ?? null,
+        lastPmValue: Number.isFinite(lastValue) ? lastValue : null,
+        lastPmDate: lastPm?.date ?? null,
         dueAt,
         status,
         overdueAmount: current - dueAt,
@@ -649,7 +649,7 @@ export default function OpsPage({
     });
 
     return rows;
-  }, [vehicles, equipment, equipmentPmEvents]);
+  }, [vehicles, equipment, equipmentPmEvents, vehiclePmEvents]);
 
   const filteredPmRows = useMemo(() => {
     const q = pmSearch.trim().toLowerCase();

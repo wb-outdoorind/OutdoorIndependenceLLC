@@ -172,14 +172,6 @@ function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
 }
 
-function vehicleLastOilChangeMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:lastOilChangeMileage`;
-}
-
-function vehiclePmStorageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:vehicle_pm`;
-}
-
 function addMonthsIso(dateIso: string, months: number) {
   const dt = new Date(`${dateIso}T12:00:00`);
   if (Number.isNaN(dt.getTime())) return "";
@@ -194,17 +186,12 @@ export default function VehiclePreventativeMaintenanceForm() {
   const params = useParams<{ vehicleID: string }>();
   const vehicleId = params.vehicleID;
 
-  const initialSavedMileage = (() => {
-    if (typeof window === "undefined") return null;
-    const value = Number(localStorage.getItem(vehicleMileageKey(vehicleId)));
-    return Number.isFinite(value) && value > 0 ? value : null;
-  })();
-
   const todayIso = new Date().toISOString().slice(0, 10);
 
+  const [initialSavedMileage, setInitialSavedMileage] = useState<number | null>(null);
   const [inspectionDate, setInspectionDate] = useState(todayIso);
   const [inspectorName, setInspectorName] = useState("");
-  const [mileage, setMileage] = useState(initialSavedMileage != null ? String(initialSavedMileage) : "");
+  const [mileage, setMileage] = useState("");
 
   const [oilLifePercentage, setOilLifePercentage] = useState("");
   const [oilChangePerformed, setOilChangePerformed] = useState<YesNo>("");
@@ -252,6 +239,40 @@ export default function VehiclePreventativeMaintenanceForm() {
       setInspectorName((prev) => (prev.trim() ? prev : name));
     })();
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (!alive) return;
+
+      if (!error) {
+        const parsedDbMileage = Number(data?.mileage);
+        if (Number.isFinite(parsedDbMileage) && parsedDbMileage > 0) {
+          setInitialSavedMileage(parsedDbMileage);
+          setMileage((prev) => (prev.trim() ? prev : String(parsedDbMileage)));
+          return;
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        const localValue = Number(localStorage.getItem(vehicleMileageKey(vehicleId)));
+        if (Number.isFinite(localValue) && localValue > 0) {
+          setInitialSavedMileage(localValue);
+          setMileage((prev) => (prev.trim() ? prev : String(localValue)));
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [vehicleId]);
 
   function updateCheck(key: string, value: PMChoice) {
     setChecks((prev) => ({ ...prev, [key]: value }));
@@ -379,17 +400,29 @@ export default function VehiclePreventativeMaintenanceForm() {
       signature: signature.trim(),
     };
 
-    const existing = JSON.parse(localStorage.getItem(vehiclePmStorageKey(vehicleId)) || "[]");
-    existing.unshift(record);
-    localStorage.setItem(vehiclePmStorageKey(vehicleId), JSON.stringify(existing));
-
-    localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
-    if (oilChangePerformed === "yes") {
-      localStorage.setItem(vehicleLastOilChangeMileageKey(vehicleId), String(m));
-    }
-
     try {
       const supabase = createSupabaseBrowser();
+      const failedCount = Object.values(checks).filter((value) => value === "fail").length;
+      const pmSummary = failedCount > 0 ? `${failedCount} failed item(s)` : "All truck PM checks passed";
+
+      const { error: eventInsertError } = await supabase
+        .from("vehicle_pm_events")
+        .insert({
+          vehicle_id: vehicleId,
+          mileage: m,
+          notes: repairsNotes.trim() || null,
+          result: {
+            mode: "truck_pm",
+            summary: pmSummary,
+            truckPm: record,
+          },
+        });
+      if (eventInsertError) {
+        console.error("Failed to insert vehicle PM event:", eventInsertError);
+        alert(eventInsertError.message || "Failed to save truck PM inspection.");
+        return;
+      }
+
       const { data: vehicleRow, error: vehicleReadError } = await supabase
         .from("vehicles")
         .select("mileage")

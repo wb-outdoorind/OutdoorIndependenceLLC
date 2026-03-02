@@ -37,6 +37,15 @@ type VehiclePMRecord = {
   notes?: string;
 };
 
+type VehiclePmEventRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  mileage: number | null;
+  notes: string | null;
+  result: unknown;
+};
+
 type MaintenanceRequestPreviewRow = {
   id: string;
   vehicle_id: string;
@@ -99,9 +108,6 @@ type VehicleEditDraft = {
    Local storage keys
 ========================= */
 
-function vehiclePmKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:vehicle_pm`;
-}
 function vehicleMileageKey(vehicleId: string) {
   return `vehicle:${vehicleId}:mileage`;
 }
@@ -124,15 +130,6 @@ function normalizeVehicleType(t: string | null): VehicleType {
     return "skidsteer";
   if (x === "loader") return "loader";
   return "truck";
-}
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
 }
 
 function formatDateTime(iso: string) {
@@ -209,6 +206,25 @@ function parseTitleAndDescription(raw: string | null) {
   if (lines.length <= 2) return { title, description: raw.trim() };
   const description = lines.slice(2).join("\n").trim();
   return { title, description };
+}
+
+function mapVehiclePmEventToRecord(row: VehiclePmEventRow): VehiclePMRecord {
+  const result = row.result && typeof row.result === "object" ? (row.result as Record<string, unknown>) : null;
+  const truckPmRaw =
+    result && result.truckPm && typeof result.truckPm === "object"
+      ? (result.truckPm as Record<string, unknown>)
+      : null;
+  const rawOilChange = truckPmRaw?.oilChangePerformed ?? result?.oilChangePerformed;
+  const oilChangePerformed = rawOilChange === true || rawOilChange === "yes";
+
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    createdAt: row.created_at,
+    mileage: Number.isFinite(Number(row.mileage)) ? Number(row.mileage) : 0,
+    oilChangePerformed,
+    notes: row.notes ?? undefined,
+  };
 }
 
 function cardStyle(): React.CSSProperties {
@@ -359,6 +375,7 @@ export default function VehicleDetailPage() {
   const plateParam = (searchParams.get("plate") || "").trim();
   const [requestPreviewRows, setRequestPreviewRows] = useState<MaintenanceRequestPreviewRow[]>([]);
   const [logPreviewRows, setLogPreviewRows] = useState<MaintenanceLogPreviewRow[]>([]);
+  const [pmRecords, setPmRecords] = useState<VehiclePMRecord[]>([]);
   const [requestPreviewError, setRequestPreviewError] = useState<string | null>(null);
   const [logPreviewError, setLogPreviewError] = useState<string | null>(null);
   const [openRequestCountForHealth, setOpenRequestCountForHealth] = useState(0);
@@ -567,11 +584,10 @@ export default function VehicleDetailPage() {
     };
   }, [vehicleIdFromRoute, routeVehicleId, assetParam, plateParam]);
 
-  const { localMileage, pmRecords } = useMemo(() => {
+  const { localMileage } = useMemo(() => {
     if (!hasMounted || typeof window === "undefined") {
       return {
         localMileage: undefined as number | undefined,
-        pmRecords: [] as VehiclePMRecord[],
       };
     }
 
@@ -583,10 +599,6 @@ export default function VehicleDetailPage() {
 
     return {
       localMileage: parsedLocalMileage,
-      pmRecords: safeParse<VehiclePMRecord[]>(
-        localStorage.getItem(vehiclePmKey(storageId)),
-        []
-      ),
     };
   }, [hasMounted, vehicleIdFromRoute, vehicle?.id]);
 
@@ -598,7 +610,7 @@ export default function VehicleDetailPage() {
       setRequestPreviewError(null);
       setLogPreviewError(null);
 
-      const [requestsRes, logsRes, openRequestsCountRes] = await Promise.all([
+      const [requestsRes, logsRes, openRequestsCountRes, pmRes] = await Promise.all([
         supabase
           .from("maintenance_requests")
           .select("id, created_at, status, urgency, system_affected, description, vehicle_id")
@@ -616,6 +628,12 @@ export default function VehicleDetailPage() {
           .select("id", { count: "exact", head: true })
           .eq("vehicle_id", params.vehicleID)
           .in("status", ["Open", "In Progress"]),
+        supabase
+          .from("vehicle_pm_events")
+          .select("id,vehicle_id,created_at,mileage,notes,result")
+          .eq("vehicle_id", params.vehicleID)
+          .order("created_at", { ascending: false })
+          .limit(50),
       ]);
 
       if (!alive) return;
@@ -645,6 +663,15 @@ export default function VehicleDetailPage() {
         setOpenRequestCountForHealth(0);
       } else {
         setOpenRequestCountForHealth(openRequestsCountRes.count ?? 0);
+      }
+
+      if (pmRes.error || !pmRes.data) {
+        if (pmRes.error) {
+          console.error("Vehicle PM preview load error:", pmRes.error);
+        }
+        setPmRecords([]);
+      } else {
+        setPmRecords((pmRes.data as VehiclePmEventRow[]).map(mapVehiclePmEventToRecord));
       }
     })();
 

@@ -59,6 +59,15 @@ type VehiclePMRecord = {
   notes?: string;
 };
 
+type VehiclePmEventRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  mileage: number | null;
+  notes: string | null;
+  result: unknown;
+};
+
 type RequestStatus = "Open" | "In Progress" | "Closed";
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 
@@ -141,10 +150,6 @@ type TimelineItem = {
 
 type FilterValue = "All" | TimelineType;
 
-function vehiclePmKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:vehicle_pm`;
-}
-
 function isTimelineType(value: string | null): value is TimelineType {
   return (
     value === "Pre-Trip" ||
@@ -158,15 +163,6 @@ function isTimelineType(value: string | null): value is TimelineType {
 /* =========================
    Helpers
 ========================= */
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
@@ -269,6 +265,25 @@ function parseChecklist(value: unknown): Partial<TripInspectionRecord> {
   return value as Partial<TripInspectionRecord>;
 }
 
+function mapVehiclePmEventToRecord(row: VehiclePmEventRow): VehiclePMRecord {
+  const result = row.result && typeof row.result === "object" ? (row.result as Record<string, unknown>) : null;
+  const truckPmRaw =
+    result && result.truckPm && typeof result.truckPm === "object"
+      ? (result.truckPm as Record<string, unknown>)
+      : null;
+  const rawOilChange = truckPmRaw?.oilChangePerformed ?? result?.oilChangePerformed;
+  const oilChangePerformed = rawOilChange === true || rawOilChange === "yes";
+
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    createdAt: row.created_at,
+    mileage: Number.isFinite(Number(row.mileage)) ? Number(row.mileage) : 0,
+    oilChangePerformed,
+    notes: row.notes ?? undefined,
+  };
+}
+
 /* =========================
    Page
 ========================= */
@@ -285,9 +300,11 @@ export default function VehicleHistoryPage() {
   const [inspectionRows, setInspectionRows] = useState<TripInspectionRecord[]>([]);
   const [requestRows, setRequestRows] = useState<MaintenanceRequestRecord[]>([]);
   const [logRows, setLogRows] = useState<MaintenanceLogRecord[]>([]);
+  const [pmRows, setPmRows] = useState<VehiclePMRecord[]>([]);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
+  const [pmError, setPmError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -444,9 +461,38 @@ export default function VehicleHistoryPage() {
     };
   }, [params.vehicleID]);
 
-  const items = useMemo(() => {
-    if (typeof window === "undefined") return [] as TimelineItem[];
+  useEffect(() => {
+    let alive = true;
 
+    async function loadPmRows() {
+      const supabase = createSupabaseBrowser();
+      setPmError(null);
+
+      const { data, error } = await supabase
+        .from("vehicle_pm_events")
+        .select("id,vehicle_id,created_at,mileage,notes,result")
+        .eq("vehicle_id", params.vehicleID)
+        .order("created_at", { ascending: false });
+
+      if (!alive) return;
+      if (error || !data) {
+        if (error) console.error("[vehicle-history] vehicle_pm_events load error:", error);
+        setPmError(error?.message || "Failed to load vehicle PM records.");
+        setPmRows([]);
+        return;
+      }
+
+      setPmRows((data as VehiclePmEventRow[]).map(mapVehiclePmEventToRecord));
+    }
+
+    void loadPmRows();
+
+    return () => {
+      alive = false;
+    };
+  }, [params.vehicleID]);
+
+  const items = useMemo(() => {
     const preTrips = inspectionRows.filter((x) => x.type !== "post-trip").map(
       (x): TimelineItem => {
         const defects =
@@ -493,7 +539,7 @@ export default function VehicleHistoryPage() {
       }
     );
 
-    const pms = safeParse<VehiclePMRecord[]>(localStorage.getItem(vehiclePmKey(vehicleId)), []).map(
+    const pms = pmRows.map(
       (x): TimelineItem => ({
         id: x.id,
         type: "Vehicle PM",
@@ -555,7 +601,7 @@ export default function VehicleHistoryPage() {
     );
 
     return merged;
-  }, [vehicleId, inspectionRows, requestRows, logRows]);
+  }, [inspectionRows, requestRows, logRows, pmRows]);
 
   const filtered = useMemo(() => {
     if (filter === "All") return items;
@@ -616,6 +662,12 @@ export default function VehicleHistoryPage() {
       {logError ? (
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
           {logError}
+        </div>
+      ) : null}
+
+      {pmError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ff9d9d", opacity: 0.95 }}>
+          {pmError}
         </div>
       ) : null}
 
