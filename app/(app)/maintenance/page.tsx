@@ -527,7 +527,23 @@ export default function MaintenanceCenterPage() {
             background: section === "queue" ? "rgba(126,255,167,0.12)" : sectionCardStyle.background,
           }}
         >
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Request Queue</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Request Queue</div>
+            {userRole === "apprentice" ? (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 900,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  background: "rgba(255,255,255,0.08)",
+                }}
+              >
+                View Only
+              </span>
+            ) : null}
+          </div>
           <div style={{ opacity: 0.78, marginTop: 8 }}>Open, in-progress, and closed requests across vehicles and equipment.</div>
         </button>
 
