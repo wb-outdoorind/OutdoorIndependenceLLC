@@ -588,6 +588,14 @@ export default function MaintenanceCenterPage() {
         </div>
       ) : (
         <>
+        {userRole === "apprentice" ? (
+          <div style={{ marginTop: 16, ...cardStyle }}>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Role Restriction</div>
+            <div style={{ opacity: 0.8 }}>
+              Apprentice role cannot create maintenance requests or maintenance logs. Use this queue for visibility only.
+            </div>
+          </div>
+        ) : null}
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input
             value={search}
@@ -681,9 +689,15 @@ export default function MaintenanceCenterPage() {
                     </div>
 
                     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <Link href={createLogHref} style={buttonStyle}>
-                        Create Log
-                      </Link>
+                      {userRole !== "apprentice" ? (
+                        <Link href={createLogHref} style={buttonStyle}>
+                          Create Log
+                        </Link>
+                      ) : (
+                        <span style={{ ...secondaryButtonStyle, opacity: 0.6, cursor: "not-allowed" }}>
+                          Log Restricted
+                        </span>
+                      )}
 
                       <Link href={openUnitHref} style={secondaryButtonStyle}>
                         Open {kindLabel}
