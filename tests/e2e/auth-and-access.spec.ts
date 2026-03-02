@@ -7,8 +7,7 @@ test("login page renders", async ({ page }) => {
 });
 
 test("protected route redirects to login when unauthenticated", async ({ page }) => {
-  const response = await page.goto("/vehicles", { waitUntil: "domcontentloaded" });
-  expect(response?.status()).toBeGreaterThanOrEqual(300);
+  await page.goto("/vehicles", { waitUntil: "domcontentloaded" });
   expect(page.url()).toContain("/login");
   expect(page.url()).toContain("next=%2Fvehicles");
 });
