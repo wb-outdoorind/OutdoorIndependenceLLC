@@ -26,18 +26,6 @@ type VehicleRecord = {
   mileage: number | null;
 };
 
-function normalizeVehicleType(
-  t: string | null
-): "truck" | "car" | "skidsteer" | "loader" {
-  const x = (t ?? "").trim().toLowerCase();
-  if (x === "truck") return "truck";
-  if (x === "car") return "car";
-  if (x === "skidsteer" || x === "skid steer" || x === "skid_steer")
-    return "skidsteer";
-  if (x === "loader") return "loader";
-  return "truck"; // safe default
-}
-
 /* ======================
    Styles
 ====================== */
@@ -268,22 +256,6 @@ export default function VehiclesListClient({
                   <Link
                     key={v.id}
                     href={`/vehicles/${encodeURIComponent(v.id)}`}
-                    onClick={() => {
-                      // ✅ store normalized type for downstream forms
-                      const vt = normalizeVehicleType(v.type);
-                      localStorage.setItem(`vehicle:${v.id}:type`, vt);
-
-                      // ✅ store name so downstream forms can show it
-                      localStorage.setItem(`vehicle:${v.id}:name`, v.name ?? "");
-
-                      // ✅ store mileage for prefill + oil life
-                      if (typeof v.mileage === "number") {
-                        localStorage.setItem(
-                          `vehicle:${v.id}:mileage`,
-                          String(v.mileage)
-                        );
-                      }
-                    }}
                     style={{ textDecoration: "none", color: "inherit" }}
                   >
                     <div

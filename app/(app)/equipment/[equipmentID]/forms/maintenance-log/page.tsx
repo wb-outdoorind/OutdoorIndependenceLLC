@@ -60,10 +60,6 @@ function canQuickLogOverride(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
-function equipmentHoursKey(equipmentId: string) {
-  return `equipment:${equipmentId}:hours`;
-}
-
 function todayYYYYMMDD() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -91,17 +87,9 @@ export default function EquipmentMaintenanceLogPage() {
 
   const equipmentId = params?.equipmentID ? decodeURIComponent(params.equipmentID) : "";
   const queryRequestId = sp?.get("requestId") ? decodeURIComponent(sp.get("requestId")!) : "";
-  const initialStoredHours = (() => {
-    if (typeof window === "undefined" || !equipmentId) return null;
-    const saved = localStorage.getItem(equipmentHoursKey(equipmentId));
-    const h = saved ? Number(saved) : NaN;
-    return Number.isFinite(h) && h >= 0 ? h : null;
-  })();
 
   const [title, setTitle] = useState("");
-  const [hours, setHours] = useState(() =>
-    initialStoredHours != null ? String(initialStoredHours) : ""
-  );
+  const [hours, setHours] = useState("");
   const [status, setStatus] = useState<MaintenanceLogStatus | "">("");
   const [mechanicSelfScore, setMechanicSelfScore] = useState("");
   const [notes, setNotes] = useState("");
@@ -127,7 +115,7 @@ export default function EquipmentMaintenanceLogPage() {
   const [selectedPartId, setSelectedPartId] = useState("");
   const [selectedPartQty, setSelectedPartQty] = useState("1");
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
-  const [currentHours] = useState<number | null>(initialStoredHours);
+  const [currentHours, setCurrentHours] = useState<number | null>(null);
   const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
@@ -200,6 +188,32 @@ export default function EquipmentMaintenanceLogPage() {
       alive = false;
     };
   }, [equipmentId, queryRequestId]);
+
+  useEffect(() => {
+    if (!equipmentId) return;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment")
+        .select("current_hours")
+        .eq("id", equipmentId)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("[equipment-maintenance-log] equipment context load error:", error);
+        return;
+      }
+      const h = Number(data?.current_hours);
+      if (Number.isFinite(h) && h >= 0) {
+        setCurrentHours(h);
+        setHours((prev) => (prev.trim() ? prev : String(h)));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [equipmentId]);
 
   const totalCost = useMemo(() => {
     const l = Number(laborCost);
@@ -471,7 +485,6 @@ export default function EquipmentMaintenanceLogPage() {
       });
     }
 
-    localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
     router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
   }
 

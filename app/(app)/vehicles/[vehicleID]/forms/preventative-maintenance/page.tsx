@@ -168,10 +168,6 @@ const CHECK_SECTIONS: Array<{ title: string; items: Array<{ key: string; label: 
   },
 ];
 
-function vehicleMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:mileage`;
-}
-
 function addMonthsIso(dateIso: string, months: number) {
   const dt = new Date(`${dateIso}T12:00:00`);
   if (Number.isNaN(dt.getTime())) return "";
@@ -256,15 +252,6 @@ export default function VehiclePreventativeMaintenanceForm() {
         if (Number.isFinite(parsedDbMileage) && parsedDbMileage > 0) {
           setInitialSavedMileage(parsedDbMileage);
           setMileage((prev) => (prev.trim() ? prev : String(parsedDbMileage)));
-          return;
-        }
-      }
-
-      if (typeof window !== "undefined") {
-        const localValue = Number(localStorage.getItem(vehicleMileageKey(vehicleId)));
-        if (Number.isFinite(localValue) && localValue > 0) {
-          setInitialSavedMileage(localValue);
-          setMileage((prev) => (prev.trim() ? prev : String(localValue)));
         }
       }
     })();
@@ -443,7 +430,6 @@ export default function VehiclePreventativeMaintenanceForm() {
         if (vehicleUpdateError) {
           console.error("Failed to update vehicle mileage:", vehicleUpdateError);
         }
-        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
       }
     } catch (vehicleMileageError) {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);

@@ -17,18 +17,6 @@ type EquipmentRow = {
 };
 type Role = AppRole;
 
-function equipmentNameKey(equipmentId: string) {
-  return `equipment:${equipmentId}:name`;
-}
-
-function equipmentTypeKey(equipmentId: string) {
-  return `equipment:${equipmentId}:type`;
-}
-
-function equipmentHoursKey(equipmentId: string) {
-  return `equipment:${equipmentId}:hours`;
-}
-
 function pickCategory(typeValue: string, nameValue: string, idValue: string) {
   const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
   if (hay.includes("backpack blower")) return "BackpackBlower";
@@ -284,13 +272,6 @@ export default function EquipmentListPage() {
               <Link
                 key={r.id}
                 href={`/equipment/${encodeURIComponent(r.id)}`}
-                onClick={() => {
-                  localStorage.setItem(equipmentNameKey(r.id), r.name ?? "");
-                  localStorage.setItem(equipmentTypeKey(r.id), r.equipment_type ?? "");
-                  if (typeof r.current_hours === "number") {
-                    localStorage.setItem(equipmentHoursKey(r.id), String(r.current_hours));
-                  }
-                }}
                 style={{ textDecoration: "none", color: "inherit" }}
               >
                 <div

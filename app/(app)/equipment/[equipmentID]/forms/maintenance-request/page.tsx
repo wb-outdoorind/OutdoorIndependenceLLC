@@ -48,18 +48,6 @@ type SystemAffected =
 type TriState = "Yes" | "No" | "Not sure";
 type Role = AppRole;
 
-function equipmentHoursKey(equipmentId: string) {
-  return `equipment:${equipmentId}:hours`;
-}
-
-function equipmentNameKey(equipmentId: string) {
-  return `equipment:${equipmentId}:name`;
-}
-
-function equipmentTypeKey(equipmentId: string) {
-  return `equipment:${equipmentId}:type`;
-}
-
 function todayYYYYMMDD() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -104,24 +92,26 @@ export default function EquipmentMaintenanceRequestPage() {
 
   useEffect(() => {
     if (!equipmentId) return;
-    if (typeof window === "undefined") return;
-
-    const read = () => {
-      setEquipmentName((localStorage.getItem(equipmentNameKey(equipmentId)) ?? "").trim());
-      setEquipmentType((localStorage.getItem(equipmentTypeKey(equipmentId)) ?? "").trim());
-
-      const savedHours = localStorage.getItem(equipmentHoursKey(equipmentId));
-      const h = savedHours ? Number(savedHours) : NaN;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment")
+        .select("name,equipment_type,current_hours")
+        .eq("id", equipmentId)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading equipment context:", error);
+        return;
+      }
+      setEquipmentName((data?.name ?? "").trim());
+      setEquipmentType((data?.equipment_type ?? "").trim());
+      const h = Number(data?.current_hours);
       if (Number.isFinite(h) && h >= 0) setHours(String(h));
-    };
-
-    read();
-    const t1 = window.setTimeout(read, 50);
-    const t2 = window.setTimeout(read, 250);
-
+    })();
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      active = false;
     };
   }, [equipmentId]);
 
@@ -251,8 +241,6 @@ export default function EquipmentMaintenanceRequestPage() {
       setSubmitError(error.message);
       return;
     }
-
-    localStorage.setItem(equipmentHoursKey(equipmentId), String(h));
 
     if (insertedRequest?.id) {
       try {

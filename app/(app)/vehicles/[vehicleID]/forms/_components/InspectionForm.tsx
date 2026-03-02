@@ -224,14 +224,6 @@ function parseDiagnosticCodes(raw: string) {
     .filter(Boolean);
 }
 
-function vehicleMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:mileage`;
-}
-
-function vehicleTypeKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:type`;
-}
-
 function inspectionDraftKey(vehicleId: string, type: InspectionType) {
   return `inspection:draft:${type}:${vehicleId}`;
 }
@@ -494,27 +486,31 @@ export default function InspectionForm({
   const [draftUserId, setDraftUserId] = useState<string | null>(null);
   const bypassLeadSignoff = canBypassLeadSignoff(currentUserRole);
 
-  // Read vehicle metadata from local storage (with short retries for timing).
   useEffect(() => {
     if (!vehicleId) return;
-
-    const read = () => {
-      const raw = localStorage.getItem(vehicleTypeKey(vehicleId));
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("type,mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading vehicle context for inspection form:", error);
+        return;
+      }
+      const raw = data?.type ?? null;
       setVehicleType(isVehicleType(raw) ? raw : "truck");
-      const savedMileage = localStorage.getItem(vehicleMileageKey(vehicleId));
-      const parsedMileage = savedMileage ? Number(savedMileage) : NaN;
+      const parsedMileage = Number(data?.mileage);
       if (Number.isFinite(parsedMileage) && parsedMileage > 0) {
         setMileage((prev) => (prev.trim() ? prev : String(parsedMileage)));
       }
-    };
-
-    read();
-    const t1 = window.setTimeout(read, 50);
-    const t2 = window.setTimeout(read, 250);
+    })();
 
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      active = false;
     };
   }, [vehicleId]);
 
@@ -1349,11 +1345,9 @@ export default function InspectionForm({
         if (vehicleUpdateError) {
           console.error("Failed to update vehicle mileage:", vehicleUpdateError);
         }
-        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
       }
     } catch (vehicleMileageError) {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
-      localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
     }
 
     if (insertedInspection?.id) {

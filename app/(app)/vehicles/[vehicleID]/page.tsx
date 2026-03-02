@@ -108,16 +108,6 @@ type VehicleEditDraft = {
    Local storage keys
 ========================= */
 
-function vehicleMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:mileage`;
-}
-function vehicleTypeKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:type`;
-}
-function vehicleNameKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:name`;
-}
-
 /* =========================
    Helpers
 ========================= */
@@ -392,13 +382,6 @@ export default function VehicleDetailPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [userRole, setUserRole] = useState<Role>("employee");
-  const [hasMounted, setHasMounted] = useState(false);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setHasMounted(true), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
   useEffect(() => {
     let alive = true;
 
@@ -428,22 +411,6 @@ export default function VehicleDetailPage() {
         ) as Role
       );
 
-      const hydrateLocal = (row: VehicleRow) => {
-        if (typeof window === "undefined") return;
-
-        // ✅ type
-        const vt = normalizeVehicleType(row.type);
-        localStorage.setItem(vehicleTypeKey(row.id), vt);
-
-        // ✅ name (so forms can display it)
-        localStorage.setItem(vehicleNameKey(row.id), row.name ?? "");
-
-        // ✅ mileage
-        if (typeof row.mileage === "number") {
-          localStorage.setItem(vehicleMileageKey(row.id), String(row.mileage));
-        }
-      };
-
       // 1) Try lookup by id
       const byId = await supabase
         .from("vehicles")
@@ -453,7 +420,7 @@ export default function VehicleDetailPage() {
 
       if (!alive) return;
 
-      if (byId.error) {
+        if (byId.error) {
         console.error("Vehicle load by id error:", byId.error);
         setVehicle(null);
         setVehicleErr(byId.error.message);
@@ -461,10 +428,9 @@ export default function VehicleDetailPage() {
         return;
       }
 
-      if (byId.data) {
-        const row = byId.data as VehicleRow;
-        hydrateLocal(row);
-        setVehicle(row);
+        if (byId.data) {
+          const row = byId.data as VehicleRow;
+          setVehicle(row);
         setEditDraft({
           name: row.name ?? "",
           type: row.type ?? "",
@@ -508,7 +474,6 @@ export default function VehicleDetailPage() {
 
         if (byAsset.data) {
           const row = byAsset.data as VehicleRow;
-          hydrateLocal(row);
           setVehicle(row);
           setEditDraft({
             name: row.name ?? "",
@@ -549,7 +514,6 @@ export default function VehicleDetailPage() {
 
         if (byPlate.data) {
           const row = byPlate.data as VehicleRow;
-          hydrateLocal(row);
           setVehicle(row);
           setEditDraft({
             name: row.name ?? "",
@@ -583,24 +547,6 @@ export default function VehicleDetailPage() {
       alive = false;
     };
   }, [vehicleIdFromRoute, routeVehicleId, assetParam, plateParam]);
-
-  const { localMileage } = useMemo(() => {
-    if (!hasMounted || typeof window === "undefined") {
-      return {
-        localMileage: undefined as number | undefined,
-      };
-    }
-
-    const storageId = vehicle?.id ?? vehicleIdFromRoute;
-
-    const rawMileage = localStorage.getItem(vehicleMileageKey(storageId));
-    const n = rawMileage ? Number(rawMileage) : NaN;
-    const parsedLocalMileage = Number.isFinite(n) ? n : undefined;
-
-    return {
-      localMileage: parsedLocalMileage,
-    };
-  }, [hasMounted, vehicleIdFromRoute, vehicle?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -692,11 +638,8 @@ export default function VehicleDetailPage() {
   const displayStatus = vehicle?.status ?? "—";
 
   const currentMileage = useMemo(() => {
-    const supa = typeof vehicle?.mileage === "number" ? vehicle.mileage : undefined;
-    if (typeof supa === "number" && typeof localMileage === "number")
-      return Math.max(supa, localMileage);
-    return typeof localMileage === "number" ? localMileage : supa;
-  }, [vehicle?.mileage, localMileage]);
+    return typeof vehicle?.mileage === "number" ? vehicle.mileage : undefined;
+  }, [vehicle?.mileage]);
 
   const lastOilChangeMileage = useMemo(() => {
     const oilChanges = pmRecords
@@ -979,13 +922,6 @@ export default function VehicleDetailPage() {
       asset: updatedVehicle.asset ?? "",
     });
 
-    if (typeof window !== "undefined") {
-      localStorage.setItem(vehicleNameKey(updatedVehicle.id), updatedVehicle.name ?? "");
-      localStorage.setItem(vehicleTypeKey(updatedVehicle.id), normalizeVehicleType(updatedVehicle.type));
-      if (typeof updatedVehicle.mileage === "number") {
-        localStorage.setItem(vehicleMileageKey(updatedVehicle.id), String(updatedVehicle.mileage));
-      }
-    }
   }
 
   return (

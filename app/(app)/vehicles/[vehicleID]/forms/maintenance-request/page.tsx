@@ -49,16 +49,6 @@ type TriState = "Yes" | "No" | "Not sure";
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 type Role = AppRole;
 
-function vehicleMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:mileage`;
-}
-function vehicleTypeKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:type`;
-}
-function vehicleNameKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:name`;
-}
-
 function isVehicleType(x: string | null): x is VehicleType {
   return x === "truck" || x === "car" || x === "skidsteer" || x === "loader";
 }
@@ -93,7 +83,6 @@ export default function MaintenanceRequestPage() {
   const params = useParams<{ vehicleID?: string }>();
   const vehicleId = params?.vehicleID ? decodeURIComponent(params.vehicleID) : "";
 
-  // Transfer fields from localStorage (written by vehicle list / detail page)
   const [vehicleName, setVehicleName] = useState("");
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
 
@@ -147,32 +136,32 @@ export default function MaintenanceRequestPage() {
     useState<TriState | "">("");
   const [userRole, setUserRole] = useState<Role | null>(null);
 
-  // ✅ load transfer data safely
   useEffect(() => {
     if (!vehicleId) return;
-    if (typeof window === "undefined") return;
+    let active = true;
 
-    const read = () => {
-      const n = localStorage.getItem(vehicleNameKey(vehicleId));
-      setVehicleName((n ?? "").trim());
-
-      const t = localStorage.getItem(vehicleTypeKey(vehicleId));
-      setVehicleType(isVehicleType(t) ? t : "truck");
-
-      const savedMileage = localStorage.getItem(vehicleMileageKey(vehicleId));
-      const m = savedMileage ? Number(savedMileage) : NaN;
-      if (Number.isFinite(m) && m > 0) {
-        setMileage((prev) => (prev.trim() ? prev : String(m)));
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("name,type,mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (!active) return;
+      if (error) {
+        console.error("Failed loading vehicle context:", error);
+        return;
       }
-    };
-
-    read();
-    const t1 = window.setTimeout(read, 50);
-    const t2 = window.setTimeout(read, 250);
+      setVehicleName((data?.name ?? "").trim());
+      setVehicleType(isVehicleType(data?.type ?? null) ? (data?.type as VehicleType) : "truck");
+      const dbMileage = Number(data?.mileage);
+      if (Number.isFinite(dbMileage) && dbMileage > 0) {
+        setMileage((prev) => (prev.trim() ? prev : String(dbMileage)));
+      }
+    })();
 
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      active = false;
     };
   }, [vehicleId]);
 
@@ -338,11 +327,9 @@ export default function MaintenanceRequestPage() {
         if (vehicleUpdateError) {
           console.error("Failed to update vehicle mileage:", vehicleUpdateError);
         }
-        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
       }
     } catch (vehicleMileageError) {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
-      localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
     }
 
     if (returnTo && insertedRequest?.id && linkSectionId && linkItemKey) {

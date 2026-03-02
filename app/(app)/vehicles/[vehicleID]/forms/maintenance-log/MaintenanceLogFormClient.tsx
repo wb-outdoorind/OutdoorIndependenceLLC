@@ -38,7 +38,7 @@ type Attachment = {
   createdAt: string; // ISO
   name: string;
   mime: string;
-  dataUrl: string; // NOTE: localStorage size limit; keep #/size small
+  dataUrl: string;
   kind?: "receipt" | "issue" | "other";
 };
 
@@ -65,6 +65,17 @@ type MaintenanceRequestRecord = {
   closedAt?: string;
 
   // optional future: photos?: Attachment[]
+};
+
+type MaintenanceRequestRow = {
+  id: string;
+  vehicle_id: string;
+  created_at: string;
+  status: string | null;
+  urgency: string | null;
+  system_affected: string | null;
+  drivability: string | null;
+  description: string | null;
 };
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
@@ -102,20 +113,6 @@ function canQuickLogOverride(role: Role | null) {
    Keys
 ========================= */
 
-function vehicleMileageKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:mileage`;
-}
-function maintenanceRequestKey(vehicleId: string) {
-  return `vehicle:${vehicleId}:maintenance_request`;
-}
-
-function safeJSON<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function todayYYYYMMDD() {
   const d = new Date();
@@ -123,6 +120,23 @@ function todayYYYYMMDD() {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseTitleFromDescription(raw: string | null) {
+  if (!raw) return "";
+  const lines = raw.split("\n");
+  const first = (lines[0] ?? "").trim();
+  if (first.startsWith("Title:")) {
+    return first.slice("Title:".length).trim();
+  }
+  return "";
+}
+
+function parseBodyFromDescription(raw: string | null) {
+  if (!raw) return "";
+  const lines = raw.split("\n");
+  if (lines.length <= 2) return raw.trim();
+  return lines.slice(2).join("\n").trim();
 }
 
 /* =========================
@@ -174,49 +188,84 @@ export default function MaintenanceLogPage() {
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
 
-  // load current vehicle mileage + request (if requestId present)
   useEffect(() => {
     if (!vehicleId) return;
-    if (typeof window === "undefined") return;
+    let active = true;
 
-    const timer = window.setTimeout(() => {
-      // vehicle mileage
-      const saved = localStorage.getItem(vehicleMileageKey(vehicleId));
-      const m = saved ? Number(saved) : NaN;
-      if (Number.isFinite(m) && m > 0) {
-        setCurrentVehicleMileage(m);
-        // If user hasn’t typed yet, prefill:
-        setMileage((prev) => (prev.trim() ? prev : String(m)));
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+
+      const { data: vehicleRow, error: vehicleErr } = await supabase
+        .from("vehicles")
+        .select("mileage")
+        .eq("id", vehicleId)
+        .maybeSingle();
+      if (!active) return;
+      if (!vehicleErr) {
+        const m = Number(vehicleRow?.mileage);
+        if (Number.isFinite(m) && m > 0) {
+          setCurrentVehicleMileage(m);
+          setMileage((prev) => (prev.trim() ? prev : String(m)));
+        }
       }
 
-      // request linking
       if (!requestId) return;
 
-      const requests = safeJSON<MaintenanceRequestRecord[]>(
-        localStorage.getItem(maintenanceRequestKey(vehicleId)),
-        []
-      );
+      const [requestRes, existingLogRes] = await Promise.all([
+        supabase
+          .from("maintenance_requests")
+          .select("id,vehicle_id,created_at,status,urgency,system_affected,drivability,description")
+          .eq("id", requestId)
+          .eq("vehicle_id", vehicleId)
+          .maybeSingle(),
+        supabase
+          .from("maintenance_logs")
+          .select("id")
+          .eq("request_id", requestId)
+          .limit(1),
+      ]);
+      if (!active) return;
 
-      const req = requests.find((r) => r.id === requestId) ?? null;
+      if (requestRes.error) {
+        console.error("Failed loading linked maintenance request:", requestRes.error);
+      }
+
+      const reqRow = requestRes.data as MaintenanceRequestRow | null;
+      const req = reqRow
+        ? ({
+            id: reqRow.id,
+            vehicleId: reqRow.vehicle_id,
+            createdAt: reqRow.created_at,
+            requestDate: reqRow.created_at.slice(0, 10),
+            employee: "",
+            drivabilityStatus: (reqRow.drivability as DrivabilityStatus) || "Yes – Drivable",
+            systemAffected: (reqRow.system_affected as SystemAffected) || "Other",
+            urgency: (reqRow.urgency as Urgency) || "Low",
+            title: parseTitleFromDescription(reqRow.description),
+            description: parseBodyFromDescription(reqRow.description),
+            status:
+              reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
+                ? reqRow.status
+                : "Open",
+          } as MaintenanceRequestRecord)
+        : null;
       setLinkedRequest(req);
 
-      if (!req) return;
-
-      // Enforce 1 request → 1 log
-      if (req.maintenanceLogId) {
+      const hasExistingLog = (existingLogRes.data ?? []).length > 0;
+      if (hasExistingLog) {
         alert("This request already has a maintenance log. Opening the vehicle instead.");
         router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
         return;
       }
 
-      // Autofill log form from request (only if user hasn’t typed yet)
+      if (!req) return;
+
       setTitle((prev) => (prev.trim() ? prev : req.title));
       setNotes((prev) =>
         prev.trim()
           ? prev
           : [
               `From Request (${req.id})`,
-              `Teammate: ${req.employee}`,
               `Urgency: ${req.urgency}`,
               `System: ${req.systemAffected}`,
               `Drivability: ${req.drivabilityStatus}`,
@@ -225,9 +274,11 @@ export default function MaintenanceLogPage() {
               req.description,
             ].join("\n")
       );
-    }, 0);
+    })();
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      active = false;
+    };
   }, [vehicleId, requestId, router]);
 
   useEffect(() => {
@@ -361,7 +412,7 @@ export default function MaintenanceLogPage() {
   }
 
   async function onPickReceiptPhoto(file: File) {
-    // Basic size guard: refuse very large images (localStorage risk)
+    // Basic size guard to keep payload sizes reasonable.
     if (file.size > 2_000_000) {
       alert("That photo is large (>2MB). Please retake at a lower resolution or crop it.");
       return;
@@ -379,7 +430,7 @@ export default function MaintenanceLogPage() {
 
     setReceiptPhotos((prev) => {
       const next = [att, ...prev];
-      // limit to 3 receipts for localStorage safety
+      // Limit to 3 receipts for form usability/performance.
       return next.slice(0, 3);
     });
   }
@@ -545,7 +596,6 @@ export default function MaintenanceLogPage() {
     }
 
     // update vehicle mileage (only forward)
-    localStorage.setItem(vehicleMileageKey(vehicleId), String(m));
     try {
       const { data: vehicleRow, error: vehicleReadError } = await supabase
         .from("vehicles")
@@ -567,7 +617,6 @@ export default function MaintenanceLogPage() {
         if (vehicleUpdateError) {
           console.error("Failed to update vehicle mileage:", vehicleUpdateError);
         }
-        localStorage.setItem(vehicleMileageKey(vehicleId), String(nextMileage));
       }
     } catch (vehicleMileageError) {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
@@ -591,7 +640,7 @@ export default function MaintenanceLogPage() {
 
       {requestId && !linkedRequest ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.9 }}>
-          Could not find the request in localStorage for this vehicle. You can still log manually.
+          Could not find the linked request for this vehicle. You can still log manually.
         </div>
       ) : null}
 
@@ -907,7 +956,7 @@ export default function MaintenanceLogPage() {
             </label>
 
             <div style={{ fontSize: 12, opacity: 0.7 }}>
-              Limit: 3 photos • Keep them small for localStorage.
+              Limit: 3 photos • Keep them reasonably small.
             </div>
           </div>
 

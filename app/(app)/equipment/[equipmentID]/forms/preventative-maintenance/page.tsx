@@ -285,10 +285,6 @@ function isApplicatorEquipmentType(value: string | null | undefined) {
   return v.includes("applicator") || (v.includes("turf") && v.includes("application"));
 }
 
-function equipmentHoursKey(equipmentId: string) {
-  return `equipment:${equipmentId}:hours`;
-}
-
 function normalizeChecklist(raw: unknown): ChecklistItem[] {
   const items: ChecklistItem[] = [];
 
@@ -648,7 +644,6 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
-      if (parsedHours != null) localStorage.setItem(equipmentHoursKey(equipment.id), String(parsedHours));
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -742,7 +737,6 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
-      if (parsedHours != null) localStorage.setItem(equipmentHoursKey(equipment.id), String(parsedHours));
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -808,7 +802,6 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
-      if (parsedHours != null) localStorage.setItem(equipmentHoursKey(equipment.id), String(parsedHours));
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -843,7 +836,6 @@ export default function EquipmentPreventativeMaintenancePage() {
       return;
     }
 
-    if (parsedHours != null) localStorage.setItem(equipmentHoursKey(equipment.id), String(parsedHours));
     router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
   }
 

@@ -64,18 +64,6 @@ type HistoryPreviewItem = {
   notes?: string;
 };
 
-function equipmentNameKey(equipmentId: string) {
-  return `equipment:${equipmentId}:name`;
-}
-
-function equipmentTypeKey(equipmentId: string) {
-  return `equipment:${equipmentId}:type`;
-}
-
-function equipmentHoursKey(equipmentId: string) {
-  return `equipment:${equipmentId}:hours`;
-}
-
 function parseTitleAndDescription(raw: string | null) {
   if (!raw) return { title: "", description: "" };
   const lines = raw.split("\n");
@@ -271,14 +259,7 @@ export default function EquipmentDetailPage() {
         return;
       }
 
-      const row = data as EquipmentRow;
-      localStorage.setItem(equipmentNameKey(row.id), row.name ?? "");
-      localStorage.setItem(equipmentTypeKey(row.id), row.equipment_type ?? "");
-      if (typeof row.current_hours === "number") {
-        localStorage.setItem(equipmentHoursKey(row.id), String(row.current_hours));
-      }
-
-      setEquipment(row);
+      setEquipment(data as EquipmentRow);
       setLoading(false);
     }
 
