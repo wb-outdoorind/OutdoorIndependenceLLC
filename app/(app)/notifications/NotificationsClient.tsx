@@ -151,6 +151,60 @@ function notificationHref(row: NotificationRow) {
   return null;
 }
 
+function parseVehicleIdFromBody(body: string) {
+  const match = body.match(/\bVehicle\s+([A-Za-z0-9_-]+)/i);
+  return match?.[1] ?? null;
+}
+
+function parseEquipmentIdFromBody(body: string) {
+  const match = body.match(/\bEquipment\s+([A-Za-z0-9_-]+)/i);
+  return match?.[1] ?? null;
+}
+
+function notificationActions(row: NotificationRow) {
+  const actions: Array<{ label: string; href: string }> = [];
+  const primary = notificationHref(row);
+  if (primary) {
+    actions.push({ label: "View Details", href: primary });
+  }
+
+  if (row.kind === "vehicle_maintenance_request_created") {
+    actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
+    const vehicleId = parseVehicleIdFromBody(row.body);
+    if (vehicleId) {
+      actions.push({
+        label: "Open Vehicle",
+        href: `/vehicles/${encodeURIComponent(vehicleId)}`,
+      });
+    }
+  }
+
+  if (row.kind === "equipment_maintenance_request_created") {
+    actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
+    const equipmentId = parseEquipmentIdFromBody(row.body);
+    if (equipmentId) {
+      actions.push({
+        label: "Open Equipment",
+        href: `/equipment/${encodeURIComponent(equipmentId)}`,
+      });
+    }
+  }
+
+  if (row.kind === "form_accountability_flag" || row.kind === "accountability_falloff_reminder") {
+    actions.push({ label: "Open Accountability Center", href: "/form-reports" });
+  }
+
+  if (row.kind.startsWith("flagged_queue_")) {
+    actions.push({ label: "Open Accountability Center", href: "/form-reports" });
+  }
+
+  if (row.kind === "trip_lead_signoff_request") {
+    actions.push({ label: "Open Approvals", href: "/approvals" });
+  }
+
+  return actions.filter((action, idx, arr) => arr.findIndex((x) => x.href === action.href) === idx);
+}
+
 export default function NotificationsClient({ role }: { role: string | null }) {
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<NotificationRow[]>([]);
@@ -529,11 +583,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                         Mark Read
                       </button>
                     ) : null}
-                    {notificationHref(row) ? (
-                      <Link href={notificationHref(row)!} style={buttonStyle()}>
-                        View Details
+                    {notificationActions(row).map((action) => (
+                      <Link key={`${row.id}-${action.href}`} href={action.href} style={buttonStyle()}>
+                        {action.label}
                       </Link>
-                    ) : null}
+                    ))}
                   </div>
                 </div>
                 <div style={{ marginTop: 8, opacity: 0.9 }}>{row.body}</div>
