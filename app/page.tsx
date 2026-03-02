@@ -432,6 +432,17 @@ export default async function Home() {
       ];
     }
 
+    if (role === "apprentice") {
+      tiles = tiles.map((tile) =>
+        tile.title === "Maintenance Center"
+          ? {
+              ...tile,
+              desc: "View-only queue and operations dashboards. Request/log creation is restricted.",
+            }
+          : tile
+      );
+    }
+
     if (isLeadership) {
       const [vehicleReqRes, equipmentReqRes, gradesRes] = await Promise.all([
         supabase
@@ -519,6 +530,7 @@ export default async function Home() {
         ],
       };
     } else if (isTeammateOpsRole) {
+      const maintenanceHref = role === "apprentice" ? "/maintenance" : "/maintenance?section=operations";
       dashboard = {
         title: "Teammate Operations Dashboard",
         subtitle: "Average form score metrics for apprentice through team lead 2 roles.",
@@ -530,7 +542,7 @@ export default async function Home() {
           { label: "Tracked Forms", value: String(teammateOpsStats?.formCount ?? 0) },
         ],
         actions: [
-          { label: "Open Maintenance Center", href: "/maintenance?section=operations" },
+          { label: role === "apprentice" ? "Open Maintenance (View Only)" : "Open Maintenance Center", href: maintenanceHref },
           { label: "Open Scan QR", href: "/scan" },
           { label: "Open Notifications", href: "/notifications" },
         ],
