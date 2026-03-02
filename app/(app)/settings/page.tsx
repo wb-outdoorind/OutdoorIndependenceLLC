@@ -41,6 +41,10 @@ export default function SettingsPage() {
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(() => readRoleViewOverride());
 
   const canViewAs = canUseRoleView(actualRole);
+  const canViewRunbook =
+    actualRole === "owner" ||
+    actualRole === "operations_manager" ||
+    actualRole === "office_admin";
 
   useEffect(() => {
     let active = true;
@@ -160,6 +164,32 @@ export default function SettingsPage() {
         </div>
         <LogoutButton />
       </section>
+
+      {canViewRunbook ? (
+        <section style={{ ...cardStyle, marginTop: 14 }}>
+          <h2 style={{ marginTop: 0, marginBottom: 12 }}>Deployment Runbook</h2>
+          <div style={{ opacity: 0.78, marginBottom: 10 }}>
+            Web + iOS release checklist used for production deployments.
+          </div>
+          <a
+            href="https://github.com/wb-outdoorind/OutdoorIndependenceLLC/blob/main/docs/deploy.md"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: "inline-block",
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid var(--surface-border)",
+              background: "var(--surface)",
+              color: "inherit",
+              textDecoration: "none",
+              fontWeight: 700,
+            }}
+          >
+            Open Runbook
+          </a>
+        </section>
+      ) : null}
     </main>
   );
 }
