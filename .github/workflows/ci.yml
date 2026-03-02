@@ -26,3 +26,10 @@ jobs:
 
       - name: Run Release Checks
         run: npm run release:check
+
+      - name: Run Local Smoke Checks
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: example-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: example-service-role-key
+        run: npm run smoke:local

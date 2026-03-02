@@ -11,6 +11,7 @@
     "check:api-auth": "bash ./scripts/check-api-auth.sh",
     "release:check": "npm run lint && npm run build",
     "smoke:web": "bash ./scripts/smoke-web.sh",
+    "smoke:local": "bash ./scripts/smoke-local.sh",
     "mobile:sync": "npx cap sync",
     "mobile:add:ios": "npx cap add ios",
     "mobile:add:android": "npx cap add android",
