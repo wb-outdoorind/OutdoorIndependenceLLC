@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 import * as path from "path";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createClient } from "@supabase/supabase-js";
 
 type Row = {
@@ -35,6 +35,50 @@ type EquipmentPayload = {
   status: string | null;
   asset_qr: string | null;
 };
+
+function cellToString(value: ExcelJS.CellValue): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if ("text" in value && typeof value.text === "string") return value.text.trim();
+    if ("result" in value) return cellToString(value.result as ExcelJS.CellValue);
+    if ("richText" in value && Array.isArray(value.richText)) {
+      return value.richText.map((part) => part.text).join("").trim();
+    }
+  }
+  return "";
+}
+
+async function readRowsFromExcel(xlsxPath: string): Promise<Row[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(xlsxPath);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return [];
+
+  const headerRow = worksheet.getRow(1);
+  const headers: string[] = [];
+  for (let col = 1; col <= headerRow.cellCount; col += 1) {
+    headers.push(cellToString(headerRow.getCell(col).value));
+  }
+
+  const rows: Row[] = [];
+  for (let rowNum = 2; rowNum <= worksheet.rowCount; rowNum += 1) {
+    const row = worksheet.getRow(rowNum);
+    const out: Record<string, string> = {};
+    let hasValue = false;
+    headers.forEach((header, idx) => {
+      if (!header) return;
+      const value = cellToString(row.getCell(idx + 1).value);
+      out[header] = value;
+      if (value) hasValue = true;
+    });
+    if (hasValue) rows.push(out as Row);
+  }
+  return rows;
+}
 
 function slugify(input: string): string {
   return input
@@ -75,10 +119,7 @@ async function main() {
   });
 
   const xlsxPath = path.resolve(process.cwd(), "OI_APP_Assets.xlsx");
-  const wb = XLSX.readFile(xlsxPath);
-  const sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<Row>(ws, { defval: "" });
+  const rows = await readRowsFromExcel(xlsxPath);
 
   const seen = new Map<string, number>();
 
