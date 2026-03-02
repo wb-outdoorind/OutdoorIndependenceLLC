@@ -117,6 +117,18 @@ Minimum checks:
 - One pre/post trip form can be submitted
 - Role view works (owner/ops manager)
 
+Quick command (defaults to production URL):
+
+```bash
+npm run smoke:web
+```
+
+Custom URL example:
+
+```bash
+BASE_URL=https://outdoor-independence-llc-app.vercel.app npm run smoke:web
+```
+
 ## 10) Rollback Strategy
 
 If production breaks:
