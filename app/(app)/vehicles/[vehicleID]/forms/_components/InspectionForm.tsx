@@ -74,6 +74,13 @@ type VehicleOption = {
   type: string | null;
   status: string | null;
 };
+
+type LeadOption = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+};
 type Role =
   | "owner"
   | "operations_manager"
@@ -349,6 +356,9 @@ export default function InspectionForm({
   const [inspectionDate, setInspectionDate] = useState(todayYYYYMMDD());
   const [mileage, setMileage] = useState("");
   const [employee, setEmployee] = useState("");
+  const [leadApproverId, setLeadApproverId] = useState("");
+  const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
+  const [leadLoading, setLeadLoading] = useState(false);
   const [dashLightsOn, setDashLightsOn] = useState<string[]>([]);
 
   // ✅ sectionState must rebuild when vehicleType/visibleSections changes
@@ -493,6 +503,7 @@ export default function InspectionForm({
         sectionEquipmentIds?: Record<string, string[]>;
         trailerVehicleIds?: string[];
         trailerVehicleLinks?: Record<string, string>;
+        leadApproverId?: string;
       };
       if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
       if (typeof draft.mileage === "string") setMileage(draft.mileage);
@@ -514,6 +525,9 @@ export default function InspectionForm({
       }
       if (draft.trailerVehicleLinks && typeof draft.trailerVehicleLinks === "object") {
         setTrailerVehicleLinks(draft.trailerVehicleLinks);
+      }
+      if (typeof draft.leadApproverId === "string") {
+        setLeadApproverId(draft.leadApproverId);
       }
     } catch (error) {
       console.error("Failed to restore inspection draft:", error);
@@ -633,6 +647,32 @@ export default function InspectionForm({
         return;
       }
       setEquipmentOptions((data ?? []) as EquipmentOption[]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [vehicleId]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    let active = true;
+    void (async () => {
+      setLeadLoading(true);
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,full_name,email,role")
+        .in("role", ["owner", "operations_manager", "office_admin", "team_lead_1", "team_lead_2"])
+        .order("full_name", { ascending: true })
+        .limit(200);
+      if (!active) return;
+      setLeadLoading(false);
+      if (error) {
+        console.error("Failed loading lead options:", error);
+        setLeadOptions([]);
+        return;
+      }
+      setLeadOptions((data ?? []) as LeadOption[]);
     })();
     return () => {
       active = false;
@@ -855,6 +895,7 @@ export default function InspectionForm({
       inspectionDate,
       mileage,
       employee,
+      leadApproverId,
       dashLightsOn,
       sectionState,
       itemExtraValues,
@@ -987,6 +1028,7 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
+    if (!leadApproverId.trim()) return alert("Lead sign-off is required. Select a lead before submitting.");
     if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (defectsFound && !notes.trim())
@@ -1075,6 +1117,7 @@ export default function InspectionForm({
       inspectionStatus,
       notes: notes.trim(),
       employee: employee.trim(),
+      leadApproverId: leadApproverId.trim(),
       inspectionDate,
       employeeSignature: employeeSignature.trim(),
       managerSignature: managerSignature.trim()
@@ -1129,6 +1172,9 @@ export default function InspectionForm({
         checklist,
         overall_status: inspectionStatus,
         mileage: m,
+        lead_approver_id: leadApproverId.trim(),
+        lead_approval_status: "pending",
+        lead_approval_requested_at: new Date().toISOString(),
       })
       .select("id")
       .single();
@@ -1168,6 +1214,18 @@ export default function InspectionForm({
     }
 
     if (insertedInspection?.id) {
+      try {
+        await fetch("/api/inspections/lead-approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "request",
+            inspectionId: insertedInspection.id,
+          }),
+        });
+      } catch (approvalNotifyError) {
+        console.error("Lead approval notification failed:", approvalNotifyError);
+      }
       try {
         await fetch("/api/form-reports/grade", {
           method: "POST",
@@ -1273,6 +1331,26 @@ export default function InspectionForm({
                 placeholder="Teammate name"
                 style={inputStyle()}
               />
+            </div>
+
+            <div>
+              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                Lead Sign-Off Required *
+              </div>
+              <select
+                value={leadApproverId}
+                onChange={(e) => setLeadApproverId(e.target.value)}
+                style={inputStyle()}
+                disabled={leadLoading}
+              >
+                <option value="">{leadLoading ? "Loading leads..." : "Select lead..."}</option>
+                {leadOptions.map((row) => (
+                  <option key={`lead-${row.id}`} value={row.id}>
+                    {(row.full_name?.trim() || row.email?.trim() || row.id) +
+                      (row.role ? ` (${row.role.replaceAll("_", " ")})` : "")}
+                  </option>
+                ))}
+              </select>
             </div>
 
           </div>

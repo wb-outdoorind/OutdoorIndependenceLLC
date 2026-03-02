@@ -278,11 +278,53 @@ export default function AccountabilityTrackerPanel({
     due_date: "",
   });
 
-  const byId = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const p of profiles) m[p.id] = profileLabel(p);
-    return m;
-  }, [profiles]);
+  function exportFormAsPrintablePdf(row: AccountabilityFormRow & { linkedFlag: FlaggedGradeRow | null }) {
+    const teammate = byId[row.teammate_id] || row.teammate_id;
+    const manager = byId[row.manager_id] || row.manager_id;
+    const linkedFlagText = row.linked_flag_grade_id
+      ? `Flag #${row.linked_flag_grade_id}${row.linkedFlag ? ` (${row.linkedFlag.form_type} #${row.linkedFlag.form_id})` : ""}`
+      : "None";
+    const linkedOccurrenceText = row.linked_occurrence_id ? `Occurrence #${row.linked_occurrence_id}` : "None";
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Accountability Form #${row.id}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 28px; color: #111; }
+    h1 { margin: 0 0 10px 0; font-size: 22px; }
+    .meta { margin: 0 0 14px 0; color: #444; font-size: 13px; }
+    .card { border: 1px solid #d8d8d8; border-radius: 10px; padding: 12px; margin-top: 10px; }
+    .row { margin: 5px 0; }
+    .label { font-weight: 700; }
+    @media print { button { display: none; } body { margin: 14px; } }
+  </style>
+</head>
+<body>
+  <h1>Accountability Form #${row.id}</h1>
+  <div class="meta">Generated ${new Date().toLocaleString()}</div>
+  <div class="card">
+    <div class="row"><span class="label">Employee:</span> ${teammate}</div>
+    <div class="row"><span class="label">Manager:</span> ${manager}</div>
+    <div class="row"><span class="label">Category:</span> ${row.category}</div>
+    <div class="row"><span class="label">Program Step:</span> ${row.disciplinary_step}</div>
+    <div class="row"><span class="label">Form Date:</span> ${row.form_date}</div>
+    <div class="row"><span class="label">Linked Occurrence:</span> ${linkedOccurrenceText}</div>
+    <div class="row"><span class="label">Linked Flagged Form:</span> ${linkedFlagText}</div>
+    <div class="row"><span class="label">Created At:</span> ${new Date(row.created_at).toLocaleString()}</div>
+  </div>
+  <script>window.print();</script>
+</body>
+</html>`;
+    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=720");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  const byId: Record<string, string> = {};
+  for (const p of profiles) byId[p.id] = profileLabel(p);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -558,6 +600,8 @@ export default function AccountabilityTrackerPanel({
   }, [categoryFilter, occurrences, statusFilter]);
 
   const employeeTrackingRows = useMemo(() => {
+    const byIdMap: Record<string, string> = {};
+    for (const p of profiles) byIdMap[p.id] = profileLabel(p);
     const map = new Map<
       string,
       {
@@ -585,7 +629,7 @@ export default function AccountabilityTrackerPanel({
       const key = row.teammate_id;
       const existing = map.get(key) ?? {
         teammateId: row.teammate_id,
-        name: byId[row.teammate_id] || row.teammate_id,
+        name: byIdMap[row.teammate_id] || row.teammate_id,
         total: 0,
         active: 0,
         complete: 0,
@@ -620,7 +664,7 @@ export default function AccountabilityTrackerPanel({
       const key = form.teammate_id;
       const existing = map.get(key) ?? {
         teammateId: key,
-        name: byId[key] || key,
+        name: byIdMap[key] || key,
         total: 0,
         active: 0,
         complete: 0,
@@ -651,7 +695,7 @@ export default function AccountabilityTrackerPanel({
       } else {
         map.set(action.target_user_id, {
           teammateId: action.target_user_id,
-          name: byId[action.target_user_id] || action.target_user_id,
+          name: byIdMap[action.target_user_id] || action.target_user_id,
           total: 0,
           active: 0,
           complete: 0,
@@ -672,7 +716,7 @@ export default function AccountabilityTrackerPanel({
     }
 
     return Array.from(map.values()).sort((a, b) => b.active - a.active || b.total - a.total || a.name.localeCompare(b.name));
-  }, [actions, byId, forms, occurrences]);
+  }, [actions, forms, occurrences, profiles]);
 
   const filteredEmployeeTrackingRows = useMemo(() => {
     const q = employeeQuery.trim().toLowerCase();
@@ -1210,6 +1254,11 @@ export default function AccountabilityTrackerPanel({
                 <div style={{ marginTop: 6, fontSize: 13, opacity: 0.82 }}>
                   Linked occurrence: {row.linked_occurrence_id ? `#${row.linked_occurrence_id}` : "None"} · Linked flagged form:{" "}
                   {row.linked_flag_grade_id ? `#${row.linked_flag_grade_id}` : "None"}
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" style={buttonStyle()} onClick={() => exportFormAsPrintablePdf(row)}>
+                    Export Printable PDF
+                  </button>
                 </div>
                 {row.linked_flag_grade_id ? (
                   <div style={{ marginTop: 8 }}>

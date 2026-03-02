@@ -145,6 +145,9 @@ function notificationHref(row: NotificationRow) {
   if (row.kind.startsWith("flagged_queue_") && row.entity_id) {
     return `/form-reports?flagged=${encodeURIComponent(row.entity_id)}`;
   }
+  if (row.kind === "trip_lead_signoff_request" && row.entity_id) {
+    return `/approvals?inspection=${encodeURIComponent(row.entity_id)}`;
+  }
   return null;
 }
 
