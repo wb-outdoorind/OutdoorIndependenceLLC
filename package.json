@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:api-auth": "bash ./scripts/check-api-auth.sh",
     "mobile:sync": "npx cap sync",
     "mobile:add:ios": "npx cap add ios",
     "mobile:add:android": "npx cap add android",
