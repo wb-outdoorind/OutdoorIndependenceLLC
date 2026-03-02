@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 type EquipmentRow = {
   id: string;
@@ -312,7 +313,12 @@ export default function EquipmentDetailPage() {
           .select("role")
           .eq("id", authData.user.id)
           .maybeSingle();
-        setUserRole((profile?.role as Role | undefined) ?? "employee");
+        setUserRole(
+          resolveEffectiveRole(
+            (profile?.role as Role | undefined) ?? "employee",
+            readRoleViewOverride()
+          ) as Role
+        );
       })();
     }, 0);
     return () => window.clearTimeout(timer);

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
 type Role =
@@ -150,7 +151,12 @@ export default function EquipmentMaintenanceLogPage() {
           .select("role")
           .eq("id", authData.user.id)
           .maybeSingle();
-        setUserRole((profile?.role as Role | undefined) ?? "employee");
+        setUserRole(
+          resolveEffectiveRole(
+            (profile?.role as Role | undefined) ?? "employee",
+            readRoleViewOverride()
+          ) as Role
+        );
       })();
     }, 0);
     return () => window.clearTimeout(timer);

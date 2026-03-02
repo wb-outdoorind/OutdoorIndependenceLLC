@@ -1,6 +1,7 @@
 // lib/supabase/server.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 
 /**
  * Server-side Supabase client (cookie-based).
@@ -39,6 +40,7 @@ export async function createServerSupabase() {
  */
 export async function getCurrentUserProfile() {
   const supabase = await createServerSupabase();
+  const cookieStore = await cookies();
 
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userRes?.user) return null;
@@ -50,7 +52,10 @@ export async function getCurrentUserProfile() {
     .single();
 
   // If profile missing (or blocked by RLS), treat as not logged in for safety
-  if (profileErr || !profile) return { user: userRes.user, profile: null };
+  if (profileErr || !profile) return { user: userRes.user, profile: null, effectiveRole: "employee" };
 
-  return { user: userRes.user, profile };
+  const requestedRole = cookieStore.get(ROLE_VIEW_COOKIE)?.value ?? null;
+  const effectiveRole = resolveEffectiveRole(profile.role ?? null, requestedRole);
+
+  return { user: userRes.user, profile, effectiveRole };
 }

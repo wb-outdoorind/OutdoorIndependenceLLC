@@ -4,7 +4,7 @@ import InventoryReportsClient from "./InventoryReportsClient";
 
 export default async function InventoryReportsPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canView = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canView) {

@@ -4,7 +4,7 @@ import NewInventoryItemClient from "./NewInventoryItemClient";
 
 export default async function InventoryNewPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canCreate = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 

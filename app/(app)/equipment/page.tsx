@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type EquipmentRow = {
   id: string;
@@ -14,7 +15,7 @@ type EquipmentRow = {
   model: string | null;
   year: number | null;
 };
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role = AppRole;
 
 function equipmentNameKey(equipmentId: string) {
   return `equipment:${equipmentId}:name`;
@@ -169,7 +170,10 @@ export default function EquipmentListPage() {
         .maybeSingle();
 
       if (!alive) return;
-      const role = (profile?.role as Role | undefined) ?? "employee";
+      const role = resolveEffectiveRole(
+        (profile?.role as Role | undefined) ?? "employee",
+        readRoleViewOverride()
+      ) as Role;
       setCanCreateEquipment(
         role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
       );

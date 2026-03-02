@@ -4,7 +4,7 @@ import InventoryTransfersClient from "./InventoryTransfersClient";
 
 export default async function InventoryTransfersPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canTransfer = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canTransfer) {

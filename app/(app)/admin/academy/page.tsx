@@ -4,7 +4,7 @@ import AcademyAdminClient from "./AcademyAdminClient";
 
 export default async function AcademyAdminPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canManage = role === "owner" || role === "operations_manager" || role === "office_admin";
   if (!canManage) {

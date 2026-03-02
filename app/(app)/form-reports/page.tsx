@@ -6,7 +6,7 @@ export default async function FormReportsPage() {
   const session = await getCurrentUserProfile();
   if (!session?.user) redirect("/login");
 
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
   const canView =
     role === "owner" ||
     role === "operations_manager" ||

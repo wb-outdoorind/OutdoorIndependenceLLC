@@ -13,7 +13,7 @@ const ALLOWED = new Set([
 export default async function ApprovalsPage() {
   const session = await getCurrentUserProfile();
   if (!session?.user) redirect("/login");
-  const role = session.profile?.role ?? null;
+  const role = session.effectiveRole ?? null;
   if (!role || !ALLOWED.has(role)) {
     redirect("/not-authorized?reason=lead_approvals_requires_lead_role&next=/approvals");
   }

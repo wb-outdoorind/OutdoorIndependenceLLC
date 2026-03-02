@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 export type Choice = "pass" | "fail";
 type ChoiceOrBlank = Choice | "";
@@ -612,7 +613,12 @@ export default function InspectionForm({
           .select("role")
           .eq("id", authData.user.id)
           .maybeSingle();
-        setCurrentUserRole((profile?.role as Role | undefined) ?? "employee");
+        setCurrentUserRole(
+          resolveEffectiveRole(
+            (profile?.role as Role | undefined) ?? "employee",
+            readRoleViewOverride()
+          ) as Role
+        );
       })();
     }, 0);
     return () => window.clearTimeout(timer);

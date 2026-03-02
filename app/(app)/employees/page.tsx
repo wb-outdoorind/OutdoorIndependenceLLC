@@ -9,7 +9,7 @@ export default async function EmployeesPage() {
     redirect("/login");
   }
 
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   return <EmployeesClient role={role} />;
 }

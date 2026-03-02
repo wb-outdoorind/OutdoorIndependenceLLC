@@ -4,7 +4,7 @@ import NewEquipmentClient from "./NewEquipmentClient";
 
 export default async function EquipmentNewPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canCreate = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 

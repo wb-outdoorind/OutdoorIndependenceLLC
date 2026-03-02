@@ -12,7 +12,7 @@ export default async function Page({
   const session = await getCurrentUserProfile();
   if (!session?.user) redirect("/login");
 
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
   if (role !== "owner" && role !== "operations_manager" && role !== "office_admin") {
     redirect("/not-authorized?reason=employees_cannot_edit");
   }

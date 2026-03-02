@@ -3,7 +3,7 @@ import { getCurrentUserProfile } from "@/lib/supabase/server";
 
 export default async function OpsPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canView = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canView) {

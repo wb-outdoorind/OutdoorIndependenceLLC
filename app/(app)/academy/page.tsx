@@ -3,8 +3,9 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role = AppRole;
 
 type AcademyContentRow = {
   id: string;
@@ -126,7 +127,12 @@ function AcademyPageContent() {
           .select("role")
           .eq("id", authData.user.id)
           .maybeSingle();
-        setRole((profile?.role as Role | undefined) ?? "employee");
+        setRole(
+          resolveEffectiveRole(
+            (profile?.role as Role | undefined) ?? "employee",
+            readRoleViewOverride()
+          ) as Role
+        );
       } else {
         setRole(null);
       }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import OpsClient from "@/app/(app)/ops/OpsClient";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -262,7 +263,10 @@ export default function MaintenanceCenterPage() {
         .maybeSingle();
 
       if (!alive) return;
-      const role = (profile?.role as Role | undefined) ?? "employee";
+      const role = resolveEffectiveRole(
+        (profile?.role as Role | undefined) ?? "employee",
+        readRoleViewOverride()
+      ) as Role;
       setUserRole(role);
       setCanViewOperations(
         role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"

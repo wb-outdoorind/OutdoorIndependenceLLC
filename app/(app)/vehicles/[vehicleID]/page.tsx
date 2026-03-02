@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 /* =========================
    Types
@@ -413,7 +414,12 @@ export default function VehicleDetailPage() {
         .select("role")
         .eq("id", authData.user.id)
         .maybeSingle();
-      setUserRole((roleProfile?.role as Role | undefined) ?? "employee");
+      setUserRole(
+        resolveEffectiveRole(
+          (roleProfile?.role as Role | undefined) ?? "employee",
+          readRoleViewOverride()
+        ) as Role
+      );
 
       const hydrateLocal = (row: VehicleRow) => {
         if (typeof window === "undefined") return;

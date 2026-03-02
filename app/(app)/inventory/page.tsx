@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
-type Role = "owner" | "operations_manager" | "office_admin" | "mechanic" | "employee";
+type Role = AppRole;
 
 type InventoryItemRow = {
   id: string;
@@ -84,7 +85,14 @@ export default function InventoryPage() {
           .select("role")
           .eq("id", authData.user.id)
           .maybeSingle();
-        if (alive) setRole((profile?.role as Role | undefined) ?? "employee");
+        if (alive) {
+          setRole(
+            resolveEffectiveRole(
+              (profile?.role as Role | undefined) ?? "employee",
+              readRoleViewOverride()
+            ) as Role
+          );
+        }
       } else if (alive) {
         setRole(null);
       }

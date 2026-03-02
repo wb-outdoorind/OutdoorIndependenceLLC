@@ -1,7 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
+import { cookies } from "next/headers";
 import { createServerSupabase } from "@/lib/supabase/server";
 import HomeDashboardCard from "@/components/home/HomeDashboardCard";
+import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 
 export const dynamic = "force-dynamic";
 
@@ -181,6 +183,8 @@ export default async function Home() {
   let canExpandDashboard = false;
 
   try {
+    const cookieStore = await cookies();
+    const requestedRole = cookieStore.get(ROLE_VIEW_COOKIE)?.value ?? null;
     const supabase = await createServerSupabase();
     const { data: authData } = await supabase.auth.getUser();
 
@@ -192,7 +196,7 @@ export default async function Home() {
         .eq("id", authData.user.id)
         .maybeSingle();
       profile = (data as ProfileRow | null) ?? null;
-      role = profile?.role ?? null;
+      role = resolveEffectiveRole(profile?.role ?? null, requestedRole);
     }
 
     const { data: inventoryRows, error: inventoryError } = await supabase

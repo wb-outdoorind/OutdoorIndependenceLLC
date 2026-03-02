@@ -25,7 +25,7 @@ export default async function DigestDetailsPage({ params }: { params: Promise<{ 
   const session = await getCurrentUserProfile();
   if (!session?.user) redirect("/login");
 
-  const role = session.profile?.role ?? null;
+  const role = session.effectiveRole ?? null;
   const canView = role === "owner" || role === "mechanic";
   if (!canView) {
     redirect("/not-authorized?reason=digest_details_requires_owner_or_mechanic&next=/notifications");

@@ -4,7 +4,7 @@ import InventoryAlertsClient from "./InventoryAlertsClient";
 
 export default async function InventoryAlertsPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canManage = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canManage) {

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
+import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
 
 /* =========================
    Types (aligned with request)
@@ -249,7 +250,12 @@ export default function MaintenanceLogPage() {
           .eq("id", authData.user.id)
           .maybeSingle();
 
-        setUserRole((profile?.role as Role | undefined) ?? "employee");
+        setUserRole(
+          resolveEffectiveRole(
+            (profile?.role as Role | undefined) ?? "employee",
+            readRoleViewOverride()
+          ) as Role
+        );
       })();
     }, 0);
 

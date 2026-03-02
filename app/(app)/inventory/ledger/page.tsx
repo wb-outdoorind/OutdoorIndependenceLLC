@@ -4,7 +4,7 @@ import InventoryLedgerClient from "./InventoryLedgerClient";
 
 export default async function InventoryLedgerPage() {
   const session = await getCurrentUserProfile();
-  const role = session?.profile?.role ?? "employee";
+  const role = session?.effectiveRole ?? "employee";
 
   const canView = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
   if (!canView) {
