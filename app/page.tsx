@@ -715,6 +715,19 @@ export default async function Home() {
                 >
                   {lowStockCount} Low
                 </div>
+              ) : role === "apprentice" && t.title === "Maintenance Center" ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    background: "rgba(255,255,255,0.08)",
+                    padding: "3px 9px",
+                  }}
+                >
+                  View Only
+                </div>
               ) : null}
             </div>
             <div style={{ opacity: 0.82, marginTop: 8, lineHeight: 1.35 }}>
