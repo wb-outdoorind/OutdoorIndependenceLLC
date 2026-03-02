@@ -161,6 +161,34 @@ export default function EquipmentMaintenanceRequestPage() {
     return `${base} issue${end}`;
   }, [systemAffected, urgency]);
 
+  if (userRole === "apprentice") {
+    return (
+      <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
+        <h1 style={{ marginBottom: 6 }}>Equipment Maintenance Request</h1>
+        <div style={{ opacity: 0.8, marginTop: 12 }}>
+          Apprentice role does not have access to submit maintenance requests.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "inherit",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Back to Equipment
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
