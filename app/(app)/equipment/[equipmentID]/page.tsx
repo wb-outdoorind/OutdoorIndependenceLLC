@@ -808,6 +808,11 @@ export default function EquipmentDetailPage() {
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
+        {userRole === "apprentice" ? (
+          <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.78 }}>
+            Maintenance requests and logs are restricted for Apprentice role.
+          </div>
+        ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
           {canCreateMaintenanceRequest ? (
