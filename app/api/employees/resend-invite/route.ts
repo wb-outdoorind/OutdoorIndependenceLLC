@@ -1,13 +1,29 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
+import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 
 export const runtime = "nodejs";
 const TEMP_PASSWORD = "Outdoor2026!";
 
 export async function POST(req: Request) {
   try {
+    const ip = readClientIp(req);
+    const routeLimit = evaluateRateLimit({
+      key: `resend-invite:ip:${ip}`,
+      limit: 15,
+      windowMs: 60_000,
+    });
+    if (!routeLimit.ok) return rateLimitExceededResponse(routeLimit);
+
     const session = await getCurrentUserProfileStrict();
+    const userId = session?.user?.id ?? "anonymous";
+    const actorLimit = evaluateRateLimit({
+      key: `resend-invite:user:${userId}`,
+      limit: 30,
+      windowMs: 60_000,
+    });
+    if (!actorLimit.ok) return rateLimitExceededResponse(actorLimit);
     const requesterRole = session?.profile?.role ?? "employee";
 
     if (

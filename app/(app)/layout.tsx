@@ -29,7 +29,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <TopNav />
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "clamp(14px, 2.8vw, 32px)" }}>
+      <main style={{ width: "100%", maxWidth: 1400, margin: "0 auto", padding: "clamp(14px, 2.8vw, 32px)" }}>
         {children}
       </main>
     </>

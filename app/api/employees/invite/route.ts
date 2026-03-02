@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
+import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
 const TEMP_PASSWORD = "Outdoor2026!";
@@ -26,6 +27,14 @@ const ALLOWED_DEPARTMENTS = new Set([
 
 export async function POST(req: Request) {
   try {
+    const ip = readClientIp(req);
+    const routeLimit = evaluateRateLimit({
+      key: `invite:ip:${ip}`,
+      limit: 10,
+      windowMs: 60_000,
+    });
+    if (!routeLimit.ok) return rateLimitExceededResponse(routeLimit);
+
     // ✅ hard checks so we don't crash silently
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
       return NextResponse.json({ error: "Missing NEXT_PUBLIC_SUPABASE_URL" }, { status: 500 });
@@ -35,6 +44,13 @@ export async function POST(req: Request) {
     }
 
     const session = await getCurrentUserProfileStrict();
+    const requesterId = session?.user?.id ?? "anonymous";
+    const actorLimit = evaluateRateLimit({
+      key: `invite:user:${requesterId}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (!actorLimit.ok) return rateLimitExceededResponse(actorLimit);
     const requesterRole = session?.profile?.role ?? "employee";
 
     if (

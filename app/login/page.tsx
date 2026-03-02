@@ -161,6 +161,18 @@ function LoginPageContent() {
           First login users should use the temporary password provided by admin,
           then you will be asked to change it.
         </div>
+
+        <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.4 }}>
+          By continuing, you agree to the{" "}
+          <a href="https://outdoorind.org/terms" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>
+            Terms of Use
+          </a>{" "}
+          and{" "}
+          <a href="https://outdoorind.org/privacy" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>
+            Privacy Policy
+          </a>
+          .
+        </div>
       </form>
     </main>
   );

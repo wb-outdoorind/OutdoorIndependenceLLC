@@ -13,6 +13,7 @@ cd /Users/shop/inspections-app
 npm run check:api-auth
 npm run lint
 npm run build
+npm run smoke:health
 ```
 
 If any command fails, fix before deploying.
@@ -123,6 +124,13 @@ Quick command (defaults to production URL):
 npm run smoke:web
 ```
 
+Optional browser test suite (requires Playwright browsers installed):
+
+```bash
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
 Custom URL example:
 
 ```bash
@@ -146,3 +154,21 @@ Recommended branch protection settings:
 - Require status checks to pass before merging
 - Select required check: `CI / validate`
 - Restrict direct pushes to `main`
+
+## 12) Data Safety Operations
+
+Create encrypted backups:
+
+```bash
+export SUPABASE_DB_URL='postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require'
+npm run backup:supabase
+```
+
+Run restore drill on a non-production database:
+
+```bash
+export SUPABASE_RESTORE_DB_URL='postgresql://postgres:<password>@db.<restore-ref>.supabase.co:5432/postgres?sslmode=require'
+npm run restore:drill -- ./backups/schema_YYYYMMDD_HHMMSS.sql ./backups/data_YYYYMMDD_HHMMSS.dump
+```
+
+Reference: `docs/operations-hardening.md`.

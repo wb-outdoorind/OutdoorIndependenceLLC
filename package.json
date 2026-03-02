@@ -12,6 +12,10 @@
     "release:check": "npm run lint && npm run build",
     "smoke:web": "bash ./scripts/smoke-web.sh",
     "smoke:local": "bash ./scripts/smoke-local.sh",
+    "smoke:health": "curl -fsS ${BASE_URL:-https://outdoor-independence-llc-app.vercel.app}/api/health >/dev/null && echo 'Health check passed'",
+    "backup:supabase": "bash ./scripts/backup-supabase.sh",
+    "restore:drill": "bash ./scripts/restore-drill-supabase.sh",
+    "test:e2e": "playwright test",
     "mobile:sync": "npx cap sync",
     "mobile:add:ios": "npx cap add ios",
     "mobile:add:android": "npx cap add android",
@@ -40,6 +44,7 @@
     "eslint-config-next": "16.1.6",
     "exceljs": "^4.4.0",
     "tailwindcss": "^4",
+    "@playwright/test": "^1.54.2",
     "tsx": "^4.21.0",
     "typescript": "^5"
   }

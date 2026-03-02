@@ -1,16 +1,31 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    const ip = readClientIp(req);
+    const routeLimit = evaluateRateLimit({
+      key: `complete-onboarding:ip:${ip}`,
+      limit: 25,
+      windowMs: 60_000,
+    });
+    if (!routeLimit.ok) return rateLimitExceededResponse(routeLimit);
+
     const session = await getCurrentUserProfileStrict();
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
+    const actorLimit = evaluateRateLimit({
+      key: `complete-onboarding:user:${userId}`,
+      limit: 8,
+      windowMs: 60_000,
+    });
+    if (!actorLimit.ok) return rateLimitExceededResponse(actorLimit);
 
     const admin = createSupabaseAdmin();
     const { error } = await admin

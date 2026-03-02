@@ -221,6 +221,24 @@ export default function SettingsPage() {
         <LogoutButton />
       </section>
 
+      <section style={{ ...cardStyle, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 12 }}>Legal</h2>
+        <div style={{ opacity: 0.78, marginBottom: 10 }}>
+          Privacy, terms, and support links for web and App Store review.
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a href="https://outdoorind.org/privacy" target="_blank" rel="noreferrer" style={linkButtonStyle}>
+            Privacy Policy
+          </a>
+          <a href="https://outdoorind.org/terms" target="_blank" rel="noreferrer" style={linkButtonStyle}>
+            Terms of Use
+          </a>
+          <a href="mailto:alerts@outdoorind.org" style={linkButtonStyle}>
+            Support Contact
+          </a>
+        </div>
+      </section>
+
       {canViewRunbook ? (
         <section style={{ ...cardStyle, marginTop: 14 }}>
           <h2 style={{ marginTop: 0, marginBottom: 12 }}>Deployment Runbook</h2>
@@ -279,4 +297,15 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid var(--surface-border)",
   background: "var(--surface)",
   color: "inherit",
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid var(--surface-border)",
+  background: "var(--surface)",
+  color: "inherit",
+  textDecoration: "none",
+  fontWeight: 700,
 };

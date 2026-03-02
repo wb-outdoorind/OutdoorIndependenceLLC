@@ -40,5 +40,6 @@ check_200() {
 check_200 "/login"
 check_200 "/"
 check_200 "/scan"
+check_200 "/api/health"
 
 echo "Local smoke checks passed."
