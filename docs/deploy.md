@@ -124,3 +124,13 @@ If production breaks:
 2. Push revert commit to `main`.
 3. Confirm Vercel redeploy completes.
 4. Re-run smoke test.
+
+## 11) Required CI Status Checks
+
+In GitHub branch protection for `main`, require the `CI / validate` check to pass before merge.
+
+Recommended branch protection settings:
+- Require a pull request before merging
+- Require status checks to pass before merging
+- Select required check: `CI / validate`
+- Restrict direct pushes to `main`
