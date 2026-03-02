@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { writeServerAudit } from "@/lib/auditServer";
 
 type GradePayload = {
   formType?: "inspection" | "vehicle_maintenance_request" | "equipment_maintenance_request";
@@ -109,6 +111,20 @@ function readDescriptionField(description: string | null, key: string) {
     .find((raw) => raw.trim().toLowerCase().startsWith(`${key.toLowerCase()}:`));
   if (!line) return "";
   return line.slice(line.indexOf(":") + 1).trim();
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableSerialize(obj[key])}`)
+    .join(",")}}`;
+}
+
+function payloadHash(value: unknown) {
+  return crypto.createHash("sha256").update(stableSerialize(value)).digest("hex");
 }
 
 function gradeInspectionRecord(row: {
@@ -399,6 +415,8 @@ export async function POST(req: Request) {
     const admin = createSupabaseAdmin();
 
     let grade: GradeResult | null = null;
+    let snapshotSourceTable = "";
+    let snapshotPayload: Record<string, unknown> | null = null;
     if (formType === "inspection") {
       const { data, error } = await admin
         .from("inspections")
@@ -408,6 +426,8 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       if (!data) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
       grade = gradeInspectionRecord(data);
+      snapshotSourceTable = "inspections";
+      snapshotPayload = data as Record<string, unknown>;
     } else if (formType === "vehicle_maintenance_request") {
       const { data, error } = await admin
         .from("maintenance_requests")
@@ -419,6 +439,8 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       if (!data) return NextResponse.json({ error: "Vehicle maintenance request not found" }, { status: 404 });
       grade = await gradeVehicleMaintenanceRequest(admin, data);
+      snapshotSourceTable = "maintenance_requests";
+      snapshotPayload = data as Record<string, unknown>;
     } else if (formType === "equipment_maintenance_request") {
       const { data, error } = await admin
         .from("equipment_maintenance_requests")
@@ -430,6 +452,8 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       if (!data) return NextResponse.json({ error: "Equipment maintenance request not found" }, { status: 404 });
       grade = gradeEquipmentMaintenanceRequest(data);
+      snapshotSourceTable = "equipment_maintenance_requests";
+      snapshotPayload = data as Record<string, unknown>;
     } else {
       return NextResponse.json({ error: "Unsupported formType" }, { status: 400 });
     }
@@ -456,6 +480,31 @@ export async function POST(req: Request) {
 
     if (upsertError) {
       return NextResponse.json({ error: upsertError.message }, { status: 500 });
+    }
+
+    if (snapshotPayload && snapshotSourceTable) {
+      const snapshotDocument = {
+        formType,
+        formId: recordId,
+        sourceTable: snapshotSourceTable,
+        source: snapshotPayload,
+      };
+      const hash = payloadHash(snapshotDocument);
+      const { error: snapshotError } = await admin.from("form_submission_snapshots").insert({
+        form_type: formType,
+        form_id: recordId,
+        captured_by: session.user.id,
+        source_table: snapshotSourceTable,
+        payload: snapshotDocument,
+        payload_hash: hash,
+      });
+      if (snapshotError) {
+        const msg = snapshotError.message.toLowerCase();
+        // Duplicate insert is expected after first capture; snapshots are immutable.
+        if (!msg.includes("duplicate") && !msg.includes("unique")) {
+          console.warn("Failed to capture immutable form snapshot:", snapshotError.message);
+        }
+      }
     }
 
     if (formType === "vehicle_maintenance_request") {
@@ -509,6 +558,22 @@ export async function POST(req: Request) {
         dedupeKeyBase: `accountability_flag:${formType}:${recordId}`,
       });
     }
+
+    await writeServerAudit(admin, {
+      actorId: session.user.id,
+      actorRole: session.profile?.role ?? null,
+      action: "grade_form_submission",
+      tableName: "form_submission_grades",
+      recordId: `${formType}:${recordId}`,
+      eventType: "form_submission_graded",
+      entityType: formType,
+      entityId: recordId,
+      afterData: {
+        score: grade.score,
+        missingCount: grade.missingCount,
+        accountabilityFlag: grade.accountabilityFlag,
+      },
+    });
 
     return NextResponse.json({ ok: true, grade });
   } catch (error: unknown) {

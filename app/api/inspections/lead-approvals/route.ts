@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { writeServerAudit } from "@/lib/auditServer";
 
 export const runtime = "nodejs";
 
@@ -167,6 +168,18 @@ export async function POST(req: Request) {
       { onConflict: "recipient_id,dedupe_key" }
     );
     if (notifyError) return NextResponse.json({ error: notifyError.message }, { status: 500 });
+
+    await writeServerAudit(admin, {
+      actorId: userId,
+      actorRole: role,
+      action: "lead_signoff_requested",
+      tableName: "inspections",
+      recordId: inspectionId,
+      eventType: "inspection_lead_signoff_requested",
+      entityType: "inspection",
+      entityId: inspectionId,
+      meta: { leadApproverId },
+    });
     return NextResponse.json({ ok: true });
   }
 
@@ -189,6 +202,19 @@ export async function POST(req: Request) {
 
     const { error: updateError } = await admin.from("inspections").update(patch).eq("id", inspectionId);
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+
+    await writeServerAudit(admin, {
+      actorId: userId,
+      actorRole: role,
+      action: `lead_signoff_${decision}`,
+      tableName: "inspections",
+      recordId: inspectionId,
+      eventType: "inspection_lead_signoff_decision",
+      entityType: "inspection",
+      entityId: inspectionId,
+      afterData: patch,
+      meta: { decision, note: asString(body.note) || null },
+    });
 
     return NextResponse.json({ ok: true });
   }

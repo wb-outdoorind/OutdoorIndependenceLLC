@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { writeServerAudit } from "@/lib/auditServer";
 
 export const runtime = "nodejs";
 const TEMP_PASSWORD = "Outdoor2026!";
@@ -60,6 +61,18 @@ export async function POST(req: Request) {
       .update({ must_change_password: true })
       .eq("id", id);
     if (profileErr) return NextResponse.json({ error: profileErr.message }, { status: 500 });
+
+    await writeServerAudit(admin, {
+      actorId: session?.user?.id ?? null,
+      actorRole: requesterRole,
+      action: "reset_teammate_password",
+      tableName: "profiles",
+      recordId: id,
+      eventType: "teammate_password_reset",
+      entityType: "profile",
+      entityId: id,
+      meta: { email: prof.email },
+    });
 
     return NextResponse.json({ ok: true, temporaryPassword: TEMP_PASSWORD });
   } catch (e: unknown) {

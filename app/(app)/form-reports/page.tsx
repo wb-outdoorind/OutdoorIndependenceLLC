@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { canAccessRoute } from "@/lib/routeAccess";
 import FormReportsClient from "./FormReportsClient";
 
 export default async function FormReportsPage() {
@@ -7,12 +8,7 @@ export default async function FormReportsPage() {
   if (!session?.user) redirect("/login");
 
   const role = session?.effectiveRole ?? "employee";
-  const canView =
-    role === "owner" ||
-    role === "operations_manager" ||
-    role === "office_admin" ||
-    role === "mechanic";
-  if (!canView) {
+  if (!canAccessRoute(role, "accountability_center")) {
     redirect("/not-authorized?reason=accountability_center_requires_management_or_mechanic");
   }
 

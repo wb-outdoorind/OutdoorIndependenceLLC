@@ -89,6 +89,11 @@ export default function AppTopNavLinks() {
       viewAsRole &&
       viewAsRole !== actualRole
   );
+  const canViewAudit =
+    actualRole === "owner" ||
+    actualRole === "operations_manager" ||
+    actualRole === "office_admin" ||
+    actualRole === "mechanic";
 
   return (
     <nav className="app-topnav-links">
@@ -104,6 +109,7 @@ export default function AppTopNavLinks() {
         Notifications{unreadCount > 0 ? ` (${unreadCount})` : ""}
       </Link>
       <Link href="/form-reports" className="app-topnav-link">Accountability Center</Link>
+      {canViewAudit ? <Link href="/audit" className="app-topnav-link">Audit Trail</Link> : null}
       <Link href="/approvals" className="app-topnav-link">Approvals</Link>
       <Link href="/settings" className="app-topnav-link">Settings</Link>
       {showViewAsBadge ? (

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUserProfile, createServerSupabase } from "@/lib/supabase/server";
+import { canAccessRoute } from "@/lib/routeAccess";
 import DigestDetailsClient, { type DigestActionRow, type DigestAssetLabelMap } from "./DigestDetailsClient";
 
 type VehicleRow = {
@@ -26,8 +27,7 @@ export default async function DigestDetailsPage({ params }: { params: Promise<{ 
   if (!session?.user) redirect("/login");
 
   const role = session.effectiveRole ?? null;
-  const canView = role === "owner" || role === "mechanic";
-  if (!canView) {
+  if (!canAccessRoute(role, "digest_details")) {
     redirect("/not-authorized?reason=digest_details_requires_owner_or_mechanic&next=/notifications");
   }
 

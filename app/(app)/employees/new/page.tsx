@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { canAccessRoute } from "@/lib/routeAccess";
 import NewEmployeeClient from "./NewEmployeeClient";
 
 export default async function Page() {
@@ -7,7 +8,7 @@ export default async function Page() {
   if (!session?.user) redirect("/login");
 
   const role = session?.effectiveRole ?? "employee";
-  if (role !== "owner" && role !== "operations_manager" && role !== "office_admin") {
+  if (!canAccessRoute(role, "employees_create")) {
     redirect("/not-authorized?reason=employees_create");
   }
 

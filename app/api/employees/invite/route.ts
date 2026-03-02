@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { writeServerAudit } from "@/lib/auditServer";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
 const TEMP_PASSWORD = "Outdoor2026!";
@@ -173,6 +174,19 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    await writeServerAudit(admin, {
+      actorId: session?.user?.id ?? null,
+      actorRole: requesterRole,
+      action: "invite_teammate",
+      tableName: "profiles",
+      recordId: userId,
+      eventType: "teammate_invited",
+      entityType: "profile",
+      entityId: userId,
+      afterData: { role, department, email, full_name },
+      meta: { requesterRole },
+    });
 
     return NextResponse.json({ ok: true, userId, temporaryPassword: TEMP_PASSWORD });
   } catch (err: unknown) {

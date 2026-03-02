@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { writeAudit } from "@/lib/audit";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
@@ -463,6 +464,16 @@ export default function EquipmentDetailPage() {
         idx === 0 ? { ...row, mechanic_self_score: Math.round(parsed) } : row
       )
     );
+    await writeAudit({
+      action: "update_mechanic_score",
+      event_type: "mechanic_score_updated",
+      table_name: "equipment_maintenance_logs",
+      record_id: latestLog.id,
+      entity_type: "equipment",
+      entity_id: stableEquipmentId,
+      after_data: { mechanic_self_score: Math.round(parsed) },
+      meta: { route: "equipment_detail" },
+    });
     setIsEditingMechanicScore(false);
   }
 
