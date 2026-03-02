@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 type GradePayload = {
   formType?: "inspection" | "vehicle_maintenance_request" | "equipment_maintenance_request";
@@ -369,7 +369,7 @@ function gradeEquipmentMaintenanceRequest(row: {
 
 export async function POST(req: Request) {
   try {
-    const session = await getCurrentUserProfile();
+    const session = await getCurrentUserProfileStrict();
     if (!session?.user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }

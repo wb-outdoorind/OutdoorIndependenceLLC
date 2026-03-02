@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 type AssetType = "vehicle" | "equipment";
 type ActionType = "asset_health_decline" | "mechanic_decline";
@@ -23,7 +23,7 @@ function isOwnerOrMechanic(role: string | null | undefined) {
 }
 
 export async function GET(req: Request) {
-  const session = await getCurrentUserProfile();
+  const session = await getCurrentUserProfileStrict();
   const role = session?.profile?.role ?? null;
   if (!isOwnerOrMechanic(role)) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await getCurrentUserProfile();
+  const session = await getCurrentUserProfileStrict();
   const role = session?.profile?.role ?? null;
   const userId = session?.user?.id ?? null;
   if (!isOwnerOrMechanic(role) || !userId) {
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const session = await getCurrentUserProfile();
+  const session = await getCurrentUserProfileStrict();
   const role = session?.profile?.role ?? null;
   const userId = session?.user?.id ?? null;
   if (!isOwnerOrMechanic(role) || !userId) {

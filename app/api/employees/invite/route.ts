@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
 const TEMP_PASSWORD = "Outdoor2026!";
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
     }
 
-    const session = await getCurrentUserProfile();
+    const session = await getCurrentUserProfileStrict();
     const requesterRole = session?.profile?.role ?? "employee";
 
     if (

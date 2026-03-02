@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 const TEMP_PASSWORD = "Outdoor2026!";
 
 export async function POST(req: Request) {
   try {
-    const session = await getCurrentUserProfile();
+    const session = await getCurrentUserProfileStrict();
     const requesterRole = session?.profile?.role ?? "employee";
 
     if (

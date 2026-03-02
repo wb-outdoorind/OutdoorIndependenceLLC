@@ -59,3 +59,24 @@ export async function getCurrentUserProfile() {
 
   return { user: userRes.user, profile, effectiveRole };
 }
+
+/**
+ * Strict auth helper for API routes.
+ * Ignores role-view cookie overrides and always returns true profile role.
+ */
+export async function getCurrentUserProfileStrict() {
+  const supabase = await createServerSupabase();
+
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr || !userRes?.user) return null;
+
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userRes.user.id)
+    .single();
+
+  if (profileErr || !profile) return { user: userRes.user, profile: null, effectiveRole: "employee" };
+
+  return { user: userRes.user, profile, effectiveRole: profile.role ?? "employee" };
+}

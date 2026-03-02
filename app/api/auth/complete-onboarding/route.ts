@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 export async function POST() {
   try {
-    const session = await getCurrentUserProfile();
+    const session = await getCurrentUserProfileStrict();
     const userId = session?.user?.id;
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentUserProfile } from "@/lib/supabase/server";
+import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -191,7 +191,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST() {
-  const session = await getCurrentUserProfile();
+  const session = await getCurrentUserProfileStrict();
   const role = session?.profile?.role ?? null;
   if (
     role !== "owner" &&
