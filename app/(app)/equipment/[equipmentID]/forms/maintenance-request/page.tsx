@@ -4,7 +4,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -40,17 +40,7 @@ type SystemAffected =
   | "Other";
 
 type TriState = "Yes" | "No" | "Not sure";
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2"
-  | "apprentice"
-  | "employee";
+type Role = AppRole;
 
 function equipmentHoursKey(equipmentId: string) {
   return `equipment:${equipmentId}:hours`;

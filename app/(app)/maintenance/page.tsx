@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import OpsClient from "@/app/(app)/ops/OpsClient";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -74,17 +74,7 @@ type EquipmentMetaRow = {
 
 type StatusTab = "Open" | "In Progress" | "Closed";
 type MaintenanceSection = "queue" | "operations";
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "employee"
-  | "apprentice"
-  | "team_member_1"
-  | "team_member_2"
-  | "team_lead_1"
-  | "team_lead_2";
+type Role = AppRole;
 
 type GradeRow = {
   score: number | null;

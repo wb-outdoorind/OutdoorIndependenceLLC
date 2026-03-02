@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, getSignedInDisplayName, useFormExitGuard } from "@/lib/forms";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 export type Choice = "pass" | "fail";
 type ChoiceOrBlank = Choice | "";
@@ -82,17 +82,7 @@ type LeadOption = {
   email: string | null;
   role: string | null;
 };
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2"
-  | "apprentice"
-  | "employee";
+type Role = AppRole;
 
 function canBypassLeadSignoff(role: Role | null) {
   return (

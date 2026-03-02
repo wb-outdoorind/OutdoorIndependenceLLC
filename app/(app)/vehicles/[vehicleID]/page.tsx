@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 /* =========================
    Types
@@ -78,17 +78,7 @@ type HistoryPreviewItem = {
 };
 
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "apprentice"
-  | "employee"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2";
+type Role = AppRole;
 
 type VehicleEditDraft = {
   name: string;

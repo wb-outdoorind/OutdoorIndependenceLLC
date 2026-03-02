@@ -6,20 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2"
-  | "apprentice"
-  | "employee";
+type Role = AppRole;
 
 type EquipmentRequestOption = {
   id: string;

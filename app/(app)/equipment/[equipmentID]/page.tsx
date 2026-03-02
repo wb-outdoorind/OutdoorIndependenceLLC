@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
-import { readRoleViewOverride, resolveEffectiveRole } from "@/lib/roleView";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type EquipmentRow = {
   id: string;
@@ -55,17 +55,7 @@ type AssetHealthSummary = {
   pmStatus: "On Track" | "Due Soon" | "Overdue";
 };
 
-type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "apprentice"
-  | "employee"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2";
+type Role = AppRole;
 
 type HistoryPreviewItem = {
   createdAt: string;
