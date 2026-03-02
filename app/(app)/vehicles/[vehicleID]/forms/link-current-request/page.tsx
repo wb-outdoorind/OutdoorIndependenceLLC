@@ -184,7 +184,7 @@ export default function LinkCurrentRequestPage() {
           }}
           style={secondaryButtonStyle()}
         >
-          Back To Inspection
+          Back to Inspection
         </button>
       </div>
     </main>

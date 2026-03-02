@@ -248,7 +248,7 @@ export default function VehiclesListClient({
 
             {filtered.length === 0 ? (
               <div style={{ opacity: 0.75 }}>
-                {loading ? "Loading…" : "No vehicles found."}
+                {loading ? "Loading..." : "No vehicles found."}
               </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>

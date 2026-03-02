@@ -339,7 +339,7 @@ export default function InventoryAlertsClient() {
               <input
                 value={pickerSearch}
                 onChange={(e) => setPickerSearch(e.target.value)}
-                placeholder="Search employees by name, email, role"
+                placeholder="Search teammates by name, email, role"
                 style={inputStyle()}
               />
             </div>

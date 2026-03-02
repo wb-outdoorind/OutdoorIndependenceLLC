@@ -359,11 +359,6 @@ export default function MaintenanceRequestPage() {
         </span>
       </div>
 
-      {/* tiny debug so you KNOW the route is being hit */}
-      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
-        Route: /vehicles/[vehicleID]/maintenance-request
-      </div>
-
       <div style={{ marginTop: 14, ...cardStyle() }}>
         <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35, opacity: 0.92 }}>
           The Maintenance Request Form is used to report any mechanical, safety,

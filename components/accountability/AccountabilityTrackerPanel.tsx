@@ -770,7 +770,7 @@ export default function AccountabilityTrackerPanel({
         <div>
           <div style={{ fontWeight: 900, fontSize: 18 }}>Accountability Tracker & Actions</div>
           <div style={{ opacity: 0.75, marginTop: 4 }}>
-            Track occurrences, disciplinary forms, actions, and per-employee accountability history in one place.
+            Track occurrences, disciplinary forms, actions, and per-teammate accountability history in one place.
           </div>
         </div>
         <button type="button" onClick={() => void runReminderCheck()} style={buttonStyle()} disabled={reminderBusy}>
@@ -788,7 +788,7 @@ export default function AccountabilityTrackerPanel({
           gap: 8,
         }}
       >
-        <SummaryPill label="Employees Tracked" value={String(trackerSummary.employeesTracked)} />
+        <SummaryPill label="Teammates Tracked" value={String(trackerSummary.employeesTracked)} />
         <SummaryPill label="Active Occurrences" value={String(trackerSummary.activeOccurrences)} />
         <SummaryPill label="Complete Occurrences" value={String(trackerSummary.completeOccurrences)} />
         <SummaryPill label="Accountability Forms" value={String(trackerSummary.accountabilityForms)} />
@@ -797,20 +797,20 @@ export default function AccountabilityTrackerPanel({
       </div>
 
       <div style={{ marginTop: 12, ...sectionStyle() }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>1) Employee Accountability Tracking</div>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>1) Teammate Accountability Tracking</div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 320px) 1fr", gap: 10, marginBottom: 8 }}>
           <input
             value={employeeQuery}
             onChange={(e) => setEmployeeQuery(e.target.value)}
-            placeholder="Search employee"
+            placeholder="Search teammate"
             style={inputStyle()}
           />
           <div style={{ opacity: 0.75, alignSelf: "center", fontSize: 13 }}>
-            Tip: click &quot;Use in New Occurrence&quot; to pre-fill the employee in the occurrence form.
+            Tip: click &quot;Use in New Occurrence&quot; to pre-fill the teammate in the occurrence form.
           </div>
         </div>
         {!filteredEmployeeTrackingRows.length ? (
-          <div style={{ opacity: 0.75 }}>No employee accountability data yet.</div>
+          <div style={{ opacity: 0.75 }}>No teammate accountability data yet.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {filteredEmployeeTrackingRows.map((row) => (
@@ -822,7 +822,7 @@ export default function AccountabilityTrackerPanel({
                       href={`/employees/${row.teammateId}`}
                       style={{ fontSize: 12, color: "#9fcbff", textDecoration: "underline", width: "fit-content" }}
                     >
-                      Open employee profile
+                      Open teammate profile
                     </Link>
                   </div>
                   <button
@@ -966,7 +966,7 @@ export default function AccountabilityTrackerPanel({
               onChange={(e) => setDisciplineForm((p) => ({ ...p, teammate_id: e.target.value }))}
               style={inputStyle()}
             >
-              <option value="">Employee Name *</option>
+              <option value="">Teammate Name *</option>
               {profiles.map((p) => (
                 <option key={`form-tm-${p.id}`} value={p.id}>{profileLabel(p)}</option>
               ))}

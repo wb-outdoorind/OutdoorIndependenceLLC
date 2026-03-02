@@ -1951,9 +1951,9 @@ export default function FormReportsClient() {
       </section>
 
       <section style={{ marginTop: 16, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 4 }}>Employee Scoreboard</div>
+        <div style={{ fontWeight: 900, marginBottom: 4 }}>Teammate Scoreboard</div>
         <div style={{ opacity: 0.75, marginBottom: 10 }}>
-          Click an employee to open score breakdown and submitted forms.
+          Click a teammate to open score breakdown and submitted forms.
         </div>
         {loading ? (
           <div style={{ opacity: 0.75 }}>Loading...</div>
@@ -2003,7 +2003,7 @@ export default function FormReportsClient() {
                       href={`/employees/${row.userId}`}
                       style={{ fontSize: 12, color: "#9fcbff", textDecoration: "underline", justifySelf: "start" }}
                     >
-                      Open employee profile
+                      Open teammate profile
                     </Link>
                   ) : null}
                 </div>
