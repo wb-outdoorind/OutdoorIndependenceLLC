@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "check:api-auth": "bash ./scripts/check-api-auth.sh",
+    "release:check": "npm run check:api-auth && npm run lint && npm run build",
     "mobile:sync": "npx cap sync",
     "mobile:add:ios": "npx cap add ios",
     "mobile:add:android": "npx cap add android",
