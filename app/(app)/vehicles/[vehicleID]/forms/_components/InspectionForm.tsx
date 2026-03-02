@@ -93,6 +93,16 @@ type Role =
   | "apprentice"
   | "employee";
 
+function canBypassLeadSignoff(role: Role | null) {
+  return (
+    role === "team_lead_2" ||
+    role === "mechanic" ||
+    role === "office_admin" ||
+    role === "operations_manager" ||
+    role === "owner"
+  );
+}
+
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
   trailer: "Trailer Identification",
@@ -454,6 +464,7 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
+  const bypassLeadSignoff = canBypassLeadSignoff(currentUserRole);
 
   // Read vehicle metadata from local storage (with short retries for timing).
   useEffect(() => {
@@ -1028,7 +1039,9 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
-    if (!leadApproverId.trim()) return alert("Lead sign-off is required. Select a lead before submitting.");
+    if (!bypassLeadSignoff && !leadApproverId.trim()) {
+      return alert("Lead sign-off is required. Select a lead before submitting.");
+    }
     if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (defectsFound && !notes.trim())
@@ -1117,7 +1130,7 @@ export default function InspectionForm({
       inspectionStatus,
       notes: notes.trim(),
       employee: employee.trim(),
-      leadApproverId: leadApproverId.trim(),
+      leadApproverId: bypassLeadSignoff ? "" : leadApproverId.trim(),
       inspectionDate,
       employeeSignature: employeeSignature.trim(),
       managerSignature: managerSignature.trim()
@@ -1164,6 +1177,13 @@ export default function InspectionForm({
     };
 
     const supabase = createSupabaseBrowser();
+    const leadStatus = bypassLeadSignoff ? "approved" : "pending";
+    const leadApprover = bypassLeadSignoff ? null : leadApproverId.trim();
+    const leadApprovedAt = bypassLeadSignoff ? new Date().toISOString() : null;
+
+    const { data: authDataForLead } = await supabase.auth.getUser();
+    const currentUserId = authDataForLead.user?.id ?? null;
+
     const { data: insertedInspection, error } = await supabase
       .from("inspections")
       .insert({
@@ -1172,9 +1192,11 @@ export default function InspectionForm({
         checklist,
         overall_status: inspectionStatus,
         mileage: m,
-        lead_approver_id: leadApproverId.trim(),
-        lead_approval_status: "pending",
-        lead_approval_requested_at: new Date().toISOString(),
+        lead_approver_id: leadApprover,
+        lead_approval_status: leadStatus,
+        lead_approval_requested_at: bypassLeadSignoff ? null : new Date().toISOString(),
+        lead_approved_at: leadApprovedAt,
+        lead_approved_by: bypassLeadSignoff ? currentUserId : null,
       })
       .select("id")
       .single();
@@ -1215,14 +1237,16 @@ export default function InspectionForm({
 
     if (insertedInspection?.id) {
       try {
-        await fetch("/api/inspections/lead-approvals", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "request",
-            inspectionId: insertedInspection.id,
-          }),
-        });
+        if (!bypassLeadSignoff) {
+          await fetch("/api/inspections/lead-approvals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "request",
+              inspectionId: insertedInspection.id,
+            }),
+          });
+        }
       } catch (approvalNotifyError) {
         console.error("Lead approval notification failed:", approvalNotifyError);
       }
@@ -1333,25 +1357,36 @@ export default function InspectionForm({
               />
             </div>
 
-            <div>
-              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Lead Sign-Off Required *
+            {bypassLeadSignoff ? (
+              <div>
+                <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                  Lead Sign-Off
+                </div>
+                <div style={{ ...inputStyle(), opacity: 0.85 }}>
+                  Not required for Team Lead 2+ roles.
+                </div>
               </div>
-              <select
-                value={leadApproverId}
-                onChange={(e) => setLeadApproverId(e.target.value)}
-                style={inputStyle()}
-                disabled={leadLoading}
-              >
-                <option value="">{leadLoading ? "Loading leads..." : "Select lead..."}</option>
-                {leadOptions.map((row) => (
-                  <option key={`lead-${row.id}`} value={row.id}>
-                    {(row.full_name?.trim() || row.email?.trim() || row.id) +
-                      (row.role ? ` (${row.role.replaceAll("_", " ")})` : "")}
-                  </option>
-                ))}
-              </select>
-            </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+                  Lead Sign-Off Required *
+                </div>
+                <select
+                  value={leadApproverId}
+                  onChange={(e) => setLeadApproverId(e.target.value)}
+                  style={inputStyle()}
+                  disabled={leadLoading}
+                >
+                  <option value="">{leadLoading ? "Loading leads..." : "Select lead..."}</option>
+                  {leadOptions.map((row) => (
+                    <option key={`lead-${row.id}`} value={row.id}>
+                      {(row.full_name?.trim() || row.email?.trim() || row.id) +
+                        (row.role ? ` (${row.role.replaceAll("_", " ")})` : "")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
           </div>
         </div>
