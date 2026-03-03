@@ -226,6 +226,14 @@ function toDateInputValue(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
+function isDateInputValue(value: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function isTruthyQueryValue(value: string | null) {
+  return value === "1" || value === "true";
+}
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -363,14 +371,18 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [search, setSearch] = useState(() => searchParams.get("q") || "");
+  const [showUnreadOnly, setShowUnreadOnly] = useState(() => isTruthyQueryValue(searchParams.get("unread")));
   const [range, setRange] = useState<RangeKey>(() => {
     const fromQuery = searchParams.get("range");
     return isRangeKey(fromQuery) ? fromQuery : "today";
   });
-  const [customFrom, setCustomFrom] = useState(() => toDateInputValue(new Date()));
-  const [customTo, setCustomTo] = useState(() => toDateInputValue(new Date()));
+  const [customFrom, setCustomFrom] = useState(() =>
+    isDateInputValue(searchParams.get("from")) ? (searchParams.get("from") as string) : toDateInputValue(new Date())
+  );
+  const [customTo, setCustomTo] = useState(() =>
+    isDateInputValue(searchParams.get("to")) ? (searchParams.get("to") as string) : toDateInputValue(new Date())
+  );
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [queueEventsEnabled, setQueueEventsEnabled] = useState(true);
@@ -395,6 +407,16 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     canTriageSlaRole ? "My Open SLA Queue" : ""
   );
   const [defaultNotificationPresetId, setDefaultNotificationPresetId] = useState("");
+  const hasExplicitFilterQuery = useMemo(() => {
+    return (
+      Boolean(searchParams.get("q")) ||
+      Boolean(searchParams.get("unread")) ||
+      Boolean(searchParams.get("range")) ||
+      Boolean(searchParams.get("from")) ||
+      Boolean(searchParams.get("to")) ||
+      Boolean(searchParams.get("sla"))
+    );
+  }, [searchParams]);
   const quickPresetRows = useMemo(() => {
     const rows: NotificationFilterPreset[] = [];
     const pushUnique = (preset: NotificationFilterPreset | undefined) => {
@@ -435,6 +457,21 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     const hasNameChanges = activeNotificationPreset.name !== notificationPresetName.trim();
     return hasFilterChanges || hasNameChanges;
   }, [activeNotificationPreset, currentNotificationPresetFilters, notificationPresetName]);
+  const shareableFilterUrl = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const params = new URLSearchParams();
+    const q = search.trim();
+    if (q) params.set("q", q);
+    if (showUnreadOnly) params.set("unread", "1");
+    params.set("range", range);
+    if (range === "custom") {
+      if (isDateInputValue(customFrom)) params.set("from", customFrom);
+      if (isDateInputValue(customTo)) params.set("to", customTo);
+    }
+    params.set("sla", slaStatusFilter);
+    const query = params.toString();
+    return `${window.location.origin}/notifications${query ? `?${query}` : ""}`;
+  }, [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -544,6 +581,10 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         createdAt: row.created_at,
       }));
       setNotificationPresets(mapped);
+      if (hasExplicitFilterQuery) {
+        setNotificationPresetId("");
+        return;
+      }
       const preferredPresetId =
         (defaultNotificationPresetId && mapped.some((row) => row.id === defaultNotificationPresetId)
           ? defaultNotificationPresetId
@@ -563,7 +604,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     return () => {
       active = false;
     };
-  }, [currentUserId, defaultNotificationPresetId]);
+  }, [currentUserId, defaultNotificationPresetId, hasExplicitFilterQuery]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -859,6 +900,29 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  async function copyCurrentFilterLink() {
+    if (!shareableFilterUrl) {
+      setTriageMessage("Could not build filter link.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareableFilterUrl);
+      setTriageMessage("Copied filter link.");
+      return;
+    } catch {
+      const input = document.createElement("textarea");
+      input.value = shareableFilterUrl;
+      input.setAttribute("readonly", "true");
+      input.style.position = "absolute";
+      input.style.left = "-9999px";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      setTriageMessage("Copied filter link.");
+    }
   }
 
   async function saveNotificationPreset(options?: { asNew?: boolean }) {
@@ -1321,6 +1385,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           </select>
           <button type="button" onClick={exportSlaCsv} style={buttonStyle()}>
             Export SLA CSV
+          </button>
+          <button type="button" onClick={() => void copyCurrentFilterLink()} style={buttonStyle()}>
+            Copy filter link
           </button>
           {canTriageSlaRole ? (
             <>
