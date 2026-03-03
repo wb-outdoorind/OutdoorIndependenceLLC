@@ -269,6 +269,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
   const [runSlaBusy, setRunSlaBusy] = useState(false);
   const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
+  const [triageMessage, setTriageMessage] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
   const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
@@ -389,6 +390,18 @@ export default function NotificationsClient({ role }: { role: string | null }) {
 
   const unreadCount = useMemo(() => rows.filter((row) => !row.is_read).length, [rows]);
   const visibleSlaRows = useMemo(() => filtered.filter((row) => isSlaNotification(row)), [filtered]);
+  const visibleSlaOpenCount = useMemo(
+    () => visibleSlaRows.filter((row) => !row.acknowledged_at && !row.resolved_at).length,
+    [visibleSlaRows]
+  );
+  const visibleSlaAcknowledgedCount = useMemo(
+    () => visibleSlaRows.filter((row) => Boolean(row.acknowledged_at) && !row.resolved_at).length,
+    [visibleSlaRows]
+  );
+  const visibleSlaResolvedCount = useMemo(
+    () => visibleSlaRows.filter((row) => Boolean(row.resolved_at)).length,
+    [visibleSlaRows]
+  );
   const visibleUnacknowledgedSlaIds = useMemo(
     () => visibleSlaRows.filter((row) => !row.acknowledged_at && !row.resolved_at).map((row) => row.id),
     [visibleSlaRows]
@@ -433,6 +446,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
 
   async function acknowledgeNotifications(ids: number[]) {
     if (!ids.length) return;
+    setTriageMessage(null);
     const res = await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -444,6 +458,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setRows((prev) =>
       prev.map((row) => (idSet.has(row.id) ? { ...row, acknowledged_at: row.acknowledged_at ?? nowIso } : row))
     );
+    setTriageMessage(`Acknowledged ${ids.length} SLA notification${ids.length === 1 ? "" : "s"}.`);
   }
 
   async function resolveNotification(id: number) {
@@ -471,6 +486,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
 
   async function resolveNotifications(ids: number[]) {
     if (!ids.length) return;
+    setTriageMessage(null);
+    const ok = window.confirm(
+      `Resolve ${ids.length} visible SLA notification${ids.length === 1 ? "" : "s"}? This will mark them resolved and read.`
+    );
+    if (!ok) return;
     const res = await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -492,6 +512,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           : row
       )
     );
+    setTriageMessage(`Resolved ${ids.length} SLA notification${ids.length === 1 ? "" : "s"}.`);
   }
 
   async function savePrefs(
@@ -658,6 +679,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         {runSlaMessage ? (
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{runSlaMessage}</div>
         ) : null}
+        {triageMessage ? (
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{triageMessage}</div>
+        ) : null}
       </div>
 
       <div style={{ marginTop: 12, ...cardStyle() }}>
@@ -775,6 +799,28 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       ) : null}
 
       <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        {canTriageSlaRole ? (
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
+              opacity: 0.92,
+              fontSize: 13,
+            }}
+          >
+            <span style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)" }}>
+              Visible SLA Open: {visibleSlaOpenCount}
+            </span>
+            <span style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)" }}>
+              Visible SLA Acknowledged: {visibleSlaAcknowledgedCount}
+            </span>
+            <span style={{ padding: "4px 9px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.18)" }}>
+              Visible SLA Resolved: {visibleSlaResolvedCount}
+            </span>
+          </div>
+        ) : null}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <input
             value={search}
