@@ -392,6 +392,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runSlaBusy, setRunSlaBusy] = useState(false);
   const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
   const [triageMessage, setTriageMessage] = useState<string | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
   const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
@@ -1058,6 +1059,17 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setTriageMessage("Default preset cleared.");
   }
 
+  async function refreshNotifications() {
+    if (refreshBusy) return;
+    setRefreshBusy(true);
+    try {
+      await loadAll();
+      setTriageMessage("Notifications refreshed.");
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Notifications</h1>
@@ -1074,6 +1086,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" onClick={() => void markAllRead()} style={buttonStyle()}>
               Mark All Read
+            </button>
+            <button type="button" onClick={() => void refreshNotifications()} style={buttonStyle()} disabled={refreshBusy}>
+              {refreshBusy ? "Refreshing..." : "Refresh"}
             </button>
             {role === "owner" ? (
               <button
