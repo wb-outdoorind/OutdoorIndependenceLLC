@@ -261,21 +261,47 @@ a:focus-visible {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding-top: calc(36px + env(safe-area-inset-top));
+    padding: calc(34px + env(safe-area-inset-top)) 10px 10px 6px;
   }
 
   .app-topnav-links {
     max-width: 100%;
     padding-bottom: 4px;
+    gap: 6px;
+  }
+
+  .app-topnav-link {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .home-shell {
-    padding: 10px 14px 24px 6px;
+    padding: 12px 12px calc(24px + env(safe-area-inset-bottom)) 6px;
   }
 
   .home-top {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  /* Prevent iOS zoom and improve touch ergonomics on form-heavy pages. */
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px !important;
+    min-height: 42px;
+  }
+
+  textarea {
+    min-height: 110px;
+  }
+
+  /* Keep content comfortably clear of bottom safe-area/home indicator. */
+  main {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
   }
 }
 

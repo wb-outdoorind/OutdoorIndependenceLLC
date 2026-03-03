@@ -12,6 +12,7 @@ From repo root:
 cd /Users/shop/inspections-app
 npm run check:api-auth
 npm run check:route-access
+npm run check:authz
 npm run lint
 npm run build
 npm run smoke:health
