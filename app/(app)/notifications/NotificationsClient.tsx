@@ -138,6 +138,41 @@ function writeDefaultPresetId(userId: string, presetId: string) {
   window.localStorage.setItem(defaultPresetStorageKey(userId), presetId);
 }
 
+function uniquePresetName(baseName: string, presets: NotificationFilterPreset[]) {
+  const base = baseName.trim() || "New preset";
+  const normalized = new Set(presets.map((row) => row.name.trim().toLowerCase()));
+  if (!normalized.has(base.toLowerCase())) return base;
+  let i = 2;
+  while (normalized.has(`${base} (${i})`.toLowerCase())) i += 1;
+  return `${base} (${i})`;
+}
+
+function normalizeNotificationPresetFilters(filters: NotificationPresetFilters): NotificationPresetFilters {
+  return {
+    scope: "notifications",
+    search: filters.search ?? "",
+    unreadOnly: filters.unreadOnly === true,
+    range: isRangeKey(filters.range) ? filters.range : "today",
+    customFrom: filters.customFrom || "",
+    customTo: filters.customTo || "",
+    slaStatus: isSlaStatusFilter(filters.slaStatus) ? filters.slaStatus : "all",
+  };
+}
+
+function notificationPresetFiltersMatch(a: NotificationPresetFilters, b: NotificationPresetFilters) {
+  const left = normalizeNotificationPresetFilters(a);
+  const right = normalizeNotificationPresetFilters(b);
+  return (
+    left.scope === right.scope &&
+    left.search === right.search &&
+    left.unreadOnly === right.unreadOnly &&
+    left.range === right.range &&
+    left.customFrom === right.customFrom &&
+    left.customTo === right.customTo &&
+    left.slaStatus === right.slaStatus
+  );
+}
+
 function isRangeKey(value: string | null): value is RangeKey {
   return (
     value === "all" ||
@@ -375,6 +410,31 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }
     return rows.slice(0, 3);
   }, [defaultNotificationPresetId, notificationPresetId, notificationPresets]);
+  const currentNotificationPresetFilters = useMemo<NotificationPresetFilters>(
+    () => ({
+      scope: "notifications",
+      search,
+      unreadOnly: showUnreadOnly,
+      range,
+      customFrom,
+      customTo,
+      slaStatus: slaStatusFilter,
+    }),
+    [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]
+  );
+  const activeNotificationPreset = useMemo(
+    () => notificationPresets.find((row) => row.id === notificationPresetId) || null,
+    [notificationPresetId, notificationPresets]
+  );
+  const hasNotificationPresetDraftChanges = useMemo(() => {
+    if (!activeNotificationPreset) return false;
+    const hasFilterChanges = !notificationPresetFiltersMatch(
+      activeNotificationPreset.filters,
+      currentNotificationPresetFilters
+    );
+    const hasNameChanges = activeNotificationPreset.name !== notificationPresetName.trim();
+    return hasFilterChanges || hasNameChanges;
+  }, [activeNotificationPreset, currentNotificationPresetFilters, notificationPresetName]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -801,7 +861,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     URL.revokeObjectURL(url);
   }
 
-  async function saveNotificationPreset() {
+  async function saveNotificationPreset(options?: { asNew?: boolean }) {
     if (!currentUserId) {
       setTriageMessage("Sign in required to save presets.");
       return;
@@ -812,20 +872,14 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       return;
     }
     const supabase = createSupabaseBrowser();
-    const filters: NotificationPresetFilters = {
-      scope: "notifications",
-      search,
-      unreadOnly: showUnreadOnly,
-      range,
-      customFrom,
-      customTo,
-      slaStatus: slaStatusFilter,
-    };
+    const filters = currentNotificationPresetFilters;
+    const asNew = options?.asNew === true;
+    const targetName = asNew ? uniquePresetName(displayName, notificationPresets) : displayName;
     const payload = {
-      id: notificationPresetId || undefined,
+      id: asNew ? undefined : notificationPresetId || undefined,
       user_id: currentUserId,
-      name: presetDbName(displayName),
-      filters,
+      name: presetDbName(targetName),
+      filters: normalizeNotificationPresetFilters(filters),
       updated_at: new Date().toISOString(),
     };
     const { data, error } = await supabase
@@ -847,11 +901,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     const next = notificationPresetId
       ? notificationPresets.map((row) => (row.id === notificationPresetId ? nextPreset : row))
       : [nextPreset, ...notificationPresets].slice(0, 25);
-    setNotificationPresets(next);
+    const merged = asNew ? [nextPreset, ...notificationPresets].slice(0, 25) : next;
+    setNotificationPresets(merged);
     setNotificationPresetId(nextPreset.id);
     setNotificationPresetName(nextPreset.name);
     writeLastPresetId(currentUserId, nextPreset.id);
-    setTriageMessage(`Saved preset "${nextPreset.name}".`);
+    setTriageMessage(`${asNew ? "Saved new" : "Saved"} preset "${nextPreset.name}".`);
   }
 
   function applyNotificationPreset(id: string, options?: { silent?: boolean; persist?: boolean }) {
@@ -915,6 +970,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setSlaStatusFilter(canTriageSlaRole ? "open" : "all");
     setNotificationPresetId("");
     setTriageMessage("Reset to default SLA view.");
+  }
+
+  function revertNotificationPresetDraft() {
+    if (!notificationPresetId) return;
+    applyNotificationPreset(notificationPresetId, { persist: false });
+    setTriageMessage("Reverted unsaved preset changes.");
   }
 
   function setCurrentPresetAsDefault() {
@@ -1095,7 +1156,23 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
         {canTriageSlaRole ? (
           <div style={{ ...cardStyle(), display: "grid", gap: 10 }}>
-            <div style={{ fontWeight: 900 }}>Notification Filter Presets</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 900 }}>Notification Filter Presets</div>
+              {hasNotificationPresetDraftChanges ? (
+                <span
+                  style={{
+                    fontSize: 12,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,196,120,0.55)",
+                    background: "rgba(255,196,120,0.13)",
+                    fontWeight: 700,
+                  }}
+                >
+                  Unsaved changes
+                </span>
+              ) : null}
+            </div>
             {quickPresetRows.length ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {quickPresetRows.map((preset) => {
@@ -1147,6 +1224,17 @@ export default function NotificationsClient({ role }: { role: string | null }) {
               />
               <button type="button" onClick={() => void saveNotificationPreset()} style={buttonStyle()}>
                 Save preset
+              </button>
+              <button type="button" onClick={() => void saveNotificationPreset({ asNew: true })} style={buttonStyle()}>
+                Save as new
+              </button>
+              <button
+                type="button"
+                onClick={revertNotificationPresetDraft}
+                style={buttonStyle()}
+                disabled={!notificationPresetId || !hasNotificationPresetDraftChanges}
+              >
+                Revert changes
               </button>
               <button
                 type="button"
