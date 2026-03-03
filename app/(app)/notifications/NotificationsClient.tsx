@@ -83,6 +83,8 @@ type NotificationPresetDbRow = {
 const NOTIFICATION_PRESET_PREFIX = "notifications::";
 const NOTIFICATION_LAST_PRESET_KEY = "oi:notifications:last-preset";
 const NOTIFICATION_DEFAULT_PRESET_KEY = "oi:notifications:default-preset";
+const NOTIFICATION_AUTO_REFRESH_ENABLED_KEY = "oi:notifications:auto-refresh-enabled";
+const NOTIFICATION_AUTO_REFRESH_MINUTES_KEY = "oi:notifications:auto-refresh-minutes";
 
 function canTriageSla(role: string | null | undefined) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
@@ -136,6 +138,50 @@ function writeDefaultPresetId(userId: string, presetId: string) {
     return;
   }
   window.localStorage.setItem(defaultPresetStorageKey(userId), presetId);
+}
+
+function isValidAutoRefreshMinutes(value: number) {
+  return value === 1 || value === 2 || value === 5 || value === 10;
+}
+
+function normalizeAutoRefreshMinutes(value: number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value) && isValidAutoRefreshMinutes(value)) return value;
+  return 2;
+}
+
+function autoRefreshEnabledStorageKey(userId: string) {
+  return `${NOTIFICATION_AUTO_REFRESH_ENABLED_KEY}:${userId}`;
+}
+
+function autoRefreshMinutesStorageKey(userId: string) {
+  return `${NOTIFICATION_AUTO_REFRESH_MINUTES_KEY}:${userId}`;
+}
+
+function readAutoRefreshEnabled(userId: string) {
+  if (typeof window === "undefined") return true;
+  const raw = window.localStorage.getItem(autoRefreshEnabledStorageKey(userId));
+  if (raw === null) return true;
+  return raw === "true" || raw === "1";
+}
+
+function readAutoRefreshMinutes(userId: string) {
+  if (typeof window === "undefined") return 2;
+  const raw = window.localStorage.getItem(autoRefreshMinutesStorageKey(userId));
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return normalizeAutoRefreshMinutes(Number.isFinite(parsed) ? parsed : null);
+}
+
+function writeAutoRefreshEnabled(userId: string, enabled: boolean) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(autoRefreshEnabledStorageKey(userId), enabled ? "true" : "false");
+}
+
+function writeAutoRefreshMinutes(userId: string, minutes: number) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    autoRefreshMinutesStorageKey(userId),
+    String(normalizeAutoRefreshMinutes(minutes))
+  );
 }
 
 function uniquePresetName(baseName: string, presets: NotificationFilterPreset[]) {
@@ -395,6 +441,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [autoRefreshMinutes, setAutoRefreshMinutes] = useState(2);
+  const [autoRefreshSettingsReady, setAutoRefreshSettingsReady] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
@@ -546,14 +593,14 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   }, [loadAll]);
 
   useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const intervalMs = Math.max(1, autoRefreshMinutes) * 60_000;
+    if (!autoRefreshSettingsReady || !autoRefreshEnabled) return;
+    const intervalMs = normalizeAutoRefreshMinutes(autoRefreshMinutes) * 60_000;
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void loadAll({ silent: true });
     }, intervalMs);
     return () => window.clearInterval(interval);
-  }, [autoRefreshEnabled, autoRefreshMinutes, loadAll]);
+  }, [autoRefreshEnabled, autoRefreshMinutes, autoRefreshSettingsReady, loadAll]);
 
   useEffect(() => {
     let active = true;
@@ -565,14 +612,24 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       setCurrentUserId(userId);
       if (!userId) {
         setDefaultNotificationPresetId("");
+        setAutoRefreshSettingsReady(true);
         return;
       }
       setDefaultNotificationPresetId(readDefaultPresetId(userId));
+      setAutoRefreshEnabled(readAutoRefreshEnabled(userId));
+      setAutoRefreshMinutes(readAutoRefreshMinutes(userId));
+      setAutoRefreshSettingsReady(true);
     })();
     return () => {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId || !autoRefreshSettingsReady) return;
+    writeAutoRefreshEnabled(currentUserId, autoRefreshEnabled);
+    writeAutoRefreshMinutes(currentUserId, autoRefreshMinutes);
+  }, [currentUserId, autoRefreshEnabled, autoRefreshMinutes, autoRefreshSettingsReady]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -1154,7 +1211,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           </label>
           <select
             value={String(autoRefreshMinutes)}
-            onChange={(e) => setAutoRefreshMinutes(Number(e.target.value) || 2)}
+            onChange={(e) => setAutoRefreshMinutes(normalizeAutoRefreshMinutes(Number(e.target.value)))}
             style={{ ...inputStyle(), width: "auto", minWidth: 92 }}
             disabled={!autoRefreshEnabled}
           >
