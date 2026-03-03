@@ -81,6 +81,7 @@ type NotificationPresetDbRow = {
 };
 
 const NOTIFICATION_PRESET_PREFIX = "notifications::";
+const NOTIFICATION_LAST_PRESET_KEY = "oi:notifications:last-preset";
 
 function canTriageSla(role: string | null | undefined) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
@@ -98,6 +99,24 @@ function presetDisplayName(dbName: string) {
   return dbName.startsWith(NOTIFICATION_PRESET_PREFIX)
     ? dbName.slice(NOTIFICATION_PRESET_PREFIX.length)
     : dbName;
+}
+
+function lastPresetStorageKey(userId: string) {
+  return `${NOTIFICATION_LAST_PRESET_KEY}:${userId}`;
+}
+
+function readLastPresetId(userId: string) {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(lastPresetStorageKey(userId)) || "";
+}
+
+function writeLastPresetId(userId: string, presetId: string) {
+  if (typeof window === "undefined") return;
+  if (!presetId) {
+    window.localStorage.removeItem(lastPresetStorageKey(userId));
+    return;
+  }
+  window.localStorage.setItem(lastPresetStorageKey(userId), presetId);
 }
 
 function isRangeKey(value: string | null): value is RangeKey {
@@ -417,14 +436,25 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         return;
       }
       const rows = (data ?? []) as NotificationPresetDbRow[];
-      setNotificationPresets(
-        rows.map((row) => ({
-          id: row.id,
-          name: presetDisplayName(row.name),
-          filters: row.filters,
-          createdAt: row.created_at,
-        }))
-      );
+      const mapped = rows.map((row) => ({
+        id: row.id,
+        name: presetDisplayName(row.name),
+        filters: row.filters,
+        createdAt: row.created_at,
+      }));
+      setNotificationPresets(mapped);
+      const lastPresetId = readLastPresetId(currentUserId);
+      const preset = mapped.find((row) => row.id === lastPresetId);
+      if (preset) {
+        setNotificationPresetId(preset.id);
+        setNotificationPresetName(preset.name);
+        setSearch(preset.filters.search ?? "");
+        setShowUnreadOnly(preset.filters.unreadOnly === true);
+        setRange(isRangeKey(preset.filters.range) ? preset.filters.range : "today");
+        setCustomFrom(preset.filters.customFrom || toDateInputValue(new Date()));
+        setCustomTo(preset.filters.customTo || toDateInputValue(new Date()));
+        setSlaStatusFilter(isSlaStatusFilter(preset.filters.slaStatus) ? preset.filters.slaStatus : "all");
+      }
     })();
     return () => {
       active = false;
@@ -776,10 +806,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setNotificationPresets(next);
     setNotificationPresetId(nextPreset.id);
     setNotificationPresetName(nextPreset.name);
+    writeLastPresetId(currentUserId, nextPreset.id);
     setTriageMessage(`Saved preset "${nextPreset.name}".`);
   }
 
-  function applyNotificationPreset(id: string) {
+  function applyNotificationPreset(id: string, options?: { silent?: boolean; persist?: boolean }) {
     const preset = notificationPresets.find((row) => row.id === id);
     if (!preset) return;
     setNotificationPresetId(preset.id);
@@ -790,7 +821,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setCustomFrom(preset.filters.customFrom || toDateInputValue(new Date()));
     setCustomTo(preset.filters.customTo || toDateInputValue(new Date()));
     setSlaStatusFilter(isSlaStatusFilter(preset.filters.slaStatus) ? preset.filters.slaStatus : "all");
-    setTriageMessage(`Applied preset "${preset.name}".`);
+    if (options?.persist !== false && currentUserId) {
+      writeLastPresetId(currentUserId, preset.id);
+    }
+    if (!options?.silent) {
+      setTriageMessage(`Applied preset "${preset.name}".`);
+    }
   }
 
   async function deleteNotificationPreset() {
@@ -806,6 +842,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       return;
     }
     setNotificationPresets((prev) => prev.filter((row) => row.id !== notificationPresetId));
+    writeLastPresetId(currentUserId, "");
     setNotificationPresetId("");
     setTriageMessage("Deleted preset.");
   }
@@ -976,7 +1013,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <select
                 value={notificationPresetId}
-                onChange={(e) => applyNotificationPreset(e.target.value)}
+                onChange={(e) => applyNotificationPreset(e.target.value, { persist: true })}
                 style={{ ...inputStyle(), width: "auto", minWidth: 220 }}
               >
                 <option value="">Select saved preset</option>
