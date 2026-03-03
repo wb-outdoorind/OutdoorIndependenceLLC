@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import OpsClient from "@/app/(app)/ops/OpsClient";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import { getMaintenanceRequestSla, type SlaLevel } from "@/lib/sla";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = "Open" | "In Progress" | "Closed";
@@ -680,6 +681,11 @@ export default function MaintenanceCenterPage() {
                 r.entityType === "vehicle"
                   ? `/vehicles/${encodeURIComponent(r.entityId)}`
                   : `/equipment/${encodeURIComponent(r.entityId)}`;
+              const requestSla = getMaintenanceRequestSla({
+                createdAt: r.createdAt,
+                status: r.status,
+                urgency: r.urgency,
+              });
 
               return (
                 <div key={`${r.entityType}:${r.id}`} style={rowStyle}>
@@ -696,6 +702,11 @@ export default function MaintenanceCenterPage() {
                       <div style={{ opacity: 0.65, fontSize: 12, marginTop: 6 }}>
                         Request Date: <strong>{r.requestDate}</strong> • Created: <strong>{new Date(r.createdAt).toLocaleString()}</strong>
                       </div>
+                      {requestSla ? (
+                        <div style={{ marginTop: 6 }}>
+                          {slaBadge(requestSla.level, requestSla.text)}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -768,6 +779,40 @@ function badge(text: string) {
       }}
     >
       {text}
+    </span>
+  );
+}
+
+function slaBadge(level: SlaLevel, text: string) {
+  const style: React.CSSProperties =
+    level === "overdue"
+      ? {
+          border: "1px solid rgba(255,120,120,0.45)",
+          background: "rgba(120,20,20,0.35)",
+          color: "#ffd7d7",
+        }
+      : level === "due_soon"
+      ? {
+          border: "1px solid rgba(255,197,94,0.45)",
+          background: "rgba(120,82,12,0.35)",
+          color: "#ffe6b8",
+        }
+      : {
+          border: "1px solid rgba(126,255,167,0.4)",
+          background: "rgba(20,98,49,0.35)",
+          color: "#d6ffe2",
+        };
+  return (
+    <span
+      style={{
+        ...style,
+        borderRadius: 999,
+        padding: "2px 8px",
+        fontSize: 12,
+        fontWeight: 800,
+      }}
+    >
+      SLA: {text}
     </span>
   );
 }

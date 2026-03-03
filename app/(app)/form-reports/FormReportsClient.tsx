@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AccountabilityTrackerPanel from "@/components/accountability/AccountabilityTrackerPanel";
+import { getFlaggedQueueSla, type SlaLevel } from "@/lib/sla";
 
 type ScorePeriod = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
@@ -223,6 +224,40 @@ function downloadCsv(filename: string, headers: string[], rows: Array<Array<stri
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function slaPill(level: SlaLevel, text: string) {
+  const style: React.CSSProperties =
+    level === "overdue"
+      ? {
+          border: "1px solid rgba(255,120,120,0.45)",
+          background: "rgba(120,20,20,0.35)",
+          color: "#ffd7d7",
+        }
+      : level === "due_soon"
+      ? {
+          border: "1px solid rgba(255,197,94,0.45)",
+          background: "rgba(120,82,12,0.35)",
+          color: "#ffe6b8",
+        }
+      : {
+          border: "1px solid rgba(126,255,167,0.4)",
+          background: "rgba(20,98,49,0.35)",
+          color: "#d6ffe2",
+        };
+  return (
+    <span
+      style={{
+        ...style,
+        borderRadius: 999,
+        padding: "2px 8px",
+        fontSize: 11,
+        fontWeight: 800,
+      }}
+    >
+      SLA: {text}
+    </span>
+  );
 }
 
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
@@ -1869,6 +1904,16 @@ export default function FormReportsClient() {
                     Status: {item.reviewStatus.replace("_", " ")} · Owner: {item.ownerName}
                   </div>
                 </div>
+                {(() => {
+                  const flaggedSla = getFlaggedQueueSla({
+                    submittedAt: item.row.submitted_at,
+                    reviewStatus: item.reviewStatus,
+                    reviewCreatedAt: item.review?.created_at ?? null,
+                    nowMs,
+                  });
+                  if (!flaggedSla) return null;
+                  return <div style={{ marginTop: 6 }}>{slaPill(flaggedSla.level, flaggedSla.text)}</div>;
+                })()}
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.82 }}>
                   Submitted: {new Date(item.row.submitted_at).toLocaleString()} · By{" "}
                   {item.submittedProfileId ? (

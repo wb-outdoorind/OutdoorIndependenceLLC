@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { getApprovalSla, type SlaLevel } from "@/lib/sla";
 
 type ApprovalRow = {
   id: string;
@@ -55,6 +56,28 @@ function fmtDateTime(iso?: string | null) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function slaBadgeStyle(level: SlaLevel): React.CSSProperties {
+  if (level === "overdue") {
+    return {
+      border: "1px solid rgba(255,120,120,0.45)",
+      background: "rgba(120,20,20,0.35)",
+      color: "#ffd7d7",
+    };
+  }
+  if (level === "due_soon") {
+    return {
+      border: "1px solid rgba(255,197,94,0.45)",
+      background: "rgba(120,82,12,0.35)",
+      color: "#ffe6b8",
+    };
+  }
+  return {
+    border: "1px solid rgba(126,255,167,0.4)",
+    background: "rgba(20,98,49,0.35)",
+    color: "#d6ffe2",
+  };
 }
 
 export default function LeadApprovalsClient() {
@@ -154,14 +177,30 @@ export default function LeadApprovalsClient() {
         ) : (
           filtered.map((row) => {
             const isPending = row.status === "pending";
+            const approvalSla = getApprovalSla({
+              requestedAt: row.requestedAt,
+              status: row.status,
+            });
             return (
               <div key={row.id} style={cardStyle()}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 800 }}>
                     {row.inspectionType} · Vehicle {row.vehicleId}
                   </div>
-                  <div style={{ opacity: 0.72, fontSize: 12 }}>
-                    Status: {row.status.toUpperCase()}
+                  <div style={{ opacity: 0.72, fontSize: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span>Status: {row.status.toUpperCase()}</span>
+                    {approvalSla ? (
+                      <span
+                        style={{
+                          ...slaBadgeStyle(approvalSla.level),
+                          borderRadius: 999,
+                          padding: "2px 8px",
+                          fontWeight: 800,
+                        }}
+                      >
+                        SLA: {approvalSla.text}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
                 <div style={{ marginTop: 6, fontSize: 13, opacity: 0.86 }}>
