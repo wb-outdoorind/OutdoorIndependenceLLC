@@ -551,7 +551,7 @@ export default function MaintenanceCenterPage() {
             background: section === "operations" ? "rgba(126,255,167,0.12)" : sectionCardStyle.background,
           }}
         >
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Administrative Operations Dashboard</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Maintenance Operations Dashboard</div>
           <div style={{ opacity: 0.78, marginTop: 8 }}>PM due, downtime, failure trends, and maintenance performance.</div>
         </button>
       </div>
@@ -562,7 +562,18 @@ export default function MaintenanceCenterPage() {
             <div style={cardStyle}>Loading operations access...</div>
           ) : canViewOperations ? (
             <>
-              <OpsClient embedded title="Administrative Operations Dashboard" />
+              <div style={{ ...cardStyle, marginBottom: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 16 }}>PM Quick Start</div>
+                  <div style={{ opacity: 0.8, fontSize: 13, marginTop: 4 }}>
+                    Create a blank PM from any vehicle or equipment, choose PM type, and begin.
+                  </div>
+                </div>
+                <Link href="/maintenance/pm/new" style={buttonStyle}>
+                  Create Blank PM
+                </Link>
+              </div>
+              <OpsClient embedded title="Maintenance Operations Dashboard" />
               <div style={{ marginTop: 12, ...cardStyle }}>
                 <button
                   type="button"
@@ -590,7 +601,7 @@ export default function MaintenanceCenterPage() {
             />
           ) : (
             <div style={cardStyle}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>Administrative Operations Dashboard Access Required</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Maintenance Operations Dashboard Access Required</div>
               <div style={{ opacity: 0.8 }}>
                 This section is available to owner, operations manager, office admin, and mechanic roles.
               </div>

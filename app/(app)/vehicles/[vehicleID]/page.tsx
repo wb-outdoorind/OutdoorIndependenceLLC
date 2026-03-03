@@ -877,7 +877,7 @@ export default function VehicleDetailPage() {
 
     setEditSaving(true);
     const supabase = createSupabaseBrowser();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("vehicles")
       .update({
         name: nextName,
@@ -893,7 +893,9 @@ export default function VehicleDetailPage() {
         status: nextStatus,
         asset: editDraft.asset.trim() || null,
       })
-      .eq("id", vehicle.id);
+      .eq("id", vehicle.id)
+      .select("id,name,type,make,model,year,vin,plate,fuel,oil_type,mileage,status,asset")
+      .maybeSingle();
     setEditSaving(false);
 
     if (error) {
@@ -901,21 +903,12 @@ export default function VehicleDetailPage() {
       return;
     }
 
-    const updatedVehicle: VehicleRow = {
-      ...vehicle,
-      name: nextName,
-      type: nextType,
-      make: editDraft.make.trim() || null,
-      model: editDraft.model.trim() || null,
-      year: parsedYear,
-      plate: editDraft.plate.trim() || null,
-      vin: editDraft.vin.trim() || null,
-      fuel: editDraft.fuel.trim() || null,
-      oil_type: editDraft.oil_type.trim() || null,
-      mileage: parsedMileage,
-      status: nextStatus,
-      asset: editDraft.asset.trim() || null,
-    };
+    if (!data) {
+      setEditError("Save did not update this vehicle. Check your permissions and try again.");
+      return;
+    }
+
+    const updatedVehicle = data as VehicleRow;
     setVehicle(updatedVehicle);
     setIsEditing(false);
     setEditDraft({

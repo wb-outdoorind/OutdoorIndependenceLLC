@@ -577,7 +577,7 @@ export default async function Home() {
       }
 
       dashboard = {
-        title: "Administrative Operations Dashboard",
+        title: "Maintenance Operations Dashboard",
         subtitle:
           role === "office_admin"
             ? "Live operations overview for office administration."
@@ -591,6 +591,7 @@ export default async function Home() {
         ],
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
+          { label: "Create Blank PM", href: "/maintenance/pm/new" },
           { label: "Open Accountability Center", href: "/form-reports" },
           { label: "Open Inventory Alerts", href: "/inventory/alerts" },
         ],
@@ -625,6 +626,7 @@ export default async function Home() {
         ],
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
+          { label: "Create Blank PM", href: "/maintenance/pm/new" },
           { label: "Open Inventory", href: "/inventory" },
           { label: "Open Notifications", href: "/notifications" },
         ],

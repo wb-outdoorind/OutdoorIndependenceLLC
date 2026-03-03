@@ -25,6 +25,21 @@ type EquipmentRow = {
   external_id: string | null;
 };
 
+type EquipmentEditDraft = {
+  name: string;
+  equipment_type: string;
+  make: string;
+  model: string;
+  year: string;
+  serial_number: string;
+  license_plate: string;
+  fuel_type: string;
+  oil_type: string;
+  current_hours: string;
+  status: string;
+  external_id: string;
+};
+
 type MaintenanceRequestPreviewRow = {
   id: string;
   equipment_id: string;
@@ -182,6 +197,36 @@ function actionBtnStyle(): React.CSSProperties {
   };
 }
 
+const editPrimaryButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(126,255,167,0.45)",
+  borderRadius: 10,
+  padding: "8px 12px",
+  background: "rgba(126,255,167,0.14)",
+  color: "inherit",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const editSecondaryButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 10,
+  padding: "8px 12px",
+  background: "rgba(255,255,255,0.04)",
+  color: "inherit",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const detailInputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: 10,
+  marginTop: 6,
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "rgba(255,255,255,0.03)",
+  color: "inherit",
+};
+
 const trendPillStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -212,6 +257,10 @@ export default function EquipmentDetailPage() {
   const equipmentIdFromRoute = decodeURIComponent(routeEquipmentId);
 
   const [equipment, setEquipment] = useState<EquipmentRow | null>(null);
+  const [editDraft, setEditDraft] = useState<EquipmentEditDraft | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -261,6 +310,21 @@ export default function EquipmentDetailPage() {
       }
 
       setEquipment(data as EquipmentRow);
+      const row = data as EquipmentRow;
+      setEditDraft({
+        name: row.name ?? "",
+        equipment_type: row.equipment_type ?? "",
+        make: row.make ?? "",
+        model: row.model ?? "",
+        year: typeof row.year === "number" ? String(row.year) : "",
+        serial_number: row.serial_number ?? "",
+        license_plate: row.license_plate ?? "",
+        fuel_type: row.fuel_type ?? "",
+        oil_type: row.oil_type ?? "",
+        current_hours: typeof row.current_hours === "number" ? String(row.current_hours) : "",
+        status: row.status ?? "",
+        external_id: row.external_id ?? "",
+      });
       setLoading(false);
     }
 
@@ -422,6 +486,11 @@ export default function EquipmentDetailPage() {
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
   const canShowPmButton = isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate;
+  const canEditEquipment =
+    userRole === "owner" ||
+    userRole === "operations_manager" ||
+    userRole === "office_admin" ||
+    userRole === "mechanic";
   const canViewMechanicScore =
     userRole === "owner" ||
     userRole === "operations_manager" ||
@@ -431,6 +500,120 @@ export default function EquipmentDetailPage() {
   const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
   const canCreateMaintenanceRequest = userRole !== "apprentice";
   const canCreateMaintenanceLog = canViewMechanicScore;
+
+  function updateDraft<K extends keyof EquipmentEditDraft>(key: K, value: EquipmentEditDraft[K]) {
+    setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function resetDraftFromEquipment() {
+    if (!equipment) return;
+    setEditDraft({
+      name: equipment.name ?? "",
+      equipment_type: equipment.equipment_type ?? "",
+      make: equipment.make ?? "",
+      model: equipment.model ?? "",
+      year: typeof equipment.year === "number" ? String(equipment.year) : "",
+      serial_number: equipment.serial_number ?? "",
+      license_plate: equipment.license_plate ?? "",
+      fuel_type: equipment.fuel_type ?? "",
+      oil_type: equipment.oil_type ?? "",
+      current_hours: typeof equipment.current_hours === "number" ? String(equipment.current_hours) : "",
+      status: equipment.status ?? "",
+      external_id: equipment.external_id ?? "",
+    });
+  }
+
+  async function saveEquipmentEdits() {
+    if (!equipment || !editDraft || !canEditEquipment) return;
+    setEditError(null);
+
+    const nextName = editDraft.name.trim();
+    const nextType = editDraft.equipment_type.trim();
+    const nextStatus = editDraft.status.trim();
+    if (!nextName) return setEditError("Equipment name is required.");
+    if (!nextType) return setEditError("Equipment type is required.");
+    if (!nextStatus) return setEditError("Status is required.");
+
+    let parsedYear: number | null = null;
+    if (editDraft.year.trim()) {
+      const y = Number(editDraft.year);
+      if (!Number.isInteger(y) || y < 1900) {
+        return setEditError("Year must be a valid integer.");
+      }
+      parsedYear = y;
+    }
+
+    let parsedHours: number | null = null;
+    if (editDraft.current_hours.trim()) {
+      const h = Number(editDraft.current_hours);
+      if (!Number.isFinite(h) || h < 0) {
+        return setEditError("Current hours must be a valid non-negative number.");
+      }
+      parsedHours = h;
+    }
+
+    setEditSaving(true);
+    const supabase = createSupabaseBrowser();
+    const { data, error } = await supabase
+      .from("equipment")
+      .update({
+        name: nextName,
+        equipment_type: nextType,
+        make: editDraft.make.trim() || null,
+        model: editDraft.model.trim() || null,
+        year: parsedYear,
+        serial_number: editDraft.serial_number.trim() || null,
+        license_plate: editDraft.license_plate.trim() || null,
+        fuel_type: editDraft.fuel_type.trim() || null,
+        oil_type: editDraft.oil_type.trim() || null,
+        current_hours: parsedHours,
+        status: nextStatus,
+        external_id: editDraft.external_id.trim() || null,
+      })
+      .eq("id", equipment.id)
+      .select(
+        "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,current_hours,status,external_id"
+      )
+      .maybeSingle();
+    setEditSaving(false);
+
+    if (error) {
+      setEditError(error.message);
+      return;
+    }
+    if (!data) {
+      setEditError("Save did not update this equipment record. Check your permissions and try again.");
+      return;
+    }
+
+    const updated = data as EquipmentRow;
+    setEquipment(updated);
+    setIsEditing(false);
+    setEditDraft({
+      name: updated.name ?? "",
+      equipment_type: updated.equipment_type ?? "",
+      make: updated.make ?? "",
+      model: updated.model ?? "",
+      year: typeof updated.year === "number" ? String(updated.year) : "",
+      serial_number: updated.serial_number ?? "",
+      license_plate: updated.license_plate ?? "",
+      fuel_type: updated.fuel_type ?? "",
+      oil_type: updated.oil_type ?? "",
+      current_hours: typeof updated.current_hours === "number" ? String(updated.current_hours) : "",
+      status: updated.status ?? "",
+      external_id: updated.external_id ?? "",
+    });
+    await writeAudit({
+      action: "update_equipment",
+      event_type: "equipment_updated",
+      table_name: "equipment",
+      record_id: updated.id,
+      entity_type: "equipment",
+      entity_id: updated.id,
+      after_data: updated,
+      meta: { route: "equipment_detail" },
+    });
+  }
 
   async function saveMechanicScore() {
     const latestLog = logPreviewRows[0];
@@ -596,35 +779,139 @@ export default function EquipmentDetailPage() {
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900, fontSize: 16 }}>Specs</div>
-          <div style={{ opacity: 0.8, fontWeight: 800 }}>{equipment?.status ?? "-"}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {canEditEquipment ? (
+              isEditing ? (
+                <>
+                  <button type="button" onClick={saveEquipmentEdits} style={editPrimaryButtonStyle} disabled={editSaving}>
+                    {editSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditError(null);
+                      resetDraftFromEquipment();
+                    }}
+                    style={editSecondaryButtonStyle}
+                    disabled={editSaving}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(true);
+                    setEditError(null);
+                  }}
+                  style={editSecondaryButtonStyle}
+                >
+                  Edit Equipment
+                </button>
+              )
+            ) : null}
+            <div style={{ opacity: 0.8, fontWeight: 800 }}>{equipment?.status ?? "-"}</div>
+          </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-            marginTop: 14,
-          }}
-        >
-          <Spec label="Type" value={equipment?.equipment_type ?? "-"} />
-          <Spec label="Make" value={equipment?.make ?? "-"} />
-          <Spec label="Model" value={equipment?.model ?? "-"} />
-          <Spec label="Year" value={typeof equipment?.year === "number" ? String(equipment.year) : "-"} />
-          <Spec label="Serial Number" value={equipment?.serial_number ?? "-"} />
-          <Spec label="License Plate" value={equipment?.license_plate ?? "-"} />
-          <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
-          <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
-          <Spec
-            label="Current Hours"
-            value={
-              typeof equipment?.current_hours === "number"
-                ? equipment.current_hours.toLocaleString()
-                : "-"
-            }
-          />
-          <Spec label="External ID" value={equipment?.external_id ?? "-"} />
-        </div>
+        {isEditing && editDraft ? (
+          <>
+            {editError ? (
+              <div style={{ marginTop: 12, color: "#ff9d9d", fontSize: 13 }}>{editError}</div>
+            ) : null}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+                marginTop: 14,
+              }}
+            >
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Name *</div>
+                <input value={editDraft.name} onChange={(e) => updateDraft("name", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Type *</div>
+                <input value={editDraft.equipment_type} onChange={(e) => updateDraft("equipment_type", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Status *</div>
+                <select value={editDraft.status} onChange={(e) => updateDraft("status", e.target.value)} style={detailInputStyle}>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                  <option value="Out of Service">Out of Service</option>
+                  <option value="Retired">Retired</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
+                <input value={editDraft.make} onChange={(e) => updateDraft("make", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
+                <input value={editDraft.model} onChange={(e) => updateDraft("model", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
+                <input value={editDraft.year} onChange={(e) => updateDraft("year", e.target.value)} style={detailInputStyle} inputMode="numeric" />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Serial Number</div>
+                <input value={editDraft.serial_number} onChange={(e) => updateDraft("serial_number", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
+                <input value={editDraft.license_plate} onChange={(e) => updateDraft("license_plate", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
+                <input value={editDraft.fuel_type} onChange={(e) => updateDraft("fuel_type", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
+                <input value={editDraft.oil_type} onChange={(e) => updateDraft("oil_type", e.target.value)} style={detailInputStyle} />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Current Hours</div>
+                <input value={editDraft.current_hours} onChange={(e) => updateDraft("current_hours", e.target.value)} style={detailInputStyle} inputMode="decimal" />
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>External ID</div>
+                <input value={editDraft.external_id} onChange={(e) => updateDraft("external_id", e.target.value)} style={detailInputStyle} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+              marginTop: 14,
+            }}
+          >
+            <Spec label="Type" value={equipment?.equipment_type ?? "-"} />
+            <Spec label="Make" value={equipment?.make ?? "-"} />
+            <Spec label="Model" value={equipment?.model ?? "-"} />
+            <Spec label="Year" value={typeof equipment?.year === "number" ? String(equipment.year) : "-"} />
+            <Spec label="Serial Number" value={equipment?.serial_number ?? "-"} />
+            <Spec label="License Plate" value={equipment?.license_plate ?? "-"} />
+            <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
+            <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
+            <Spec
+              label="Current Hours"
+              value={
+                typeof equipment?.current_hours === "number"
+                  ? equipment.current_hours.toLocaleString()
+                  : "-"
+              }
+            />
+            <Spec label="External ID" value={equipment?.external_id ?? "-"} />
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 18, ...cardStyle() }}>
