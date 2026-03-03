@@ -393,6 +393,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
   const [triageMessage, setTriageMessage] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [autoRefreshMinutes, setAutoRefreshMinutes] = useState(2);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
   const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
@@ -474,9 +477,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     return `${window.location.origin}/notifications${query ? `?${query}` : ""}`;
   }, [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    setErrorMessage(null);
+  const loadAll = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setErrorMessage(null);
+    }
     const shouldLoadRuns = role === "owner" || role === "mechanic";
     const shouldLoadSlaRuns =
       role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
@@ -523,6 +529,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     } else {
       setSlaRuns([]);
     }
+    setLastRefreshedAt(new Date().toISOString());
     setLoading(false);
   }, [role]);
 
@@ -537,6 +544,16 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       window.clearTimeout(timer);
     };
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const intervalMs = Math.max(1, autoRefreshMinutes) * 60_000;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadAll({ silent: true });
+    }, intervalMs);
+    return () => window.clearInterval(interval);
+  }, [autoRefreshEnabled, autoRefreshMinutes, loadAll]);
 
   useEffect(() => {
     let active = true;
@@ -1116,6 +1133,38 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         {triageMessage ? (
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{triageMessage}</div>
         ) : null}
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+            fontSize: 12,
+            opacity: 0.82,
+          }}
+        >
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={autoRefreshEnabled}
+              onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+            />
+            Auto refresh
+          </label>
+          <select
+            value={String(autoRefreshMinutes)}
+            onChange={(e) => setAutoRefreshMinutes(Number(e.target.value) || 2)}
+            style={{ ...inputStyle(), width: "auto", minWidth: 92 }}
+            disabled={!autoRefreshEnabled}
+          >
+            <option value="1">1 min</option>
+            <option value="2">2 min</option>
+            <option value="5">5 min</option>
+            <option value="10">10 min</option>
+          </select>
+          <span>Last refreshed: {lastRefreshedAt ? formatDateTime(lastRefreshedAt) : "Not yet"}</span>
+        </div>
       </div>
 
       <div style={{ marginTop: 12, ...cardStyle() }}>
