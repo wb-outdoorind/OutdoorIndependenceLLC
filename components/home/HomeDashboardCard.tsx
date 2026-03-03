@@ -53,16 +53,25 @@ type SlaObservabilityStats = {
   lastRunStatus: "success" | "failed" | "none";
 };
 
+type SlaDailySummary = {
+  approvalOverdue: number;
+  maintenanceOverdue: number;
+  flaggedOverdue: number;
+  unresolvedTotal: number;
+};
+
 export default function HomeDashboardCard({
   dashboard,
   teammateOpsStats,
   canExpandDashboard,
   slaObservability,
+  slaDailySummary,
 }: {
   dashboard: DashboardData;
   teammateOpsStats: TeammateOpsStats | null;
   canExpandDashboard: boolean;
   slaObservability: SlaObservabilityStats | null;
+  slaDailySummary: SlaDailySummary | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -219,6 +228,16 @@ export default function HomeDashboardCard({
                     ? "Success"
                     : "Failed"}
                 </div>
+              </div>
+            ) : null}
+
+            {slaDailySummary ? (
+              <div style={detailCardStyle}>
+                <div style={detailTitleStyle}>SLA Daily Summary</div>
+                <div style={detailLineStyle}>Lead approvals overdue: {slaDailySummary.approvalOverdue}</div>
+                <div style={detailLineStyle}>Maintenance overdue: {slaDailySummary.maintenanceOverdue}</div>
+                <div style={detailLineStyle}>Flagged queue overdue: {slaDailySummary.flaggedOverdue}</div>
+                <div style={detailLineStyle}>Unresolved alerts (today): {slaDailySummary.unresolvedTotal}</div>
               </div>
             ) : null}
           </div>

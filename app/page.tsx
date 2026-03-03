@@ -5,6 +5,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import HomeDashboardCard from "@/components/home/HomeDashboardCard";
 import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +121,13 @@ type SlaObservabilityStats = {
   lastRunStatus: "success" | "failed" | "none";
 };
 
+type SlaDailySummary = {
+  approvalOverdue: number;
+  maintenanceOverdue: number;
+  flaggedOverdue: number;
+  unresolvedTotal: number;
+};
+
 function parseChecklistEmployee(checklist: unknown) {
   if (!checklist || typeof checklist !== "object") return "";
   const employee = (checklist as Record<string, unknown>).employee;
@@ -198,6 +206,7 @@ export default async function Home() {
   let dashboard: DashboardData | null = null;
   let teammateOpsStats: TeammateOpsStats | null = null;
   let slaObservability: SlaObservabilityStats | null = null;
+  let slaDailySummary: SlaDailySummary | null = null;
   let canExpandDashboard = false;
 
   try {
@@ -527,6 +536,46 @@ export default async function Home() {
         lastRunStatus: !lastRun ? "none" : lastRun.success ? "success" : "failed",
       };
 
+      const startToday = new Date();
+      startToday.setHours(0, 0, 0, 0);
+      const admin = createSupabaseAdmin();
+      const { data: slaNotificationRows, error: slaNotificationError } = await admin
+        .from("user_notifications")
+        .select("kind,dedupe_key")
+        .gte("created_at", startToday.toISOString())
+        .is("resolved_at", null)
+        .in("kind", [
+          "sla_lead_approval_overdue",
+          "sla_maintenance_request_overdue",
+          "sla_flagged_queue_overdue",
+        ])
+        .limit(10000);
+      if (slaNotificationError) {
+        console.error("[dashboard] failed to load SLA daily summary:", slaNotificationError);
+      } else {
+        const uniqueByDedupe = new Map<string, string>();
+        for (const row of (slaNotificationRows ?? []) as Array<{ kind: string; dedupe_key: string }>) {
+          if (!row?.dedupe_key || !row?.kind) continue;
+          if (!uniqueByDedupe.has(row.dedupe_key)) {
+            uniqueByDedupe.set(row.dedupe_key, row.kind);
+          }
+        }
+        let approvalOverdue = 0;
+        let maintenanceOverdue = 0;
+        let flaggedOverdue = 0;
+        for (const kind of uniqueByDedupe.values()) {
+          if (kind === "sla_lead_approval_overdue") approvalOverdue += 1;
+          else if (kind === "sla_maintenance_request_overdue") maintenanceOverdue += 1;
+          else if (kind === "sla_flagged_queue_overdue") flaggedOverdue += 1;
+        }
+        slaDailySummary = {
+          approvalOverdue,
+          maintenanceOverdue,
+          flaggedOverdue,
+          unresolvedTotal: uniqueByDedupe.size,
+        };
+      }
+
       dashboard = {
         title: "Administrative Operations Dashboard",
         subtitle:
@@ -721,6 +770,7 @@ export default async function Home() {
           teammateOpsStats={teammateOpsStats}
           canExpandDashboard={canExpandDashboard}
           slaObservability={slaObservability}
+          slaDailySummary={slaDailySummary}
         />
       ) : null}
 

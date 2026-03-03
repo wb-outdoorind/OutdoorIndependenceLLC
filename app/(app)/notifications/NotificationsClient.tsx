@@ -51,6 +51,8 @@ type SlaRunRow = {
   error_message: string | null;
 };
 
+type SlaStatusFilter = "all" | "open" | "acknowledged" | "resolved";
+
 type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
 function isRangeKey(value: string | null): value is RangeKey {
@@ -257,8 +259,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
+  const [runSlaBusy, setRunSlaBusy] = useState(false);
+  const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
+  const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>("all");
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -352,13 +357,22 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         if (customToMs !== null && createdMs > customToMs) return false;
       }
 
+      if (slaStatusFilter !== "all") {
+        if (!isSlaNotification(row)) return false;
+        const acknowledged = Boolean(row.acknowledged_at);
+        const resolved = Boolean(row.resolved_at);
+        if (slaStatusFilter === "open" && (acknowledged || resolved)) return false;
+        if (slaStatusFilter === "acknowledged" && (!acknowledged || resolved)) return false;
+        if (slaStatusFilter === "resolved" && !resolved) return false;
+      }
+
       if (!q) return true;
       const hay = [row.title, row.body, row.kind, row.entity_type ?? "", row.entity_id ?? ""]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [rows, search, showUnreadOnly, range, customFrom, customTo]);
+  }, [rows, search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
 
   const unreadCount = useMemo(() => rows.filter((row) => !row.is_read).length, [rows]);
 
@@ -468,6 +482,80 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     await loadAll();
   }
 
+  async function runSlaNow() {
+    setRunSlaBusy(true);
+    setRunSlaMessage(null);
+    const res = await fetch("/api/sla-alerts", { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setRunSlaMessage(json?.error || "Failed to run SLA scan.");
+      setRunSlaBusy(false);
+      return;
+    }
+    setRunSlaMessage(
+      `SLA scan complete: approvals ${Number(json?.metrics?.approvalOverdue ?? 0)}, maintenance ${Number(
+        json?.metrics?.maintenanceOverdue ?? 0
+      )}, flagged ${Number(json?.metrics?.flaggedOverdue ?? 0)}. Notifications attempted ${Number(
+        json?.notificationsAttempted ?? 0
+      )}.`
+    );
+    setRunSlaBusy(false);
+    await loadAll();
+  }
+
+  function toCsvCell(value: string | number | boolean | null | undefined) {
+    const raw = value == null ? "" : String(value);
+    const escaped = raw.replaceAll('"', '""');
+    return `"${escaped}"`;
+  }
+
+  function exportSlaCsv() {
+    const slaRows = filtered.filter((row) => isSlaNotification(row));
+    const headers = [
+      "id",
+      "title",
+      "severity",
+      "kind",
+      "entity_type",
+      "entity_id",
+      "created_at",
+      "acknowledged_at",
+      "resolved_at",
+      "is_read",
+      "body",
+    ];
+    const lines = [headers.map((h) => toCsvCell(h)).join(",")];
+    for (const row of slaRows) {
+      lines.push(
+        [
+          row.id,
+          row.title,
+          row.severity,
+          row.kind,
+          row.entity_type,
+          row.entity_id,
+          row.created_at,
+          row.acknowledged_at,
+          row.resolved_at,
+          row.is_read,
+          row.body,
+        ]
+          .map((v) => toCsvCell(v))
+          .join(",")
+      );
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
+    a.href = url;
+    a.download = `sla-notifications-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Notifications</h1>
@@ -495,10 +583,18 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                 {runNowBusy ? "Running..." : "Run Digest Now"}
               </button>
             ) : null}
+            {role === "owner" || role === "operations_manager" || role === "mechanic" ? (
+              <button type="button" onClick={() => void runSlaNow()} style={buttonStyle()} disabled={runSlaBusy}>
+                {runSlaBusy ? "Running..." : "Run SLA Scan Now"}
+              </button>
+            ) : null}
           </div>
         </div>
         {runNowMessage ? (
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{runNowMessage}</div>
+        ) : null}
+        {runSlaMessage ? (
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>{runSlaMessage}</div>
         ) : null}
       </div>
 
@@ -641,6 +737,19 @@ export default function NotificationsClient({ role }: { role: string | null }) {
             <option value="year">This year</option>
             <option value="custom">Custom range</option>
           </select>
+          <select
+            value={slaStatusFilter}
+            onChange={(e) => setSlaStatusFilter(e.target.value as SlaStatusFilter)}
+            style={inputStyle()}
+          >
+            <option value="all">SLA status: all</option>
+            <option value="open">SLA status: open</option>
+            <option value="acknowledged">SLA status: acknowledged</option>
+            <option value="resolved">SLA status: resolved</option>
+          </select>
+          <button type="button" onClick={exportSlaCsv} style={buttonStyle()}>
+            Export SLA CSV
+          </button>
         </div>
 
         {range === "custom" ? (
