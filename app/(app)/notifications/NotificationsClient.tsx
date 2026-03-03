@@ -53,6 +53,7 @@ type SlaRunRow = {
 };
 
 type SlaStatusFilter = "all" | "open" | "acknowledged" | "resolved";
+type NotificationSortKey = "newest" | "oldest" | "severity";
 
 type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
@@ -64,6 +65,7 @@ type NotificationPresetFilters = {
   customFrom: string;
   customTo: string;
   slaStatus: SlaStatusFilter;
+  sort: NotificationSortKey;
 };
 
 type NotificationFilterPreset = {
@@ -92,6 +94,10 @@ function canTriageSla(role: string | null | undefined) {
 
 function isSlaStatusFilter(value: string | null): value is SlaStatusFilter {
   return value === "all" || value === "open" || value === "acknowledged" || value === "resolved";
+}
+
+function isNotificationSortKey(value: string | null): value is NotificationSortKey {
+  return value === "newest" || value === "oldest" || value === "severity";
 }
 
 function presetDbName(displayName: string) {
@@ -202,6 +208,7 @@ function normalizeNotificationPresetFilters(filters: NotificationPresetFilters):
     customFrom: filters.customFrom || "",
     customTo: filters.customTo || "",
     slaStatus: isSlaStatusFilter(filters.slaStatus) ? filters.slaStatus : "all",
+    sort: isNotificationSortKey(filters.sort) ? filters.sort : "newest",
   };
 }
 
@@ -215,7 +222,8 @@ function notificationPresetFiltersMatch(a: NotificationPresetFilters, b: Notific
     left.range === right.range &&
     left.customFrom === right.customFrom &&
     left.customTo === right.customTo &&
-    left.slaStatus === right.slaStatus
+    left.slaStatus === right.slaStatus &&
+    left.sort === right.sort
   );
 }
 
@@ -439,6 +447,10 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
   const [triageMessage, setTriageMessage] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [sortOrder, setSortOrder] = useState<NotificationSortKey>(() => {
+    const fromQuery = searchParams.get("sort");
+    return isNotificationSortKey(fromQuery) ? fromQuery : "newest";
+  });
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [autoRefreshMinutes, setAutoRefreshMinutes] = useState(2);
   const [autoRefreshSettingsReady, setAutoRefreshSettingsReady] = useState(false);
@@ -465,7 +477,8 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       Boolean(searchParams.get("range")) ||
       Boolean(searchParams.get("from")) ||
       Boolean(searchParams.get("to")) ||
-      Boolean(searchParams.get("sla"))
+      Boolean(searchParams.get("sla")) ||
+      Boolean(searchParams.get("sort"))
     );
   }, [searchParams]);
   const quickPresetRows = useMemo(() => {
@@ -492,8 +505,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       customFrom,
       customTo,
       slaStatus: slaStatusFilter,
+      sort: sortOrder,
     }),
-    [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]
+    [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter, sortOrder]
   );
   const activeNotificationPreset = useMemo(
     () => notificationPresets.find((row) => row.id === notificationPresetId) || null,
@@ -520,9 +534,10 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       if (isDateInputValue(customTo)) params.set("to", customTo);
     }
     params.set("sla", slaStatusFilter);
+    params.set("sort", sortOrder);
     const query = params.toString();
     return `${window.location.origin}/notifications${query ? `?${query}` : ""}`;
-  }, [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
+  }, [search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter, sortOrder]);
 
   const loadAll = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -674,6 +689,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         setCustomFrom(preset.filters.customFrom || toDateInputValue(new Date()));
         setCustomTo(preset.filters.customTo || toDateInputValue(new Date()));
         setSlaStatusFilter(isSlaStatusFilter(preset.filters.slaStatus) ? preset.filters.slaStatus : "all");
+        setSortOrder(isNotificationSortKey(preset.filters.sort) ? preset.filters.sort : "newest");
       }
     })();
     return () => {
@@ -725,9 +741,32 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       return hay.includes(q);
     });
   }, [rows, search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
+  const filteredSorted = useMemo(() => {
+    const severityRank: Record<NotificationRow["severity"], number> = {
+      critical: 4,
+      high: 3,
+      warning: 2,
+      info: 1,
+    };
+    const list = [...filtered];
+    list.sort((a, b) => {
+      const aMs = new Date(a.created_at).getTime();
+      const bMs = new Date(b.created_at).getTime();
+      const safeA = Number.isFinite(aMs) ? aMs : 0;
+      const safeB = Number.isFinite(bMs) ? bMs : 0;
+      if (sortOrder === "oldest") return safeA - safeB;
+      if (sortOrder === "severity") {
+        const sev = severityRank[b.severity] - severityRank[a.severity];
+        if (sev !== 0) return sev;
+        return safeB - safeA;
+      }
+      return safeB - safeA;
+    });
+    return list;
+  }, [filtered, sortOrder]);
 
   const unreadCount = useMemo(() => rows.filter((row) => !row.is_read).length, [rows]);
-  const visibleSlaRows = useMemo(() => filtered.filter((row) => isSlaNotification(row)), [filtered]);
+  const visibleSlaRows = useMemo(() => filteredSorted.filter((row) => isSlaNotification(row)), [filteredSorted]);
   const visibleSlaOpenCount = useMemo(
     () => visibleSlaRows.filter((row) => !row.acknowledged_at && !row.resolved_at).length,
     [visibleSlaRows]
@@ -931,7 +970,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   }
 
   function exportSlaCsv() {
-    const slaRows = filtered.filter((row) => isSlaNotification(row));
+    const slaRows = filteredSorted.filter((row) => isSlaNotification(row));
     const headers = [
       "id",
       "title",
@@ -1059,6 +1098,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setCustomFrom(preset.filters.customFrom || toDateInputValue(new Date()));
     setCustomTo(preset.filters.customTo || toDateInputValue(new Date()));
     setSlaStatusFilter(isSlaStatusFilter(preset.filters.slaStatus) ? preset.filters.slaStatus : "all");
+    setSortOrder(isNotificationSortKey(preset.filters.sort) ? preset.filters.sort : "newest");
     if (options?.persist !== false && currentUserId) {
       writeLastPresetId(currentUserId, preset.id);
     }
@@ -1107,6 +1147,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setCustomFrom(today);
     setCustomTo(today);
     setSlaStatusFilter(canTriageSlaRole ? "open" : "all");
+    setSortOrder("newest");
     setNotificationPresetId("");
     setTriageMessage("Reset to default SLA view.");
   }
@@ -1504,6 +1545,15 @@ export default function NotificationsClient({ role }: { role: string | null }) {
             <option value="acknowledged">SLA status: acknowledged</option>
             <option value="resolved">SLA status: resolved</option>
           </select>
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as NotificationSortKey)}
+            style={inputStyle()}
+          >
+            <option value="newest">Sort: newest first</option>
+            <option value="oldest">Sort: oldest first</option>
+            <option value="severity">Sort: severity first</option>
+          </select>
           <button type="button" onClick={exportSlaCsv} style={buttonStyle()}>
             Export SLA CSV
           </button>
@@ -1561,11 +1611,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           <div style={{ opacity: 0.75 }}>Loading notifications...</div>
         ) : errorMessage ? (
           <div style={{ color: "#ff9d9d" }}>{errorMessage}</div>
-        ) : filtered.length === 0 ? (
+        ) : filteredSorted.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No notifications found for the selected filters.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {filtered.map((row) => (
+            {filteredSorted.map((row) => (
               <div
                 key={row.id}
                 style={{
