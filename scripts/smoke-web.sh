@@ -36,6 +36,7 @@ check_200 "/api/health"
 # Protected APIs should reject unauthenticated requests.
 check_exact "/api/notifications" "401"
 check_exact "/api/trend-actions/digest" "401"
+check_exact "/api/sla-alerts" "401"
 check_exact "/api/employees/invite" "405"
 
 echo "Smoke checks passed."

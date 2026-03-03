@@ -16,3 +16,8 @@ test("notifications API rejects unauthenticated access", async ({ request }) => 
   const res = await request.get("/api/notifications");
   expect(res.status()).toBe(401);
 });
+
+test("SLA alerts API rejects unauthenticated access", async ({ request }) => {
+  const res = await request.get("/api/sla-alerts");
+  expect(res.status()).toBe(401);
+});
