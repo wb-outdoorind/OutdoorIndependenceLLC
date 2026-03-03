@@ -11,6 +11,7 @@ From repo root:
 ```bash
 cd /Users/shop/inspections-app
 npm run check:api-auth
+npm run check:route-access
 npm run lint
 npm run build
 npm run smoke:health
@@ -47,7 +48,7 @@ Project settings must contain:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `DIGEST_CRON_SECRET` (for digest endpoint auth)
+- `CRON_SECRET` (for cron-protected endpoints)
 
 ## 5) Database Migrations (when schema changed)
 
@@ -64,7 +65,7 @@ Digest endpoint:
 
 ```bash
 curl -i \
-  -H "Authorization: Bearer $DIGEST_CRON_SECRET" \
+  -H "Authorization: Bearer $CRON_SECRET" \
   "https://outdoor-independence-llc-app.vercel.app/api/trend-actions/digest"
 ```
 
@@ -72,8 +73,16 @@ Reminder endpoint:
 
 ```bash
 curl -i \
-  -H "Authorization: Bearer $DIGEST_CRON_SECRET" \
+  -H "Authorization: Bearer $CRON_SECRET" \
   "https://outdoor-independence-llc-app.vercel.app/api/accountability/reminders"
+```
+
+SLA alert scan endpoint:
+
+```bash
+curl -i \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  "https://outdoor-independence-llc-app.vercel.app/api/sla-alerts"
 ```
 
 ## 7) iOS Sync (when web/app UI changed)
@@ -107,6 +116,19 @@ In App Store Connect:
 1. Wait for processing.
 2. Add release notes.
 3. Submit for TestFlight or App Review.
+
+### iOS Release Readiness Checklist
+
+Before archiving, confirm:
+1. `npm run release:check` passes locally.
+2. `npx cap sync ios` completed after latest web changes.
+3. App icon and launch assets are present in Xcode `Assets.xcassets`.
+4. Signing team + bundle identifier are set under `App` target.
+5. Device smoke run passes (login, home, scan QR, notifications).
+
+Real-time update rule:
+- Web/UI/data changes ship instantly to web and are reflected inside the app webview.
+- Native-capability changes (camera plugin config, iOS entitlements, plist/capacitor native changes) require a new iOS build/TestFlight submission.
 
 ## 9) Post-Deploy Smoke Test
 

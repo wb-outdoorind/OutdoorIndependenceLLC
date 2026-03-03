@@ -5,6 +5,11 @@ cd "$(dirname "$0")/.."
 
 echo "Checking API auth helper usage..."
 
+if [[ -f "middleware.ts" || -f "middleware.js" || -f "middleware.mjs" || -f "middleware.cjs" ]]; then
+  echo "ERROR: middleware file detected. Next.js 16 requires proxy.ts convention."
+  exit 1
+fi
+
 if rg -n --pcre2 '\bgetCurrentUserProfile\(' app/api >/tmp/api-auth-calls.txt 2>/dev/null; then
   echo "ERROR: Non-strict auth helper call found in app/api:"
   cat /tmp/api-auth-calls.txt

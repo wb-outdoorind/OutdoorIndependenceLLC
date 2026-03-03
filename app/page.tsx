@@ -105,6 +105,21 @@ type TeammateOpsStats = {
   }>;
 };
 
+type SlaRunLogRow = {
+  ran_at: string;
+  success: boolean;
+  notifications_attempted: number | null;
+};
+
+type SlaObservabilityStats = {
+  runs24h: number;
+  successRate7d: number;
+  avgNotificationsAttempted7d: number;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastRunStatus: "success" | "failed" | "none";
+};
+
 function parseChecklistEmployee(checklist: unknown) {
   if (!checklist || typeof checklist !== "object") return "";
   const employee = (checklist as Record<string, unknown>).employee;
@@ -182,6 +197,7 @@ export default async function Home() {
   let tiles = [...baseTiles];
   let dashboard: DashboardData | null = null;
   let teammateOpsStats: TeammateOpsStats | null = null;
+  let slaObservability: SlaObservabilityStats | null = null;
   let canExpandDashboard = false;
 
   try {
@@ -451,7 +467,7 @@ export default async function Home() {
     }
 
     if (isLeadership) {
-      const [vehicleReqRes, equipmentReqRes, gradesRes] = await Promise.all([
+      const [vehicleReqRes, equipmentReqRes, gradesRes, slaRunsRes] = await Promise.all([
         supabase
           .from("maintenance_requests")
           .select("status,urgency")
@@ -465,6 +481,11 @@ export default async function Home() {
           .select("score,accountability_flag")
           .order("submitted_at", { ascending: false })
           .limit(400),
+        supabase
+          .from("sla_alert_run_logs")
+          .select("ran_at,success,notifications_attempted")
+          .order("ran_at", { ascending: false })
+          .limit(250),
       ]);
 
       const vehicleReqs = (vehicleReqRes.data ?? []) as VehicleRequestRow[];
@@ -482,6 +503,29 @@ export default async function Home() {
             grades.reduce((sum, row) => sum + Number(row.score ?? 0), 0) / grades.length
           )
         : 0;
+      const slaRuns = (slaRunsRes.data ?? []) as SlaRunLogRow[];
+      const now = Date.now();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      const sevenDayMs = 7 * oneDayMs;
+      const runs24h = slaRuns.filter((row) => now - new Date(row.ran_at).getTime() <= oneDayMs).length;
+      const runs7d = slaRuns.filter((row) => now - new Date(row.ran_at).getTime() <= sevenDayMs);
+      const success7d = runs7d.filter((row) => row.success === true).length;
+      const attempted7d = runs7d.reduce(
+        (sum, row) =>
+          sum +
+          (Number.isFinite(Number(row.notifications_attempted)) ? Number(row.notifications_attempted) : 0),
+        0
+      );
+      const lastRun = slaRuns[0] ?? null;
+      const lastSuccess = slaRuns.find((row) => row.success === true) ?? null;
+      slaObservability = {
+        runs24h,
+        successRate7d: runs7d.length ? Math.round((success7d / runs7d.length) * 100) : 0,
+        avgNotificationsAttempted7d: runs7d.length ? Math.round(attempted7d / runs7d.length) : 0,
+        lastRunAt: lastRun?.ran_at ?? null,
+        lastSuccessAt: lastSuccess?.ran_at ?? null,
+        lastRunStatus: !lastRun ? "none" : lastRun.success ? "success" : "failed",
+      };
 
       dashboard = {
         title: "Administrative Operations Dashboard",
@@ -676,6 +720,7 @@ export default async function Home() {
           dashboard={dashboard}
           teammateOpsStats={teammateOpsStats}
           canExpandDashboard={canExpandDashboard}
+          slaObservability={slaObservability}
         />
       ) : null}
 

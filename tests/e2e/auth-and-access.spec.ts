@@ -21,3 +21,13 @@ test("SLA alerts API rejects unauthenticated access", async ({ request }) => {
   const res = await request.get("/api/sla-alerts");
   expect(res.status()).toBe(401);
 });
+
+test("SLA runs API rejects unauthenticated access", async ({ request }) => {
+  const res = await request.get("/api/sla-alerts/runs");
+  expect(res.status()).toBe(401);
+});
+
+test("digest runs API rejects unauthenticated access", async ({ request }) => {
+  const res = await request.get("/api/trend-actions/digest/runs");
+  expect(res.status()).toBe(401);
+});

@@ -15,7 +15,7 @@ export async function GET() {
   const admin = createSupabaseAdmin();
   const { data, error } = await admin
     .from("user_notifications")
-    .select("id,title,body,severity,kind,entity_type,entity_id,is_read,created_at,read_at")
+    .select("id,title,body,severity,kind,entity_type,entity_id,is_read,created_at,read_at,acknowledged_at,resolved_at")
     .eq("recipient_id", userId)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   if (!actorLimit.ok) return rateLimitExceededResponse(actorLimit);
 
   const body = (await req.json().catch(() => ({}))) as {
-    action?: "mark_read" | "mark_all_read" | "prefs";
+    action?: "mark_read" | "mark_all_read" | "acknowledge" | "resolve" | "prefs";
     ids?: number[];
     emailEnabled?: boolean;
     smsEnabled?: boolean;
@@ -78,6 +78,39 @@ export async function POST(req: Request) {
       .update({ is_read: true, read_at: new Date().toISOString() })
       .eq("recipient_id", userId)
       .in("id", ids);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "acknowledge") {
+    const ids = Array.isArray(body.ids) ? body.ids.filter((id) => Number.isFinite(id)) : [];
+    if (!ids.length) return NextResponse.json({ error: "ids required" }, { status: 400 });
+    const nowIso = new Date().toISOString();
+    const { error } = await admin
+      .from("user_notifications")
+      .update({ acknowledged_at: nowIso })
+      .eq("recipient_id", userId)
+      .in("id", ids)
+      .is("acknowledged_at", null);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "resolve") {
+    const ids = Array.isArray(body.ids) ? body.ids.filter((id) => Number.isFinite(id)) : [];
+    if (!ids.length) return NextResponse.json({ error: "ids required" }, { status: 400 });
+    const nowIso = new Date().toISOString();
+    const { error } = await admin
+      .from("user_notifications")
+      .update({
+        acknowledged_at: nowIso,
+        resolved_at: nowIso,
+        is_read: true,
+        read_at: nowIso,
+      })
+      .eq("recipient_id", userId)
+      .in("id", ids)
+      .is("resolved_at", null);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }

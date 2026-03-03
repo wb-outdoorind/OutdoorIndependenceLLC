@@ -15,6 +15,8 @@ type NotificationRow = {
   is_read: boolean;
   created_at: string;
   read_at: string | null;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
 };
 
 type DigestRunRow = {
@@ -31,6 +33,21 @@ type DigestRunRow = {
   email_attempted: number;
   email_sent: number;
   email_failed: number;
+  error_message: string | null;
+};
+
+type SlaRunRow = {
+  id: number;
+  run_source: "cron" | "manual";
+  initiated_by: string | null;
+  ran_at: string;
+  success: boolean;
+  skipped: boolean;
+  date_key: string | null;
+  approval_overdue: number;
+  maintenance_overdue: number;
+  flagged_overdue: number;
+  notifications_attempted: number;
   error_message: string | null;
 };
 
@@ -148,7 +165,23 @@ function notificationHref(row: NotificationRow) {
   if (row.kind === "trip_lead_signoff_request" && row.entity_id) {
     return `/approvals?inspection=${encodeURIComponent(row.entity_id)}`;
   }
+  if (row.kind === "sla_lead_approval_overdue" && row.entity_id) {
+    return `/approvals?inspection=${encodeURIComponent(row.entity_id)}`;
+  }
+  if (row.kind === "sla_maintenance_request_overdue" && row.entity_id) {
+    if (row.entity_type === "equipment_maintenance_request") {
+      return `/maintenance?section=queue&equipmentRequest=${encodeURIComponent(row.entity_id)}`;
+    }
+    return `/maintenance?section=queue&vehicleRequest=${encodeURIComponent(row.entity_id)}`;
+  }
+  if (row.kind === "sla_flagged_queue_overdue" && row.entity_id) {
+    return `/form-reports?flagged=${encodeURIComponent(row.entity_id)}`;
+  }
   return null;
+}
+
+function isSlaNotification(row: NotificationRow) {
+  return row.kind.startsWith("sla_");
 }
 
 function parseVehicleIdFromBody(body: string) {
@@ -225,12 +258,15 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
+  const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
     const shouldLoadRuns = role === "owner" || role === "mechanic";
-    const [notificationsRes, prefsRes, runsRes] = await Promise.all([
+    const shouldLoadSlaRuns =
+      role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+    const [notificationsRes, prefsRes, runsRes, slaRunsRes] = await Promise.all([
       fetch("/api/notifications", { method: "GET" }),
       fetch("/api/notifications", {
         method: "POST",
@@ -240,11 +276,15 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       shouldLoadRuns
         ? fetch("/api/trend-actions/digest/runs", { method: "GET" })
         : Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 })),
+      shouldLoadSlaRuns
+        ? fetch("/api/sla-alerts/runs", { method: "GET" })
+        : Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 })),
     ]);
 
     const notificationsJson = await notificationsRes.json().catch(() => ({}));
     const prefsJson = await prefsRes.json().catch(() => ({}));
     const runsJson = await runsRes.json().catch(() => ({}));
+    const slaRunsJson = await slaRunsRes.json().catch(() => ({}));
 
     if (!notificationsRes.ok) {
       setErrorMessage(notificationsJson?.error || "Failed to load notifications.");
@@ -263,6 +303,11 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       setDigestRuns((runsJson.runs ?? []) as DigestRunRow[]);
     } else {
       setDigestRuns([]);
+    }
+    if (shouldLoadSlaRuns && slaRunsRes.ok) {
+      setSlaRuns((slaRunsJson.runs ?? []) as SlaRunRow[]);
+    } else {
+      setSlaRuns([]);
     }
     setLoading(false);
   }, [role]);
@@ -335,6 +380,42 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     });
     if (!res.ok) return;
     setRows((prev) => prev.map((row) => ({ ...row, is_read: true })));
+  }
+
+  async function acknowledgeNotification(id: number) {
+    const res = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acknowledge", ids: [id] }),
+    });
+    if (!res.ok) return;
+    const nowIso = new Date().toISOString();
+    setRows((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, acknowledged_at: row.acknowledged_at ?? nowIso } : row))
+    );
+  }
+
+  async function resolveNotification(id: number) {
+    const res = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "resolve", ids: [id] }),
+    });
+    if (!res.ok) return;
+    const nowIso = new Date().toISOString();
+    setRows((prev) =>
+      prev.map((row) =>
+        row.id === id
+          ? {
+              ...row,
+              acknowledged_at: row.acknowledged_at ?? nowIso,
+              resolved_at: nowIso,
+              is_read: true,
+              read_at: nowIso,
+            }
+          : row
+      )
+    );
   }
 
   async function savePrefs(
@@ -494,6 +575,47 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         </div>
       ) : null}
 
+      {role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic" ? (
+        <div style={{ marginTop: 12, ...cardStyle() }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Recent SLA Scan Runs</div>
+          {slaRuns.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No SLA scan runs logged yet.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {slaRuns.map((run) => (
+                <div
+                  key={run.id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 800 }}>
+                      {run.run_source.toUpperCase()} · {run.success ? "Success" : "Failed"}
+                      {run.skipped ? " (Skipped)" : ""}
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>{formatDateTime(run.ran_at)}</div>
+                  </div>
+                  <div style={{ marginTop: 6, opacity: 0.85, fontSize: 13 }}>
+                    Overdue approvals: {run.approval_overdue} · maintenance: {run.maintenance_overdue} · flagged:{" "}
+                    {run.flagged_overdue}
+                  </div>
+                  <div style={{ marginTop: 4, opacity: 0.85, fontSize: 13 }}>
+                    Notifications attempted: {run.notifications_attempted}
+                  </div>
+                  {run.error_message ? (
+                    <div style={{ marginTop: 4, color: "#ff9d9d", fontSize: 13 }}>{run.error_message}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <input
@@ -583,6 +705,16 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                         Mark Read
                       </button>
                     ) : null}
+                    {isSlaNotification(row) && !row.acknowledged_at ? (
+                      <button type="button" onClick={() => void acknowledgeNotification(row.id)} style={buttonStyle()}>
+                        Acknowledge
+                      </button>
+                    ) : null}
+                    {isSlaNotification(row) && !row.resolved_at ? (
+                      <button type="button" onClick={() => void resolveNotification(row.id)} style={buttonStyle()}>
+                        Resolve
+                      </button>
+                    ) : null}
                     {notificationActions(row).map((action) => (
                       <Link key={`${row.id}-${action.href}`} href={action.href} style={buttonStyle()}>
                         {action.label}
@@ -591,6 +723,34 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                   </div>
                 </div>
                 <div style={{ marginTop: 8, opacity: 0.9 }}>{row.body}</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {row.acknowledged_at ? (
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        fontSize: 11,
+                        border: "1px solid rgba(140,220,255,0.25)",
+                        background: "rgba(120,180,255,0.2)",
+                      }}
+                    >
+                      Acknowledged
+                    </span>
+                  ) : null}
+                  {row.resolved_at ? (
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        fontSize: 11,
+                        border: "1px solid rgba(126,255,167,0.3)",
+                        background: "rgba(126,255,167,0.2)",
+                      }}
+                    >
+                      Resolved
+                    </span>
+                  ) : null}
+                </div>
                 <div style={{ marginTop: 8, opacity: 0.65, fontSize: 12 }}>
                   {formatDateTime(row.created_at)}
                   {row.entity_type ? ` • ${row.entity_type}` : ""}

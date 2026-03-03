@@ -63,6 +63,20 @@ type ReviewRow = {
   created_at: string;
 };
 
+type SlaRunLogPayload = {
+  runSource: "cron" | "manual";
+  initiatedBy: string | null;
+  success: boolean;
+  skipped: boolean;
+  dateKey?: string | null;
+  approvalOverdue?: number;
+  maintenanceOverdue?: number;
+  flaggedOverdue?: number;
+  notificationsAttempted?: number;
+  errorMessage?: string | null;
+  meta?: Record<string, unknown> | null;
+};
+
 function dateKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -85,6 +99,26 @@ function roleSet(rows: ProfileRow[], roles: string[]) {
 
 function buildUniqueRecipients(recipientIds: Array<string | null | undefined>) {
   return Array.from(new Set(recipientIds.filter((id): id is string => Boolean(id))));
+}
+
+async function logSlaRun(payload: SlaRunLogPayload) {
+  const admin = createSupabaseAdmin();
+  const { error } = await admin.from("sla_alert_run_logs").insert({
+    run_source: payload.runSource,
+    initiated_by: payload.initiatedBy,
+    success: payload.success,
+    skipped: payload.skipped,
+    date_key: payload.dateKey ?? null,
+    approval_overdue: payload.approvalOverdue ?? 0,
+    maintenance_overdue: payload.maintenanceOverdue ?? 0,
+    flagged_overdue: payload.flaggedOverdue ?? 0,
+    notifications_attempted: payload.notificationsAttempted ?? 0,
+    error_message: payload.errorMessage ?? null,
+    meta: payload.meta ?? null,
+  });
+  if (error) {
+    console.error("[sla-alerts] failed to write run log:", error.message);
+  }
 }
 
 async function runSlaAlertScan() {
@@ -277,15 +311,35 @@ export async function GET(req: Request) {
 
   try {
     const payload = await runSlaAlertScan();
+    await logSlaRun({
+      runSource: "cron",
+      initiatedBy: null,
+      success: true,
+      skipped: false,
+      dateKey: payload.dateKey,
+      approvalOverdue: payload.metrics.approvalOverdue,
+      maintenanceOverdue: payload.metrics.maintenanceOverdue,
+      flaggedOverdue: payload.metrics.flaggedOverdue,
+      notificationsAttempted: payload.notificationsAttempted,
+    });
     return NextResponse.json(payload);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to run SLA alert scan.";
+    await logSlaRun({
+      runSource: "cron",
+      initiatedBy: null,
+      success: false,
+      skipped: false,
+      dateKey: dateKey(),
+      errorMessage: message,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST() {
   const session = await getCurrentUserProfileStrict();
+  const userId = session?.user?.id ?? null;
   const role = session?.profile?.role ?? null;
   if (!canManualRun(role)) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
@@ -293,9 +347,28 @@ export async function POST() {
 
   try {
     const payload = await runSlaAlertScan();
+    await logSlaRun({
+      runSource: "manual",
+      initiatedBy: userId,
+      success: true,
+      skipped: false,
+      dateKey: payload.dateKey,
+      approvalOverdue: payload.metrics.approvalOverdue,
+      maintenanceOverdue: payload.metrics.maintenanceOverdue,
+      flaggedOverdue: payload.metrics.flaggedOverdue,
+      notificationsAttempted: payload.notificationsAttempted,
+    });
     return NextResponse.json(payload);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to run SLA alert scan.";
+    await logSlaRun({
+      runSource: "manual",
+      initiatedBy: userId,
+      success: false,
+      skipped: false,
+      dateKey: dateKey(),
+      errorMessage: message,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -44,14 +44,25 @@ type TeammateOpsStats = {
   }>;
 };
 
+type SlaObservabilityStats = {
+  runs24h: number;
+  successRate7d: number;
+  avgNotificationsAttempted7d: number;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastRunStatus: "success" | "failed" | "none";
+};
+
 export default function HomeDashboardCard({
   dashboard,
   teammateOpsStats,
   canExpandDashboard,
+  slaObservability,
 }: {
   dashboard: DashboardData;
   teammateOpsStats: TeammateOpsStats | null;
   canExpandDashboard: boolean;
+  slaObservability: SlaObservabilityStats | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -184,6 +195,32 @@ export default function HomeDashboardCard({
                 ))
               )}
             </div>
+
+            {slaObservability ? (
+              <div style={detailCardStyle}>
+                <div style={detailTitleStyle}>SLA Alert Health</div>
+                <div style={detailLineStyle}>Runs (24h): {slaObservability.runs24h}</div>
+                <div style={detailLineStyle}>7d Success Rate: {slaObservability.successRate7d}%</div>
+                <div style={detailLineStyle}>
+                  Avg Notifications Attempted (7d): {slaObservability.avgNotificationsAttempted7d}
+                </div>
+                <div style={detailLineStyle}>
+                  Last Run: {slaObservability.lastRunAt ? new Date(slaObservability.lastRunAt).toLocaleString() : "None"}
+                </div>
+                <div style={detailLineStyle}>
+                  Last Success:{" "}
+                  {slaObservability.lastSuccessAt ? new Date(slaObservability.lastSuccessAt).toLocaleString() : "None"}
+                </div>
+                <div style={detailLineStyle}>
+                  Last Status:{" "}
+                  {slaObservability.lastRunStatus === "none"
+                    ? "No runs"
+                    : slaObservability.lastRunStatus === "success"
+                    ? "Success"
+                    : "Failed"}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
