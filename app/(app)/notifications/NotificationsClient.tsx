@@ -895,6 +895,28 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setTriageMessage("Deleted preset.");
   }
 
+  function resetToDefaultSlaView() {
+    if (canTriageSlaRole) {
+      const preferredDefaultId =
+        defaultNotificationPresetId && notificationPresets.some((row) => row.id === defaultNotificationPresetId)
+          ? defaultNotificationPresetId
+          : "";
+      if (preferredDefaultId) {
+        applyNotificationPreset(preferredDefaultId, { persist: true });
+        return;
+      }
+    }
+    const today = toDateInputValue(new Date());
+    setSearch("");
+    setShowUnreadOnly(false);
+    setRange("today");
+    setCustomFrom(today);
+    setCustomTo(today);
+    setSlaStatusFilter(canTriageSlaRole ? "open" : "all");
+    setNotificationPresetId("");
+    setTriageMessage("Reset to default SLA view.");
+  }
+
   function setCurrentPresetAsDefault() {
     if (!currentUserId || !notificationPresetId) return;
     writeDefaultPresetId(currentUserId, notificationPresetId);
@@ -1098,6 +1120,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                     </button>
                   );
                 })}
+                <button type="button" onClick={resetToDefaultSlaView} style={{ ...buttonStyle(), padding: "6px 10px", fontSize: 12 }}>
+                  Reset view
+                </button>
               </div>
             ) : null}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
