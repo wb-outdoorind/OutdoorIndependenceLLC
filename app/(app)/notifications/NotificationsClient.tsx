@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type NotificationRow = {
   id: number;
@@ -55,12 +56,48 @@ type SlaStatusFilter = "all" | "open" | "acknowledged" | "resolved";
 
 type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
+type NotificationPresetFilters = {
+  scope: "notifications";
+  search: string;
+  unreadOnly: boolean;
+  range: RangeKey;
+  customFrom: string;
+  customTo: string;
+  slaStatus: SlaStatusFilter;
+};
+
+type NotificationFilterPreset = {
+  id: string;
+  name: string;
+  filters: NotificationPresetFilters;
+  createdAt: string;
+};
+
+type NotificationPresetDbRow = {
+  id: string;
+  name: string;
+  filters: NotificationPresetFilters;
+  created_at: string;
+};
+
+const NOTIFICATION_PRESET_PREFIX = "notifications::";
+
 function canTriageSla(role: string | null | undefined) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function isSlaStatusFilter(value: string | null): value is SlaStatusFilter {
   return value === "all" || value === "open" || value === "acknowledged" || value === "resolved";
+}
+
+function presetDbName(displayName: string) {
+  return `${NOTIFICATION_PRESET_PREFIX}${displayName.trim()}`;
+}
+
+function presetDisplayName(dbName: string) {
+  return dbName.startsWith(NOTIFICATION_PRESET_PREFIX)
+    ? dbName.slice(NOTIFICATION_PRESET_PREFIX.length)
+    : dbName;
 }
 
 function isRangeKey(value: string | null): value is RangeKey {
@@ -278,6 +315,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     return canTriageSla(role) ? "open" : "all";
   });
   const canTriageSlaRole = canTriageSla(role);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [notificationPresets, setNotificationPresets] = useState<NotificationFilterPreset[]>([]);
+  const [notificationPresetId, setNotificationPresetId] = useState("");
+  const [notificationPresetName, setNotificationPresetName] = useState(() =>
+    canTriageSlaRole ? "My Open SLA Queue" : ""
+  );
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -342,6 +385,51 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       window.clearTimeout(timer);
     };
   }, [loadAll]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data } = await supabase.auth.getUser();
+      if (!active) return;
+      setCurrentUserId(data.user?.id ?? null);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    let active = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("user_queue_filter_presets")
+        .select("id,name,filters,created_at")
+        .eq("user_id", currentUserId)
+        .ilike("name", `${NOTIFICATION_PRESET_PREFIX}%`)
+        .order("created_at", { ascending: false })
+        .limit(25);
+      if (!active) return;
+      if (error) {
+        setTriageMessage(error.message);
+        return;
+      }
+      const rows = (data ?? []) as NotificationPresetDbRow[];
+      setNotificationPresets(
+        rows.map((row) => ({
+          id: row.id,
+          name: presetDisplayName(row.name),
+          filters: row.filters,
+          createdAt: row.created_at,
+        }))
+      );
+    })();
+    return () => {
+      active = false;
+    };
+  }, [currentUserId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -639,6 +727,89 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     URL.revokeObjectURL(url);
   }
 
+  async function saveNotificationPreset() {
+    if (!currentUserId) {
+      setTriageMessage("Sign in required to save presets.");
+      return;
+    }
+    const displayName = notificationPresetName.trim();
+    if (!displayName) {
+      setTriageMessage("Enter a preset name first.");
+      return;
+    }
+    const supabase = createSupabaseBrowser();
+    const filters: NotificationPresetFilters = {
+      scope: "notifications",
+      search,
+      unreadOnly: showUnreadOnly,
+      range,
+      customFrom,
+      customTo,
+      slaStatus: slaStatusFilter,
+    };
+    const payload = {
+      id: notificationPresetId || undefined,
+      user_id: currentUserId,
+      name: presetDbName(displayName),
+      filters,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from("user_queue_filter_presets")
+      .upsert(payload, { onConflict: "id" })
+      .select("id,name,filters,created_at")
+      .single();
+    if (error || !data) {
+      setTriageMessage(error?.message || "Failed to save preset.");
+      return;
+    }
+    const saved = data as NotificationPresetDbRow;
+    const nextPreset: NotificationFilterPreset = {
+      id: saved.id,
+      name: presetDisplayName(saved.name),
+      filters: saved.filters,
+      createdAt: saved.created_at,
+    };
+    const next = notificationPresetId
+      ? notificationPresets.map((row) => (row.id === notificationPresetId ? nextPreset : row))
+      : [nextPreset, ...notificationPresets].slice(0, 25);
+    setNotificationPresets(next);
+    setNotificationPresetId(nextPreset.id);
+    setNotificationPresetName(nextPreset.name);
+    setTriageMessage(`Saved preset "${nextPreset.name}".`);
+  }
+
+  function applyNotificationPreset(id: string) {
+    const preset = notificationPresets.find((row) => row.id === id);
+    if (!preset) return;
+    setNotificationPresetId(preset.id);
+    setNotificationPresetName(preset.name);
+    setSearch(preset.filters.search ?? "");
+    setShowUnreadOnly(preset.filters.unreadOnly === true);
+    setRange(isRangeKey(preset.filters.range) ? preset.filters.range : "today");
+    setCustomFrom(preset.filters.customFrom || toDateInputValue(new Date()));
+    setCustomTo(preset.filters.customTo || toDateInputValue(new Date()));
+    setSlaStatusFilter(isSlaStatusFilter(preset.filters.slaStatus) ? preset.filters.slaStatus : "all");
+    setTriageMessage(`Applied preset "${preset.name}".`);
+  }
+
+  async function deleteNotificationPreset() {
+    if (!currentUserId || !notificationPresetId) return;
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("user_queue_filter_presets")
+      .delete()
+      .eq("id", notificationPresetId)
+      .eq("user_id", currentUserId);
+    if (error) {
+      setTriageMessage(error.message);
+      return;
+    }
+    setNotificationPresets((prev) => prev.filter((row) => row.id !== notificationPresetId));
+    setNotificationPresetId("");
+    setTriageMessage("Deleted preset.");
+  }
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Notifications</h1>
@@ -799,6 +970,42 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       ) : null}
 
       <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        {canTriageSlaRole ? (
+          <div style={{ ...cardStyle(), display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 900 }}>Notification Filter Presets</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select
+                value={notificationPresetId}
+                onChange={(e) => applyNotificationPreset(e.target.value)}
+                style={{ ...inputStyle(), width: "auto", minWidth: 220 }}
+              >
+                <option value="">Select saved preset</option>
+                {notificationPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={notificationPresetName}
+                onChange={(e) => setNotificationPresetName(e.target.value)}
+                style={{ ...inputStyle(), width: "auto", minWidth: 220 }}
+                placeholder="Preset name"
+              />
+              <button type="button" onClick={() => void saveNotificationPreset()} style={buttonStyle()}>
+                Save preset
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteNotificationPreset()}
+                style={buttonStyle()}
+                disabled={!notificationPresetId}
+              >
+                Delete preset
+              </button>
+            </div>
+          </div>
+        ) : null}
         {canTriageSlaRole ? (
           <div
             style={{
