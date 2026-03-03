@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/sla-alerts",
-      "schedule": "0 * * * *"
+      "schedule": "10 21 * * *"
     }
   ]
 }
