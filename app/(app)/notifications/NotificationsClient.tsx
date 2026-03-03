@@ -360,6 +360,21 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     canTriageSlaRole ? "My Open SLA Queue" : ""
   );
   const [defaultNotificationPresetId, setDefaultNotificationPresetId] = useState("");
+  const quickPresetRows = useMemo(() => {
+    const rows: NotificationFilterPreset[] = [];
+    const pushUnique = (preset: NotificationFilterPreset | undefined) => {
+      if (!preset) return;
+      if (rows.some((row) => row.id === preset.id)) return;
+      rows.push(preset);
+    };
+    pushUnique(notificationPresets.find((row) => row.id === defaultNotificationPresetId));
+    pushUnique(notificationPresets.find((row) => row.id === notificationPresetId));
+    for (const row of notificationPresets) {
+      pushUnique(row);
+      if (rows.length >= 3) break;
+    }
+    return rows.slice(0, 3);
+  }, [defaultNotificationPresetId, notificationPresetId, notificationPresets]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1059,6 +1074,32 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         {canTriageSlaRole ? (
           <div style={{ ...cardStyle(), display: "grid", gap: 10 }}>
             <div style={{ fontWeight: 900 }}>Notification Filter Presets</div>
+            {quickPresetRows.length ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {quickPresetRows.map((preset) => {
+                  const active = preset.id === notificationPresetId;
+                  return (
+                    <button
+                      key={`quick-preset-${preset.id}`}
+                      type="button"
+                      onClick={() => applyNotificationPreset(preset.id, { persist: true })}
+                      style={{
+                        ...buttonStyle(),
+                        padding: "6px 10px",
+                        fontSize: 12,
+                        border: active
+                          ? "1px solid rgba(126,255,167,0.55)"
+                          : "1px solid rgba(255,255,255,0.14)",
+                        background: active ? "rgba(126,255,167,0.16)" : "rgba(255,255,255,0.06)",
+                      }}
+                    >
+                      {preset.name}
+                      {preset.id === defaultNotificationPresetId ? " ★" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <select
                 value={notificationPresetId}
