@@ -55,6 +55,14 @@ type SlaStatusFilter = "all" | "open" | "acknowledged" | "resolved";
 
 type RangeKey = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
 
+function canTriageSla(role: string | null | undefined) {
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
+
+function isSlaStatusFilter(value: string | null): value is SlaStatusFilter {
+  return value === "all" || value === "open" || value === "acknowledged" || value === "resolved";
+}
+
 function isRangeKey(value: string | null): value is RangeKey {
   return (
     value === "all" ||
@@ -263,7 +271,12 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [runSlaMessage, setRunSlaMessage] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
-  const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>("all");
+  const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
+    const fromQuery = searchParams.get("sla");
+    if (isSlaStatusFilter(fromQuery)) return fromQuery;
+    return canTriageSla(role) ? "open" : "all";
+  });
+  const canTriageSlaRole = canTriageSla(role);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -375,6 +388,15 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   }, [rows, search, showUnreadOnly, range, customFrom, customTo, slaStatusFilter]);
 
   const unreadCount = useMemo(() => rows.filter((row) => !row.is_read).length, [rows]);
+  const visibleSlaRows = useMemo(() => filtered.filter((row) => isSlaNotification(row)), [filtered]);
+  const visibleUnacknowledgedSlaIds = useMemo(
+    () => visibleSlaRows.filter((row) => !row.acknowledged_at && !row.resolved_at).map((row) => row.id),
+    [visibleSlaRows]
+  );
+  const visibleUnresolvedSlaIds = useMemo(
+    () => visibleSlaRows.filter((row) => !row.resolved_at).map((row) => row.id),
+    [visibleSlaRows]
+  );
 
   async function markOneRead(id: number) {
     const res = await fetch("/api/notifications", {
@@ -409,6 +431,21 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     );
   }
 
+  async function acknowledgeNotifications(ids: number[]) {
+    if (!ids.length) return;
+    const res = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acknowledge", ids }),
+    });
+    if (!res.ok) return;
+    const nowIso = new Date().toISOString();
+    const idSet = new Set(ids);
+    setRows((prev) =>
+      prev.map((row) => (idSet.has(row.id) ? { ...row, acknowledged_at: row.acknowledged_at ?? nowIso } : row))
+    );
+  }
+
   async function resolveNotification(id: number) {
     const res = await fetch("/api/notifications", {
       method: "POST",
@@ -420,6 +457,31 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setRows((prev) =>
       prev.map((row) =>
         row.id === id
+          ? {
+              ...row,
+              acknowledged_at: row.acknowledged_at ?? nowIso,
+              resolved_at: nowIso,
+              is_read: true,
+              read_at: nowIso,
+            }
+          : row
+      )
+    );
+  }
+
+  async function resolveNotifications(ids: number[]) {
+    if (!ids.length) return;
+    const res = await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "resolve", ids }),
+    });
+    if (!res.ok) return;
+    const nowIso = new Date().toISOString();
+    const idSet = new Set(ids);
+    setRows((prev) =>
+      prev.map((row) =>
+        idSet.has(row.id)
           ? {
               ...row,
               acknowledged_at: row.acknowledged_at ?? nowIso,
@@ -750,6 +812,26 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           <button type="button" onClick={exportSlaCsv} style={buttonStyle()}>
             Export SLA CSV
           </button>
+          {canTriageSlaRole ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void acknowledgeNotifications(visibleUnacknowledgedSlaIds)}
+                style={buttonStyle()}
+                disabled={visibleUnacknowledgedSlaIds.length === 0}
+              >
+                Acknowledge Visible SLA ({visibleUnacknowledgedSlaIds.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => void resolveNotifications(visibleUnresolvedSlaIds)}
+                style={buttonStyle()}
+                disabled={visibleUnresolvedSlaIds.length === 0}
+              >
+                Resolve Visible SLA ({visibleUnresolvedSlaIds.length})
+              </button>
+            </>
+          ) : null}
         </div>
 
         {range === "custom" ? (
