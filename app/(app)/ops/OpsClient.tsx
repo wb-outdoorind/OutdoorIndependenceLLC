@@ -124,6 +124,13 @@ type DowntimeRow = {
   maintenanceHref: string;
 };
 
+type PmWaiverRow = {
+  asset_type: "vehicle" | "equipment";
+  asset_id: string;
+  due_at: number;
+  active: boolean;
+};
+
 type FailureRow = {
   id: string;
   created_at: string;
@@ -333,9 +340,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function OpsPage({
   embedded = false,
   title = "Maintenance Operations",
+  currentRole = null,
 }: {
   embedded?: boolean;
   title?: string;
+  currentRole?: string | null;
 } = {}) {
   const [tab, setTab] = useState<OpsTab>("Overview");
   const [loading, setLoading] = useState(true);
@@ -347,6 +356,7 @@ export default function OpsPage({
   const [equipmentPmEvents, setEquipmentPmEvents] = useState<EquipmentPmEventRow[]>([]);
   const [allRequests, setAllRequests] = useState<RequestRow[]>([]);
   const [allMaintenanceLogs, setAllMaintenanceLogs] = useState<MaintenanceLogRow[]>([]);
+  const [pmWaivers, setPmWaivers] = useState<PmWaiverRow[]>([]);
 
   const [outOfServiceCount, setOutOfServiceCount] = useState(0);
   const [openRequestCount, setOpenRequestCount] = useState(0);
@@ -359,6 +369,8 @@ export default function OpsPage({
   const [pmLifeStatusFilter, setPmLifeStatusFilter] = useState<PmLifeStatusFilter>("All");
   const [pmAssetTypeFilter, setPmAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [pmSearch, setPmSearch] = useState("");
+  const [pmWaiveBusyKey, setPmWaiveBusyKey] = useState<string | null>(null);
+  const [pmWaiveMessage, setPmWaiveMessage] = useState<string | null>(null);
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
   const [downtimeAssetTypeFilter, setDowntimeAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [downtimeSearch, setDowntimeSearch] = useState("");
@@ -423,7 +435,7 @@ export default function OpsPage({
             .select(`id,${assetKey},created_at,updated_at,status,description,system_affected`);
         };
 
-        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehiclePmRes, vehicleLogsRes, equipmentLogsRes] = await Promise.all([
+        const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehiclePmRes, vehicleLogsRes, equipmentLogsRes, pmWaiversRes] = await Promise.all([
           supabase.from("vehicles").select("id,name,year,status,mileage,updated_at"),
           supabase.from("equipment").select("id,name,year,status,current_hours,updated_at"),
           fetchRequestsWithOptionalClosedAt("maintenance_requests", "vehicle_id"),
@@ -448,6 +460,12 @@ export default function OpsPage({
             .from("equipment_maintenance_logs")
             .select("id,equipment_id,created_at,created_by,request_id,mechanic_self_score,notes,status_update")
             .order("created_at", { ascending: false }),
+          supabase
+            .from("pm_waivers")
+            .select("asset_type,asset_id,due_at,active")
+            .eq("active", true)
+            .order("updated_at", { ascending: false })
+            .limit(4000),
         ]);
 
         if (
@@ -459,7 +477,8 @@ export default function OpsPage({
           eqPmRes.error ||
           vehiclePmRes.error ||
           vehicleLogsRes.error ||
-          equipmentLogsRes.error
+          equipmentLogsRes.error ||
+          pmWaiversRes.error
         ) {
           console.error("[ops] load error:", {
             vehiclesError: vehiclesRes.error,
@@ -471,6 +490,7 @@ export default function OpsPage({
             vehiclePmError: vehiclePmRes.error,
             vehicleLogsError: vehicleLogsRes.error,
             equipmentLogsError: equipmentLogsRes.error,
+            pmWaiversError: pmWaiversRes.error,
           });
           setErrorMessage(
             vehiclesRes.error?.message ||
@@ -482,6 +502,7 @@ export default function OpsPage({
               vehiclePmRes.error?.message ||
               vehicleLogsRes.error?.message ||
               equipmentLogsRes.error?.message ||
+              pmWaiversRes.error?.message ||
               "Failed to load operations overview."
           );
           setLoading(false);
@@ -586,6 +607,7 @@ export default function OpsPage({
         setEquipmentPmEvents(eqPmRows);
         setAllRequests(requestRows);
         setAllMaintenanceLogs(maintenanceLogRows);
+        setPmWaivers(((pmWaiversRes.data ?? []) as PmWaiverRow[]) || []);
 
         setOutOfServiceCount(out);
         setOpenRequestCount(openRequests.length);
@@ -600,6 +622,15 @@ export default function OpsPage({
   }, [router]);
 
   const tabs: OpsTab[] = ["Overview", "Preventative Maintenance Overview", "Downtime", "Failures", "Performance"];
+  const canWaivePm = useMemo(() => {
+    const role = (currentRole ?? "").trim();
+    return (
+      role === "owner" ||
+      role === "operations_manager" ||
+      role === "office_admin" ||
+      role === "mechanic"
+    );
+  }, [currentRole]);
 
   const overviewCards = useMemo(
     () => [
@@ -613,6 +644,11 @@ export default function OpsPage({
   const pmBoardRows = useMemo(() => {
     const equipmentLastPm = new Map<string, { hours: number | null; date: string }>();
     const vehicleLastPm = new Map<string, { mileage: number | null; date: string }>();
+    const waivedPmKeys = new Set(
+      pmWaivers
+        .filter((row) => row.active)
+        .map((row) => `${row.asset_type}:${row.asset_id}:${Math.round(Number(row.due_at ?? 0))}`)
+    );
     for (const row of vehiclePmEvents) {
       if (!vehicleLastPm.has(row.vehicle_id)) {
         vehicleLastPm.set(row.vehicle_id, {
@@ -646,6 +682,8 @@ export default function OpsPage({
       else if (delta <= VEHICLE_DUE_SOON_WINDOW_MILES) status = "Due Soon";
 
       if (!status) continue;
+      const rowKey = `vehicle:${v.id}:${Math.round(dueAt)}`;
+      if (waivedPmKeys.has(rowKey)) continue;
 
       rows.push({
         assetId: v.id,
@@ -677,6 +715,8 @@ export default function OpsPage({
       else if (delta <= EQUIPMENT_DUE_SOON_WINDOW_HOURS) status = "Due Soon";
 
       if (!status) continue;
+      const rowKey = `equipment:${e.id}:${Math.round(dueAt)}`;
+      if (waivedPmKeys.has(rowKey)) continue;
 
       rows.push({
         assetId: e.id,
@@ -708,7 +748,7 @@ export default function OpsPage({
     });
 
     return rows;
-  }, [vehicles, equipment, equipmentPmEvents, vehiclePmEvents]);
+  }, [vehicles, equipment, equipmentPmEvents, pmWaivers, vehiclePmEvents]);
 
   const filteredPmRows = useMemo(() => {
     const q = pmSearch.trim().toLowerCase();
@@ -725,6 +765,57 @@ export default function OpsPage({
       return hay.includes(q);
     });
   }, [pmBoardRows, pmStatusFilter, pmAssetTypeFilter, pmSearch]);
+
+  async function handleWaivePm(row: PmBoardRow) {
+    if (!canWaivePm) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to waive PM for ${row.assetName} (${row.assetType})?`
+    );
+    if (!confirmed) return;
+
+    const assetType = row.assetType === "Vehicle" ? "vehicle" : "equipment";
+    const dueAt = Math.max(0, Math.round(row.dueAt));
+    const busyKey = `${assetType}:${row.assetId}:${dueAt}`;
+    setPmWaiveBusyKey(busyKey);
+    setPmWaiveMessage(null);
+
+    try {
+      const res = await fetch("/api/pm-waivers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assetType,
+          assetId: row.assetId,
+          assetName: row.assetName,
+          dueAt,
+          unit: row.unit,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to waive PM.");
+      }
+
+      setPmWaivers((prev) => {
+        const next = prev.filter(
+          (waiver) =>
+            !(
+              waiver.asset_type === assetType &&
+              waiver.asset_id === row.assetId &&
+              Math.round(Number(waiver.due_at ?? 0)) === dueAt
+            )
+        );
+        next.unshift({ asset_type: assetType, asset_id: row.assetId, due_at: dueAt, active: true });
+        return next;
+      });
+      setPmWaiveMessage(`PM waived for ${row.assetName}. Operations Manager notification sent.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to waive PM.";
+      setPmWaiveMessage(message);
+    } finally {
+      setPmWaiveBusyKey(null);
+    }
+  }
 
   const pmLifeRows = useMemo(() => {
     const equipmentLastPm = new Map<string, { hours: number | null; date: string }>();
@@ -1695,6 +1786,12 @@ export default function OpsPage({
             </Field>
           </div>
 
+          {pmWaiveMessage ? (
+            <div style={{ marginBottom: 12, opacity: 0.88, color: pmWaiveMessage.toLowerCase().includes("failed") ? "#ff9d9d" : "#c5ffd8" }}>
+              {pmWaiveMessage}
+            </div>
+          ) : null}
+
           {pmBoardTab === "PM Due Board" ? (
             filteredPmRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No due or overdue PM units match the current filters.</div>
@@ -1741,6 +1838,24 @@ export default function OpsPage({
                             <Link href={row.historyHref} style={actionLinkStyle}>
                               View History
                             </Link>
+                            {canWaivePm ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleWaivePm(row)}
+                                disabled={pmWaiveBusyKey === `${row.assetType === "Vehicle" ? "vehicle" : "equipment"}:${row.assetId}:${Math.round(row.dueAt)}`}
+                                style={{
+                                  ...actionButtonStyle,
+                                  opacity:
+                                    pmWaiveBusyKey === `${row.assetType === "Vehicle" ? "vehicle" : "equipment"}:${row.assetId}:${Math.round(row.dueAt)}`
+                                      ? 0.65
+                                      : 1,
+                                }}
+                              >
+                                {pmWaiveBusyKey === `${row.assetType === "Vehicle" ? "vehicle" : "equipment"}:${row.assetId}:${Math.round(row.dueAt)}`
+                                  ? "Waiving..."
+                                  : "Waive PM"}
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>

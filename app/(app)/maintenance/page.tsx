@@ -221,7 +221,6 @@ export default function MaintenanceCenterPage() {
   const [canViewOperations, setCanViewOperations] = useState(false);
   const [userRole, setUserRole] = useState<Role>("employee");
   const [roleResolved, setRoleResolved] = useState(false);
-  const [expandedTeamDashboard, setExpandedTeamDashboard] = useState(false);
   const [teammateMetrics, setTeammateMetrics] = useState<TeammateOpsMetrics>({
     daily: 0,
     weekly: 0,
@@ -573,24 +572,13 @@ export default function MaintenanceCenterPage() {
                   Create Blank PM
                 </Link>
               </div>
-              <OpsClient embedded title="Maintenance Operations Dashboard" />
-              <div style={{ marginTop: 12, ...cardStyle }}>
-                <button
-                  type="button"
-                  onClick={() => setExpandedTeamDashboard((prev) => !prev)}
-                  style={buttonStyle}
-                >
-                  Expand dashboard
-                </button>
-                {expandedTeamDashboard ? (
-                  <div style={{ marginTop: 12 }}>
-                    <TeammateOperationsDashboard
-                      loading={teammateMetricsLoading}
-                      error={teammateMetricsError}
-                      metrics={teammateMetrics}
-                    />
-                  </div>
-                ) : null}
+              <OpsClient embedded title="Maintenance Operations Dashboard" currentRole={userRole} />
+              <div style={{ marginTop: 12 }}>
+                <TeammateOperationsDashboard
+                  loading={teammateMetricsLoading}
+                  error={teammateMetricsError}
+                  metrics={teammateMetrics}
+                />
               </div>
             </>
           ) : canViewTeammateOperations ? (
