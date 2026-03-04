@@ -65,6 +65,11 @@ type FormsHistoryResponse = {
   error?: string;
 };
 
+type HistoryAssetFilterOption = {
+  value: string;
+  label: string;
+};
+
 type FormOption = {
   id: FormType;
   label: string;
@@ -281,7 +286,8 @@ export default function FormsClient({
 
   const fullHistory = canViewFullHistory(role);
   const [historyScope, setHistoryScope] = useState<"mine" | "all">("mine");
-  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("pre_post");
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [historyAssetFilter, setHistoryAssetFilter] = useState<string>("all");
   const [historyRows, setHistoryRows] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -489,6 +495,32 @@ export default function FormsClient({
     };
   }, [effectiveHistoryScope, historyFilter]);
 
+  const historyAssetOptions = useMemo<HistoryAssetFilterOption[]>(() => {
+    const map = new Map<string, string>();
+    for (const row of historyRows) {
+      const key = `${row.assetType}:${row.assetId}`;
+      const prefix = row.assetType === "vehicle" ? "Vehicle" : "Equipment";
+      map.set(key, `${prefix}: ${row.assetLabel}`);
+    }
+    const options = Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [{ value: "all", label: "All assets" }, ...options];
+  }, [historyRows]);
+
+  const effectiveHistoryAssetFilter = useMemo(() => {
+    if (historyAssetFilter === "all") return "all";
+    if (historyAssetOptions.some((option) => option.value === historyAssetFilter)) {
+      return historyAssetFilter;
+    }
+    return "all";
+  }, [historyAssetFilter, historyAssetOptions]);
+
+  const filteredHistoryRows = useMemo(() => {
+    if (effectiveHistoryAssetFilter === "all") return historyRows;
+    return historyRows.filter((row) => `${row.assetType}:${row.assetId}` === effectiveHistoryAssetFilter);
+  }, [effectiveHistoryAssetFilter, historyRows]);
+
   function launchForm() {
     if (!selectedOption || !effectiveSelectedAssetId) return;
     setLaunching(true);
@@ -618,8 +650,8 @@ export default function FormsClient({
               onChange={(e) => setHistoryFilter(e.target.value as HistoryFilter)}
               style={inputStyle()}
             >
-              <option value="pre_post">My Pre/Post Trip Inspections (Default)</option>
               <option value="all">All Form Types</option>
+              <option value="pre_post">Pre/Post Trip Inspections</option>
               <option value="pre_trip">Pre-Trip Inspections</option>
               <option value="post_trip">Post-Trip Inspections</option>
               <option value="vehicle_maintenance_request">Vehicle Maintenance Requests</option>
@@ -628,6 +660,21 @@ export default function FormsClient({
               <option value="equipment_maintenance_request">Equipment Maintenance Requests</option>
               <option value="equipment_maintenance_log">Equipment Maintenance Logs</option>
               <option value="equipment_pm">Equipment PM</option>
+            </select>
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontWeight: 800 }}>Asset Filter</span>
+            <select
+              value={effectiveHistoryAssetFilter}
+              onChange={(e) => setHistoryAssetFilter(e.target.value)}
+              style={inputStyle()}
+            >
+              {historyAssetOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -655,10 +702,10 @@ export default function FormsClient({
 
         {!historyLoading && !historyError ? (
           <div style={{ display: "grid", gap: 10 }}>
-            {historyRows.length === 0 ? (
+            {filteredHistoryRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No form history found for the selected filter.</div>
             ) : (
-              historyRows.map((row) => (
+              filteredHistoryRows.map((row) => (
                 <div
                   key={row.key}
                   style={{
