@@ -6,6 +6,7 @@ import HomeDashboardCard from "@/components/home/HomeDashboardCard";
 import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { canAccessRoute } from "@/lib/routeAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -249,6 +250,28 @@ export default async function Home() {
       role === "team_member_2" ||
       role === "team_lead_1" ||
       role === "team_lead_2";
+
+    if (canAccessRoute(role, "lead_approvals")) {
+      tiles = [
+        ...tiles,
+        {
+          title: "Approvals",
+          href: "/approvals",
+          desc: "Review and sign off pending lead approvals.",
+        },
+      ];
+    }
+
+    if (canAccessRoute(role, "audit_trail")) {
+      tiles = [
+        ...tiles,
+        {
+          title: "Audit Trail",
+          href: "/audit",
+          desc: "View system activity and change history.",
+        },
+      ];
+    }
 
     if (isLeadership || isTeammateOpsRole) {
       const [gradesRes, teammateProfilesRes, inspectionsRes] = await Promise.all([
