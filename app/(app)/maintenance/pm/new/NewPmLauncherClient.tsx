@@ -12,6 +12,9 @@ type VehicleAssetRow = {
   name: string | null;
   type: string | null;
   status: string | null;
+  plate: string | null;
+  asset: string | null;
+  asset_qr: string | null;
 };
 
 type EquipmentAssetRow = {
@@ -19,11 +22,14 @@ type EquipmentAssetRow = {
   name: string | null;
   equipment_type: string | null;
   status: string | null;
+  external_id: string | null;
+  asset_qr: string | null;
 };
 
 type AssetOption = {
   id: string;
   label: string;
+  searchText: string;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -83,10 +89,33 @@ function pmKindLabel(kind: PmKind) {
   return "Standard Equipment PM";
 }
 
+function normalizedScanCandidates(rawValue: string) {
+  const value = rawValue.trim();
+  if (!value) return [];
+  let lastSegment = "";
+  try {
+    const u = new URL(value);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length) lastSegment = decodeURIComponent(parts[parts.length - 1]);
+  } catch {
+    // not a URL
+  }
+  return [value, value.toLowerCase(), lastSegment, lastSegment.toLowerCase()].filter(Boolean);
+}
+
+function equalsCandidate(value: string | null | undefined, candidate: string) {
+  const v = (value ?? "").trim();
+  if (!v) return false;
+  return v === candidate || v.toLowerCase() === candidate.toLowerCase();
+}
+
 export default function NewPmLauncherClient({ role }: { role: string }) {
   const router = useRouter();
   const [pmKind, setPmKind] = useState<PmKind>("vehicle_pm");
   const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [assetSearch, setAssetSearch] = useState("");
+  const [assetQrInput, setAssetQrInput] = useState("");
+  const [assetQrError, setAssetQrError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<VehicleAssetRow[]>([]);
   const [equipment, setEquipment] = useState<EquipmentAssetRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,12 +132,12 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
       const [vehiclesRes, equipmentRes] = await Promise.all([
         supabase
           .from("vehicles")
-          .select("id,name,type,status")
+          .select("id,name,type,status,plate,asset,asset_qr")
           .order("name", { ascending: true })
           .limit(500),
         supabase
           .from("equipment")
-          .select("id,name,equipment_type,status")
+          .select("id,name,equipment_type,status,external_id,asset_qr")
           .order("name", { ascending: true })
           .limit(500),
       ]);
@@ -142,6 +171,17 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
       return vehicles.map((row) => ({
         id: row.id,
         label: `${row.name?.trim() || row.id} · ${row.type?.trim() || "vehicle"}${row.status?.trim() ? ` · ${row.status.trim()}` : ""}`,
+        searchText: [
+          row.id,
+          row.name ?? "",
+          row.type ?? "",
+          row.status ?? "",
+          row.plate ?? "",
+          row.asset ?? "",
+          row.asset_qr ?? "",
+        ]
+          .join(" ")
+          .toLowerCase(),
       }));
     }
 
@@ -155,13 +195,78 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
     return filteredEquipment.map((row) => ({
       id: row.id,
       label: `${row.name?.trim() || row.id} · ${row.equipment_type?.trim() || "equipment"}${row.status?.trim() ? ` · ${row.status.trim()}` : ""}`,
+      searchText: [
+        row.id,
+        row.name ?? "",
+        row.equipment_type ?? "",
+        row.status ?? "",
+        row.external_id ?? "",
+        row.asset_qr ?? "",
+      ]
+        .join(" ")
+        .toLowerCase(),
     }));
   }, [equipment, pmKind, vehicles]);
+  const visibleAssetOptions = useMemo(() => {
+    const q = assetSearch.trim().toLowerCase();
+    if (!q) return assetOptions;
+    return assetOptions.filter((opt) => opt.searchText.includes(q));
+  }, [assetOptions, assetSearch]);
   const effectiveSelectedAssetId = useMemo(() => {
-    if (!assetOptions.length) return "";
-    if (assetOptions.some((opt) => opt.id === selectedAssetId)) return selectedAssetId;
-    return assetOptions[0].id;
-  }, [assetOptions, selectedAssetId]);
+    if (!visibleAssetOptions.length) return "";
+    if (visibleAssetOptions.some((opt) => opt.id === selectedAssetId)) return selectedAssetId;
+    return visibleAssetOptions[0].id;
+  }, [visibleAssetOptions, selectedAssetId]);
+
+  function findAssetIdByQr(rawValue: string) {
+    const candidates = normalizedScanCandidates(rawValue);
+    if (!candidates.length) return null;
+    if (pmKind === "vehicle_pm") {
+      for (const candidate of candidates) {
+        const found = vehicles.find(
+          (row) =>
+            equalsCandidate(row.id, candidate) ||
+            equalsCandidate(row.name, candidate) ||
+            equalsCandidate(row.asset_qr, candidate) ||
+            equalsCandidate(row.asset, candidate) ||
+            equalsCandidate(row.plate, candidate)
+        );
+        if (found) return found.id;
+      }
+      return null;
+    }
+
+    const filteredEquipment = equipment.filter((row) => {
+      if (pmKind === "trailer_pm") return isTrailerEquipmentType(row.equipment_type);
+      if (pmKind === "mower_pm") return isMowerEquipmentType(row.equipment_type);
+      if (pmKind === "applicator_pm") return isApplicatorEquipmentType(row.equipment_type);
+      return !isTrailerEquipmentType(row.equipment_type) && !isMowerEquipmentType(row.equipment_type) && !isApplicatorEquipmentType(row.equipment_type);
+    });
+
+    for (const candidate of candidates) {
+      const found = filteredEquipment.find(
+        (row) =>
+          equalsCandidate(row.id, candidate) ||
+          equalsCandidate(row.name, candidate) ||
+          equalsCandidate(row.asset_qr, candidate) ||
+          equalsCandidate(row.external_id, candidate)
+      );
+      if (found) return found.id;
+    }
+    return null;
+  }
+
+  function selectAssetByQr() {
+    const foundId = findAssetIdByQr(assetQrInput);
+    if (!foundId) {
+      setAssetQrError("No matching asset found for this QR value.");
+      return;
+    }
+    setSelectedAssetId(foundId);
+    setAssetSearch("");
+    setAssetQrInput("");
+    setAssetQrError(null);
+  }
 
   function launchPm() {
     if (!effectiveSelectedAssetId) return;
@@ -210,9 +315,38 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
 
             <label style={{ display: "grid", gap: 6 }}>
               <span style={{ fontWeight: 800 }}>Asset</span>
-              <select value={effectiveSelectedAssetId} onChange={(e) => setSelectedAssetId(e.target.value)} style={inputStyle()}>
-                {assetOptions.length === 0 ? <option value="">No matching assets</option> : null}
-                {assetOptions.map((opt) => (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) minmax(240px, 1fr)", gap: 8 }}>
+                  <input
+                    value={assetSearch}
+                    onChange={(e) => setAssetSearch(e.target.value)}
+                    placeholder="Search asset..."
+                    style={inputStyle()}
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+                    <input
+                      value={assetQrInput}
+                      onChange={(e) => {
+                        setAssetQrInput(e.target.value);
+                        if (assetQrError) setAssetQrError(null);
+                      }}
+                      placeholder="Scan or paste asset QR..."
+                      style={inputStyle()}
+                    />
+                    <button type="button" onClick={selectAssetByQr} style={buttonStyle()}>
+                      Scan QR
+                    </button>
+                  </div>
+                </div>
+                {assetQrError ? <div style={{ color: "#ff9d9d", fontSize: 12 }}>{assetQrError}</div> : null}
+              </div>
+              <select
+                value={effectiveSelectedAssetId}
+                onChange={(e) => setSelectedAssetId(e.target.value)}
+                style={inputStyle()}
+              >
+                {visibleAssetOptions.length === 0 ? <option value="">No matching assets</option> : null}
+                {visibleAssetOptions.map((opt) => (
                   <option key={opt.id} value={opt.id}>
                     {opt.label}
                   </option>
