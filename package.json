@@ -17,6 +17,7 @@
     "smoke:health": "curl -fsS ${BASE_URL:-https://outdoor-independence-llc-app.vercel.app}/api/health >/dev/null && echo 'Health check passed'",
     "backup:supabase": "bash ./scripts/backup-supabase.sh",
     "restore:drill": "bash ./scripts/restore-drill-supabase.sh",
+    "push:checked": "bash ./scripts/push-after-checks.sh",
     "test:e2e": "playwright test",
     "mobile:sync": "npx cap sync",
     "mobile:add:ios": "npx cap add ios",

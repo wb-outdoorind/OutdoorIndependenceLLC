@@ -48,3 +48,4 @@ OI_APP_Assets.xlsx
 OI_APP_Inventory.xlsx
 supabase.tar.gz
 .tmp/
+.env*.local

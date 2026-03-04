@@ -29,6 +29,26 @@ git commit -m "your release message"
 git push origin main
 ```
 
+One-command alternative (runs lint+build first):
+
+```bash
+cd /Users/shop/inspections-app
+npm run push:checked -- "your release message"
+```
+
+Optional flags:
+
+```bash
+# include Supabase migration push
+npm run push:checked -- "your release message" --with-db-push
+
+# include iOS Capacitor sync before commit
+npm run push:checked -- "your release message" --with-ios-sync
+
+# include both
+npm run push:checked -- "your release message" --with-db-push --with-ios-sync
+```
+
 ## 3) Web Deploy (Vercel)
 
 Normal path:
