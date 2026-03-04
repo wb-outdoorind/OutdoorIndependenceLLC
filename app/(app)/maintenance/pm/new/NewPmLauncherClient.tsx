@@ -330,7 +330,7 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
                         setAssetQrInput(e.target.value);
                         if (assetQrError) setAssetQrError(null);
                       }}
-                      placeholder="Scan or paste asset QR..."
+                      placeholder="Scan asset QR..."
                       style={inputStyle()}
                     />
                     <button type="button" onClick={selectAssetByQr} style={buttonStyle()}>
