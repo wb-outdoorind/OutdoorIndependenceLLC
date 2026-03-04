@@ -16,6 +16,7 @@ type FormType =
   | "equipment_pm";
 
 type HistoryFilter = "pre_post" | "all" | FormType;
+type HistoryAssetTypeFilter = "all" | "vehicle" | "equipment";
 
 type VehicleAssetRow = {
   id: string;
@@ -65,7 +66,7 @@ type FormsHistoryResponse = {
   error?: string;
 };
 
-type HistoryAssetFilterOption = {
+type HistorySpecificAssetFilterOption = {
   value: string;
   label: string;
 };
@@ -287,7 +288,9 @@ export default function FormsClient({
   const fullHistory = canViewFullHistory(role);
   const [historyScope, setHistoryScope] = useState<"mine" | "all">("mine");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [historyAssetTypeFilter, setHistoryAssetTypeFilter] = useState<HistoryAssetTypeFilter>("all");
   const [historyAssetFilter, setHistoryAssetFilter] = useState<string>("all");
+  const [historyAssetFilterMenuOpen, setHistoryAssetFilterMenuOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -495,9 +498,10 @@ export default function FormsClient({
     };
   }, [effectiveHistoryScope, historyFilter]);
 
-  const historyAssetOptions = useMemo<HistoryAssetFilterOption[]>(() => {
+  const historyAssetOptions = useMemo<HistorySpecificAssetFilterOption[]>(() => {
     const map = new Map<string, string>();
     for (const row of historyRows) {
+      if (historyAssetTypeFilter !== "all" && row.assetType !== historyAssetTypeFilter) continue;
       const key = `${row.assetType}:${row.assetId}`;
       const prefix = row.assetType === "vehicle" ? "Vehicle" : "Equipment";
       map.set(key, `${prefix}: ${row.assetLabel}`);
@@ -506,7 +510,7 @@ export default function FormsClient({
       .map(([value, label]) => ({ value, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
     return [{ value: "all", label: "All assets" }, ...options];
-  }, [historyRows]);
+  }, [historyAssetTypeFilter, historyRows]);
 
   const effectiveHistoryAssetFilter = useMemo(() => {
     if (historyAssetFilter === "all") return "all";
@@ -516,10 +520,29 @@ export default function FormsClient({
     return "all";
   }, [historyAssetFilter, historyAssetOptions]);
 
+  const historyAssetFilterSummary = useMemo(() => {
+    const typeLabel =
+      historyAssetTypeFilter === "all"
+        ? "All asset types"
+        : historyAssetTypeFilter === "vehicle"
+          ? "Vehicles"
+          : "Equipment";
+    const specificLabel =
+      effectiveHistoryAssetFilter === "all"
+        ? "All assets"
+        : historyAssetOptions.find((option) => option.value === effectiveHistoryAssetFilter)?.label ?? "All assets";
+    return `${typeLabel} · ${specificLabel}`;
+  }, [effectiveHistoryAssetFilter, historyAssetOptions, historyAssetTypeFilter]);
+
   const filteredHistoryRows = useMemo(() => {
-    if (effectiveHistoryAssetFilter === "all") return historyRows;
-    return historyRows.filter((row) => `${row.assetType}:${row.assetId}` === effectiveHistoryAssetFilter);
-  }, [effectiveHistoryAssetFilter, historyRows]);
+    return historyRows.filter((row) => {
+      if (historyAssetTypeFilter !== "all" && row.assetType !== historyAssetTypeFilter) return false;
+      if (effectiveHistoryAssetFilter !== "all" && `${row.assetType}:${row.assetId}` !== effectiveHistoryAssetFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [effectiveHistoryAssetFilter, historyAssetTypeFilter, historyRows]);
 
   function launchForm() {
     if (!selectedOption || !effectiveSelectedAssetId) return;
@@ -663,20 +686,81 @@ export default function FormsClient({
             </select>
           </label>
 
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontWeight: 800 }}>Asset Filter</span>
-            <select
-              value={effectiveHistoryAssetFilter}
-              onChange={(e) => setHistoryAssetFilter(e.target.value)}
-              style={inputStyle()}
+          <div style={{ display: "grid", gap: 6, position: "relative" }}>
+            <span style={{ fontWeight: 800 }}>Asset Filters</span>
+            <button
+              type="button"
+              onClick={() => setHistoryAssetFilterMenuOpen((prev) => !prev)}
+              style={buttonStyle()}
             >
-              {historyAssetOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              {historyAssetFilterMenuOpen ? "Close Filters" : "Open Asset Filters"}
+            </button>
+            <div style={{ opacity: 0.72, fontSize: 12 }}>{historyAssetFilterSummary}</div>
+
+            {historyAssetFilterMenuOpen ? (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  marginTop: 8,
+                  zIndex: 5,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: 14,
+                  background: "rgba(12,14,18,0.98)",
+                  padding: 12,
+                  display: "grid",
+                  gap: 10,
+                  boxShadow: "0 14px 36px rgba(0,0,0,0.35)",
+                }}
+              >
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, opacity: 0.78 }}>Asset Type</span>
+                  <select
+                    value={historyAssetTypeFilter}
+                    onChange={(e) => setHistoryAssetTypeFilter(e.target.value as HistoryAssetTypeFilter)}
+                    style={inputStyle()}
+                  >
+                    <option value="all">All asset types</option>
+                    <option value="vehicle">Vehicles only</option>
+                    <option value="equipment">Equipment only</option>
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, opacity: 0.78 }}>Specific Asset</span>
+                  <select
+                    value={effectiveHistoryAssetFilter}
+                    onChange={(e) => setHistoryAssetFilter(e.target.value)}
+                    style={inputStyle()}
+                  >
+                    {historyAssetOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistoryAssetTypeFilter("all");
+                      setHistoryAssetFilter("all");
+                    }}
+                    style={buttonStyle()}
+                  >
+                    Clear
+                  </button>
+                  <button type="button" onClick={() => setHistoryAssetFilterMenuOpen(false)} style={buttonStyle()}>
+                    Apply
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
 
           {fullHistory ? (
             <label style={{ display: "grid", gap: 6 }}>
