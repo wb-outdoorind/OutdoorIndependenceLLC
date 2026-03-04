@@ -876,39 +876,45 @@ export default function VehicleDetailPage() {
     }
 
     setEditSaving(true);
-    const supabase = createSupabaseBrowser();
-    const { data, error } = await supabase
-      .from("vehicles")
-      .update({
-        name: nextName,
-        type: nextType,
-        make: editDraft.make.trim() || null,
-        model: editDraft.model.trim() || null,
-        year: parsedYear,
-        plate: editDraft.plate.trim() || null,
-        vin: editDraft.vin.trim() || null,
-        fuel: editDraft.fuel.trim() || null,
-        oil_type: editDraft.oil_type.trim() || null,
-        mileage: parsedMileage,
-        status: nextStatus,
-        asset: editDraft.asset.trim() || null,
-      })
-      .eq("id", vehicle.id)
-      .select("id,name,type,make,model,year,vin,plate,fuel,oil_type,mileage,status,asset")
-      .maybeSingle();
+    const response = await fetch("/api/assets/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assetType: "vehicle",
+        id: vehicle.id,
+        patch: {
+          name: nextName,
+          type: nextType,
+          make: editDraft.make.trim() || null,
+          model: editDraft.model.trim() || null,
+          year: parsedYear,
+          plate: editDraft.plate.trim() || null,
+          vin: editDraft.vin.trim() || null,
+          fuel: editDraft.fuel.trim() || null,
+          oil_type: editDraft.oil_type.trim() || null,
+          mileage: parsedMileage,
+          status: nextStatus,
+          asset: editDraft.asset.trim() || null,
+        },
+      }),
+    });
+    const json = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      asset?: VehicleRow;
+    };
     setEditSaving(false);
 
-    if (error) {
-      setEditError(error.message);
+    if (!response.ok) {
+      setEditError(json.error || "Failed to save vehicle.");
       return;
     }
 
-    if (!data) {
-      setEditError("Save did not update this vehicle. Check your permissions and try again.");
+    if (!json.asset) {
+      setEditError("Save did not return updated vehicle.");
       return;
     }
 
-    const updatedVehicle = data as VehicleRow;
+    const updatedVehicle = json.asset;
     setVehicle(updatedVehicle);
     setIsEditing(false);
     setEditDraft({

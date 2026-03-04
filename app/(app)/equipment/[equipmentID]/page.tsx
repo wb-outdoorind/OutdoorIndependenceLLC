@@ -553,40 +553,44 @@ export default function EquipmentDetailPage() {
     }
 
     setEditSaving(true);
-    const supabase = createSupabaseBrowser();
-    const { data, error } = await supabase
-      .from("equipment")
-      .update({
-        name: nextName,
-        equipment_type: nextType,
-        make: editDraft.make.trim() || null,
-        model: editDraft.model.trim() || null,
-        year: parsedYear,
-        serial_number: editDraft.serial_number.trim() || null,
-        license_plate: editDraft.license_plate.trim() || null,
-        fuel_type: editDraft.fuel_type.trim() || null,
-        oil_type: editDraft.oil_type.trim() || null,
-        current_hours: parsedHours,
-        status: nextStatus,
-        external_id: editDraft.external_id.trim() || null,
-      })
-      .eq("id", equipment.id)
-      .select(
-        "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,current_hours,status,external_id"
-      )
-      .maybeSingle();
+    const response = await fetch("/api/assets/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assetType: "equipment",
+        id: equipment.id,
+        patch: {
+          name: nextName,
+          equipment_type: nextType,
+          make: editDraft.make.trim() || null,
+          model: editDraft.model.trim() || null,
+          year: parsedYear,
+          serial_number: editDraft.serial_number.trim() || null,
+          license_plate: editDraft.license_plate.trim() || null,
+          fuel_type: editDraft.fuel_type.trim() || null,
+          oil_type: editDraft.oil_type.trim() || null,
+          current_hours: parsedHours,
+          status: nextStatus,
+          external_id: editDraft.external_id.trim() || null,
+        },
+      }),
+    });
+    const json = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      asset?: EquipmentRow;
+    };
     setEditSaving(false);
 
-    if (error) {
-      setEditError(error.message);
+    if (!response.ok) {
+      setEditError(json.error || "Failed to save equipment.");
       return;
     }
-    if (!data) {
-      setEditError("Save did not update this equipment record. Check your permissions and try again.");
+    if (!json.asset) {
+      setEditError("Save did not return updated equipment.");
       return;
     }
 
-    const updated = data as EquipmentRow;
+    const updated = json.asset;
     setEquipment(updated);
     setIsEditing(false);
     setEditDraft({
