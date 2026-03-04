@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type PmKind = "vehicle_pm" | "trailer_pm" | "mower_pm" | "applicator_pm" | "equipment_pm";
@@ -30,6 +30,11 @@ type AssetOption = {
   id: string;
   label: string;
   searchText: string;
+};
+
+type AssetScanMatch = {
+  id: string;
+  kind: PmKind;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -111,10 +116,13 @@ function equalsCandidate(value: string | null | undefined, candidate: string) {
 
 export default function NewPmLauncherClient({ role }: { role: string }) {
   const router = useRouter();
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
   const [pmKind, setPmKind] = useState<PmKind>("vehicle_pm");
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [assetSearch, setAssetSearch] = useState("");
-  const [assetQrInput, setAssetQrInput] = useState("");
+  const [scannerBuffer, setScannerBuffer] = useState("");
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scannerStatus, setScannerStatus] = useState("");
   const [assetQrError, setAssetQrError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<VehicleAssetRow[]>([]);
   const [equipment, setEquipment] = useState<EquipmentAssetRow[]>([]);
@@ -218,55 +226,81 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
     return visibleAssetOptions[0].id;
   }, [visibleAssetOptions, selectedAssetId]);
 
-  function findAssetIdByQr(rawValue: string) {
+  const findAssetByQr = useCallback((rawValue: string): AssetScanMatch | null => {
     const candidates = normalizedScanCandidates(rawValue);
     if (!candidates.length) return null;
-    if (pmKind === "vehicle_pm") {
-      for (const candidate of candidates) {
-        const found = vehicles.find(
-          (row) =>
-            equalsCandidate(row.id, candidate) ||
-            equalsCandidate(row.name, candidate) ||
-            equalsCandidate(row.asset_qr, candidate) ||
-            equalsCandidate(row.asset, candidate) ||
-            equalsCandidate(row.plate, candidate)
-        );
-        if (found) return found.id;
-      }
-      return null;
-    }
-
-    const filteredEquipment = equipment.filter((row) => {
-      if (pmKind === "trailer_pm") return isTrailerEquipmentType(row.equipment_type);
-      if (pmKind === "mower_pm") return isMowerEquipmentType(row.equipment_type);
-      if (pmKind === "applicator_pm") return isApplicatorEquipmentType(row.equipment_type);
-      return !isTrailerEquipmentType(row.equipment_type) && !isMowerEquipmentType(row.equipment_type) && !isApplicatorEquipmentType(row.equipment_type);
-    });
-
     for (const candidate of candidates) {
-      const found = filteredEquipment.find(
+      const vehicleMatch = vehicles.find(
+        (row) =>
+          equalsCandidate(row.id, candidate) ||
+          equalsCandidate(row.name, candidate) ||
+          equalsCandidate(row.asset_qr, candidate) ||
+          equalsCandidate(row.asset, candidate) ||
+          equalsCandidate(row.plate, candidate)
+      );
+      if (vehicleMatch) return { id: vehicleMatch.id, kind: "vehicle_pm" };
+
+      const equipmentMatch = equipment.find(
         (row) =>
           equalsCandidate(row.id, candidate) ||
           equalsCandidate(row.name, candidate) ||
           equalsCandidate(row.asset_qr, candidate) ||
           equalsCandidate(row.external_id, candidate)
       );
-      if (found) return found.id;
+      if (equipmentMatch) {
+        const equipmentType = equipmentMatch.equipment_type;
+        if (isTrailerEquipmentType(equipmentType)) return { id: equipmentMatch.id, kind: "trailer_pm" };
+        if (isMowerEquipmentType(equipmentType)) return { id: equipmentMatch.id, kind: "mower_pm" };
+        if (isApplicatorEquipmentType(equipmentType)) return { id: equipmentMatch.id, kind: "applicator_pm" };
+        return { id: equipmentMatch.id, kind: "equipment_pm" };
+      }
     }
     return null;
-  }
+  }, [equipment, vehicles]);
 
-  function selectAssetByQr() {
-    const foundId = findAssetIdByQr(assetQrInput);
-    if (!foundId) {
+  const completeScan = useCallback((rawValue: string) => {
+    const found = findAssetByQr(rawValue);
+    if (!found) {
       setAssetQrError("No matching asset found for this QR value.");
+      setScannerStatus("No matching asset found. Scan again.");
+      setScannerBuffer("");
+      requestAnimationFrame(() => scanInputRef.current?.focus());
       return;
     }
-    setSelectedAssetId(foundId);
+    setPmKind(found.kind);
+    setSelectedAssetId(found.id);
     setAssetSearch("");
-    setAssetQrInput("");
+    setScannerBuffer("");
+    setScannerActive(false);
+    setScannerStatus("Asset selected from QR.");
     setAssetQrError(null);
+    scanInputRef.current?.blur();
+  }, [findAssetByQr]);
+
+  function armScanner() {
+    setScannerActive(true);
+    setScannerBuffer("");
+    setAssetQrError(null);
+    setScannerStatus("Scanner ready. Scan the asset QR now.");
+    requestAnimationFrame(() => scanInputRef.current?.focus());
   }
+
+  useEffect(() => {
+    if (!scannerActive) return;
+    const value = scannerBuffer.trim();
+    if (!value) return;
+    const timer = window.setTimeout(() => {
+      completeScan(value);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [completeScan, scannerActive, scannerBuffer]);
+
+  useEffect(() => {
+    if (scannerActive) return;
+    if (!scannerStatus) return;
+    const timer = window.setTimeout(() => setScannerStatus(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [scannerActive, scannerStatus]);
 
   function launchPm() {
     if (!effectiveSelectedAssetId) return;
@@ -316,28 +350,32 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
             <label style={{ display: "grid", gap: 6 }}>
               <span style={{ fontWeight: 800 }}>Asset</span>
               <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) minmax(240px, 1fr)", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) auto", gap: 8 }}>
                   <input
                     value={assetSearch}
                     onChange={(e) => setAssetSearch(e.target.value)}
                     placeholder="Search asset..."
                     style={inputStyle()}
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-                    <input
-                      value={assetQrInput}
-                      onChange={(e) => {
-                        setAssetQrInput(e.target.value);
-                        if (assetQrError) setAssetQrError(null);
-                      }}
-                      placeholder="Scan asset QR..."
-                      style={inputStyle()}
-                    />
-                    <button type="button" onClick={selectAssetByQr} style={buttonStyle()}>
-                      Scan QR
-                    </button>
-                  </div>
+                  <button type="button" onClick={armScanner} style={buttonStyle()}>
+                    {scannerActive ? "Ready to Scan…" : "Scan QR"}
+                  </button>
                 </div>
+                <input
+                  ref={scanInputRef}
+                  type="text"
+                  value={scannerBuffer}
+                  onChange={(e) => setScannerBuffer(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    completeScan(scannerBuffer);
+                  }}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  style={{ position: "absolute", left: -9999, top: 0, width: 1, height: 1, opacity: 0 }}
+                />
+                {scannerStatus ? <div style={{ opacity: 0.78, fontSize: 12 }}>{scannerStatus}</div> : null}
                 {assetQrError ? <div style={{ color: "#ff9d9d", fontSize: 12 }}>{assetQrError}</div> : null}
               </div>
               <select
