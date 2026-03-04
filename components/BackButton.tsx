@@ -11,6 +11,7 @@ function logicalBackTarget(pathname: string): string | null {
     "/login",
     "/vehicles",
     "/equipment",
+    "/forms",
     "/inventory",
     "/employees",
     "/ops",

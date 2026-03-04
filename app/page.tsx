@@ -14,6 +14,7 @@ const baseTiles = [
   { title: "Scan QR Code", href: "/scan", desc: "Scan an asset QR code to pull it up fast" },
   { title: "Vehicles", href: "/vehicles", desc: "Vehicle info, inspections, and maintenance" },
   { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
+  { title: "Forms", href: "/forms", desc: "Create blank forms and review submission history" },
   { title: "Inventory", href: "/inventory?filter=low", desc: "Parts, stock levels, reorder tracking" },
   { title: "Maintenance Center", href: "/maintenance", desc: "Queue, PM planning, downtime, and maintenance operations" },
   { title: "Notifications", href: "/notifications", desc: "Inbox for alerts, accountability, and digests" },

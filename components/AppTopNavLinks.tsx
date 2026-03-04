@@ -101,6 +101,7 @@ export default function AppTopNavLinks() {
       <Link href="/scan" className="app-topnav-link">Scan QR</Link>
       <Link href="/vehicles" className="app-topnav-link">Vehicles</Link>
       <Link href="/equipment" className="app-topnav-link">Equipment</Link>
+      <Link href="/forms" className="app-topnav-link">Forms</Link>
       <Link href="/inventory" className="app-topnav-link">Inventory</Link>
       <Link href="/maintenance" className="app-topnav-link">Maintenance Center</Link>
       <Link href="/academy" className="app-topnav-link">OI Academy</Link>
