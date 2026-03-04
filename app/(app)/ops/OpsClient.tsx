@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
-type OpsTab = "Overview" | "PM Due" | "Downtime" | "Failures" | "Performance";
+type OpsTab = "Overview" | "Preventative Maintenance Overview" | "Downtime" | "Failures" | "Performance";
+type PmBoardTab = "PM Due Board" | "PM Life Board";
 type PmStatusFilter = "All" | "Due Soon" | "Overdue";
+type PmLifeStatusFilter = "All" | "On Track" | "Due Soon" | "Overdue";
 type AssetTypeFilter = "All" | "Vehicles" | "Equipment";
 
 type VehicleRow = {
@@ -68,6 +70,7 @@ type VehiclePmRecord = {
   vehicle_id: string;
   created_at: string;
   mileage: number | null;
+  result: unknown;
 };
 
 type PmBoardRow = {
@@ -81,6 +84,25 @@ type PmBoardRow = {
   dueAt: number;
   status: "Due Soon" | "Overdue";
   overdueAmount: number;
+  pmFormHref: string;
+  historyHref: string;
+};
+
+type PmLifeStatus = "On Track" | "Due Soon" | "Overdue";
+
+type PmLifeBoardRow = {
+  assetId: string;
+  assetName: string;
+  assetType: "Vehicle" | "Equipment";
+  currentValue: number;
+  unit: "miles" | "hours";
+  lastPmValue: number | null;
+  lastPmDate: string | null;
+  pmDueDate: string | null;
+  dueAt: number;
+  status: PmLifeStatus;
+  pmLifePercent: number;
+  oilLifePercent: number | null;
   pmFormHref: string;
   historyHref: string;
 };
@@ -163,6 +185,41 @@ function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function addMonthsToIso(iso: string | null, months: number) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString();
+}
+
+function parseVehiclePmResult(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
+
+function parseOilLifePercentFromVehiclePmResult(value: unknown) {
+  const root = parseVehiclePmResult(value);
+  if (!root) return null;
+  const truckPm = root.truckPm;
+  if (!truckPm || typeof truckPm !== "object") return null;
+  const raw = (truckPm as Record<string, unknown>).oilLifePercentage;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return null;
+  return clampPercent(num);
+}
+
+function parseOilChangedFromVehiclePmResult(value: unknown) {
+  const root = parseVehiclePmResult(value);
+  if (!root) return false;
+  const truckPm = root.truckPm;
+  const oilChangedValue =
+    truckPm && typeof truckPm === "object"
+      ? (truckPm as Record<string, unknown>).oilChangePerformed
+      : root.oilChangePerformed;
+  return oilChangedValue === true || oilChangedValue === "yes";
 }
 
 function clampPercent(value: number) {
@@ -297,7 +354,9 @@ export default function OpsPage({
   const [closedLast7Days, setClosedLast7Days] = useState(0);
   const [avgDaysToClose, setAvgDaysToClose] = useState(0);
 
+  const [pmBoardTab, setPmBoardTab] = useState<PmBoardTab>("PM Due Board");
   const [pmStatusFilter, setPmStatusFilter] = useState<PmStatusFilter>("All");
+  const [pmLifeStatusFilter, setPmLifeStatusFilter] = useState<PmLifeStatusFilter>("All");
   const [pmAssetTypeFilter, setPmAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [pmSearch, setPmSearch] = useState("");
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
@@ -379,7 +438,7 @@ export default function OpsPage({
             .order("created_at", { ascending: false }),
           supabase
             .from("vehicle_pm_events")
-            .select("id,vehicle_id,created_at,mileage")
+            .select("id,vehicle_id,created_at,mileage,result")
             .order("created_at", { ascending: false }),
           supabase
             .from("maintenance_logs")
@@ -540,7 +599,7 @@ export default function OpsPage({
     return () => window.clearTimeout(timer);
   }, [router]);
 
-  const tabs: OpsTab[] = ["Overview", "PM Due", "Downtime", "Failures", "Performance"];
+  const tabs: OpsTab[] = ["Overview", "Preventative Maintenance Overview", "Downtime", "Failures", "Performance"];
 
   const overviewCards = useMemo(
     () => [
@@ -666,6 +725,142 @@ export default function OpsPage({
       return hay.includes(q);
     });
   }, [pmBoardRows, pmStatusFilter, pmAssetTypeFilter, pmSearch]);
+
+  const pmLifeRows = useMemo(() => {
+    const equipmentLastPm = new Map<string, { hours: number | null; date: string }>();
+    const vehicleLastPm = new Map<string, { mileage: number | null; date: string }>();
+    const vehicleLastOilChangeMileage = new Map<string, number>();
+    const vehicleLastReportedOilLife = new Map<string, number>();
+
+    for (const row of vehiclePmEvents) {
+      if (!vehicleLastPm.has(row.vehicle_id)) {
+        vehicleLastPm.set(row.vehicle_id, {
+          mileage: row.mileage,
+          date: row.created_at,
+        });
+      }
+      if (!vehicleLastOilChangeMileage.has(row.vehicle_id) && parseOilChangedFromVehiclePmResult(row.result)) {
+        const mileage = Number(row.mileage);
+        if (Number.isFinite(mileage) && mileage >= 0) {
+          vehicleLastOilChangeMileage.set(row.vehicle_id, mileage);
+        }
+      }
+      if (!vehicleLastReportedOilLife.has(row.vehicle_id)) {
+        const oilLife = parseOilLifePercentFromVehiclePmResult(row.result);
+        if (oilLife != null) {
+          vehicleLastReportedOilLife.set(row.vehicle_id, oilLife);
+        }
+      }
+    }
+
+    for (const row of equipmentPmEvents) {
+      if (!equipmentLastPm.has(row.equipment_id)) {
+        equipmentLastPm.set(row.equipment_id, {
+          hours: row.hours,
+          date: row.created_at,
+        });
+      }
+    }
+
+    const rows: PmLifeBoardRow[] = [];
+
+    for (const v of vehicles) {
+      const current = Number(v.mileage ?? 0);
+      if (!Number.isFinite(current) || current < 0) continue;
+
+      const lastPm = vehicleLastPm.get(v.id);
+      const lastPmValue = Number(lastPm?.mileage ?? 0);
+      const dueAt = lastPmValue + VEHICLE_PM_INTERVAL_MILES;
+      const delta = dueAt - current;
+
+      let status: PmLifeStatus = "On Track";
+      if (current >= dueAt) status = "Overdue";
+      else if (delta <= VEHICLE_DUE_SOON_WINDOW_MILES) status = "Due Soon";
+
+      const pmLifePercent = clampPercent(100 - ((current - lastPmValue) / VEHICLE_PM_INTERVAL_MILES) * 100);
+      const oilAnchor = vehicleLastOilChangeMileage.get(v.id) ?? lastPmValue;
+      const derivedOilLifePercent = clampPercent(100 - ((current - oilAnchor) / VEHICLE_PM_INTERVAL_MILES) * 100);
+      const oilLifePercent = vehicleLastReportedOilLife.get(v.id) ?? derivedOilLifePercent;
+
+      rows.push({
+        assetId: v.id,
+        assetName: v.name || v.id,
+        assetType: "Vehicle",
+        currentValue: current,
+        unit: "miles",
+        lastPmValue: Number.isFinite(lastPmValue) ? lastPmValue : null,
+        lastPmDate: lastPm?.date ?? null,
+        pmDueDate: addMonthsToIso(lastPm?.date ?? null, 4),
+        dueAt,
+        status,
+        pmLifePercent,
+        oilLifePercent,
+        pmFormHref: `/vehicles/${encodeURIComponent(v.id)}/forms/preventative-maintenance`,
+        historyHref: `/vehicles/${encodeURIComponent(v.id)}/history`,
+      });
+    }
+
+    for (const e of equipment) {
+      const current = Number(e.current_hours ?? 0);
+      if (!Number.isFinite(current) || current < 0) continue;
+
+      const lastPm = equipmentLastPm.get(e.id);
+      const lastPmValue = Number(lastPm?.hours ?? 0);
+      const dueAt = lastPmValue + EQUIPMENT_PM_INTERVAL_HOURS;
+      const delta = dueAt - current;
+
+      let status: PmLifeStatus = "On Track";
+      if (current >= dueAt) status = "Overdue";
+      else if (delta <= EQUIPMENT_DUE_SOON_WINDOW_HOURS) status = "Due Soon";
+
+      const pmLifePercent = clampPercent(100 - ((current - lastPmValue) / EQUIPMENT_PM_INTERVAL_HOURS) * 100);
+
+      rows.push({
+        assetId: e.id,
+        assetName: e.name || e.id,
+        assetType: "Equipment",
+        currentValue: current,
+        unit: "hours",
+        lastPmValue: Number.isFinite(lastPmValue) ? lastPmValue : null,
+        lastPmDate: lastPm?.date ?? null,
+        pmDueDate: addMonthsToIso(lastPm?.date ?? null, 4),
+        dueAt,
+        status,
+        pmLifePercent,
+        oilLifePercent: pmLifePercent,
+        pmFormHref: `/equipment/${encodeURIComponent(e.id)}/forms/preventative-maintenance`,
+        historyHref: `/equipment/${encodeURIComponent(e.id)}/history`,
+      });
+    }
+
+    rows.sort((a, b) => {
+      const priority: Record<PmLifeStatus, number> = {
+        Overdue: 0,
+        "Due Soon": 1,
+        "On Track": 2,
+      };
+      if (priority[a.status] !== priority[b.status]) return priority[a.status] - priority[b.status];
+      return a.assetName.localeCompare(b.assetName);
+    });
+
+    return rows;
+  }, [equipment, equipmentPmEvents, vehiclePmEvents, vehicles]);
+
+  const filteredPmLifeRows = useMemo(() => {
+    const q = pmSearch.trim().toLowerCase();
+
+    return pmLifeRows.filter((row) => {
+      if (pmLifeStatusFilter !== "All" && row.status !== pmLifeStatusFilter) return false;
+      if (pmAssetTypeFilter !== "All") {
+        if (pmAssetTypeFilter === "Vehicles" && row.assetType !== "Vehicle") return false;
+        if (pmAssetTypeFilter === "Equipment" && row.assetType !== "Equipment") return false;
+      }
+
+      if (!q) return true;
+      const hay = [row.assetName, row.assetId, row.assetType].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [pmAssetTypeFilter, pmLifeRows, pmLifeStatusFilter, pmSearch]);
 
   const downtimeRows = useMemo(() => {
     const nowIso = new Date().toISOString();
@@ -1434,9 +1629,26 @@ export default function OpsPage({
         </>
       ) : null}
 
-      {!loading && !errorMessage && isAuthenticated && tab === "PM Due" ? (
+      {!loading && !errorMessage && isAuthenticated && tab === "Preventative Maintenance Overview" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>PM Due Board</div>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Preventative Maintenance Overview</div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {(["PM Due Board", "PM Life Board"] as PmBoardTab[]).map((board) => (
+              <button
+                key={board}
+                type="button"
+                onClick={() => setPmBoardTab(board)}
+                style={{
+                  ...actionButtonStyle,
+                  border: pmBoardTab === board ? "1px solid rgba(126,255,167,0.55)" : "1px solid rgba(255,255,255,0.14)",
+                  background: pmBoardTab === board ? "rgba(126,255,167,0.12)" : "rgba(255,255,255,0.03)",
+                }}
+              >
+                {board}
+              </button>
+            ))}
+          </div>
 
           <div
             style={{
@@ -1446,13 +1658,24 @@ export default function OpsPage({
               marginBottom: 12,
             }}
           >
-            <Field label="Status">
-              <select value={pmStatusFilter} onChange={(e) => setPmStatusFilter(e.target.value as PmStatusFilter)} style={inputStyle()}>
-                <option>All</option>
-                <option>Due Soon</option>
-                <option>Overdue</option>
-              </select>
-            </Field>
+            {pmBoardTab === "PM Due Board" ? (
+              <Field label="Status">
+                <select value={pmStatusFilter} onChange={(e) => setPmStatusFilter(e.target.value as PmStatusFilter)} style={inputStyle()}>
+                  <option>All</option>
+                  <option>Due Soon</option>
+                  <option>Overdue</option>
+                </select>
+              </Field>
+            ) : (
+              <Field label="Status">
+                <select value={pmLifeStatusFilter} onChange={(e) => setPmLifeStatusFilter(e.target.value as PmLifeStatusFilter)} style={inputStyle()}>
+                  <option>All</option>
+                  <option>On Track</option>
+                  <option>Due Soon</option>
+                  <option>Overdue</option>
+                </select>
+              </Field>
+            )}
 
             <Field label="Asset Type">
               <select value={pmAssetTypeFilter} onChange={(e) => setPmAssetTypeFilter(e.target.value as AssetTypeFilter)} style={inputStyle()}>
@@ -1472,8 +1695,62 @@ export default function OpsPage({
             </Field>
           </div>
 
-          {filteredPmRows.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No due or overdue PM units match the current filters.</div>
+          {pmBoardTab === "PM Due Board" ? (
+            filteredPmRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No due or overdue PM units match the current filters.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Asset</th>
+                      <th style={thStyle}>Type</th>
+                      <th style={thStyle}>Current</th>
+                      <th style={thStyle}>Last PM</th>
+                      <th style={thStyle}>Due At</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPmRows.map((row) => (
+                      <tr key={`${row.assetType}:${row.assetId}`}>
+                        <td style={tdStyle}>
+                          <div style={{ fontWeight: 800 }}>{row.assetName}</div>
+                          <div style={{ opacity: 0.72, fontSize: 12 }}>{row.assetId}</div>
+                        </td>
+                        <td style={tdStyle}>{row.assetType}</td>
+                        <td style={tdStyle}>
+                          {row.currentValue.toLocaleString()} {row.unit}
+                        </td>
+                        <td style={tdStyle}>
+                          {row.lastPmValue != null ? `${row.lastPmValue.toLocaleString()} ${row.unit}` : "—"}
+                          <div style={{ opacity: 0.72, fontSize: 12 }}>
+                            {row.lastPmDate ? formatDateTime(row.lastPmDate) : "No PM record"}
+                          </div>
+                        </td>
+                        <td style={tdStyle}>{row.dueAt.toLocaleString()} {row.unit}</td>
+                        <td style={tdStyle}>
+                          <span style={statusChipStyle(row.status === "Overdue")}>{row.status}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <Link href={row.pmFormHref} style={actionLinkStyle}>
+                              Go to PM Form
+                            </Link>
+                            <Link href={row.historyHref} style={actionLinkStyle}>
+                              View History
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : filteredPmLifeRows.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No PM lifecycle rows match the current filters.</div>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -1483,14 +1760,17 @@ export default function OpsPage({
                     <th style={thStyle}>Type</th>
                     <th style={thStyle}>Current</th>
                     <th style={thStyle}>Last PM</th>
+                    <th style={thStyle}>PM Due Date</th>
                     <th style={thStyle}>Due At</th>
+                    <th style={thStyle}>Oil Life %</th>
+                    <th style={thStyle}>PM Life %</th>
                     <th style={thStyle}>Status</th>
                     <th style={thStyle}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPmRows.map((row) => (
-                    <tr key={`${row.assetType}:${row.assetId}`}>
+                  {filteredPmLifeRows.map((row) => (
+                    <tr key={`pm-life:${row.assetType}:${row.assetId}`}>
                       <td style={tdStyle}>
                         <div style={{ fontWeight: 800 }}>{row.assetName}</div>
                         <div style={{ opacity: 0.72, fontSize: 12 }}>{row.assetId}</div>
@@ -1505,7 +1785,10 @@ export default function OpsPage({
                           {row.lastPmDate ? formatDateTime(row.lastPmDate) : "No PM record"}
                         </div>
                       </td>
+                      <td style={tdStyle}>{row.pmDueDate ? formatDateTime(row.pmDueDate) : "—"}</td>
                       <td style={tdStyle}>{row.dueAt.toLocaleString()} {row.unit}</td>
+                      <td style={tdStyle}>{row.oilLifePercent == null ? "—" : `${row.oilLifePercent}%`}</td>
+                      <td style={tdStyle}>{row.pmLifePercent}%</td>
                       <td style={tdStyle}>
                         <span style={statusChipStyle(row.status === "Overdue")}>{row.status}</span>
                       </td>
@@ -2081,7 +2364,7 @@ export default function OpsPage({
         </div>
       ) : null}
 
-      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "PM Due" && tab !== "Downtime" && tab !== "Failures" && tab !== "Performance" ? (
+      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "Preventative Maintenance Overview" && tab !== "Downtime" && tab !== "Failures" && tab !== "Performance" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
