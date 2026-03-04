@@ -378,6 +378,7 @@ export default function InspectionForm({
 
   const [inspectionDate, setInspectionDate] = useState(todayYYYYMMDD());
   const [mileage, setMileage] = useState("");
+  const [savedVehicleMileage, setSavedVehicleMileage] = useState<number | null>(null);
   const [employee, setEmployee] = useState("");
   const [leadApproverId, setLeadApproverId] = useState("");
   const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
@@ -498,7 +499,10 @@ export default function InspectionForm({
       setVehicleType(isVehicleType(raw) ? raw : "truck");
       const parsedMileage = Number(data?.mileage);
       if (Number.isFinite(parsedMileage) && parsedMileage > 0) {
+        setSavedVehicleMileage(parsedMileage);
         setMileage((prev) => (prev.trim() ? prev : String(parsedMileage)));
+      } else {
+        setSavedVehicleMileage(null);
       }
     })();
 
@@ -835,11 +839,39 @@ export default function InspectionForm({
     return false;
   }, [visibleSections, sectionState, exitingItems, exiting]);
 
+  const mileageConsistency = useMemo(() => {
+    const entered = Number(mileage);
+    if (!Number.isFinite(entered) || entered <= 0) {
+      return { failed: false, reason: "" };
+    }
+    if (!Number.isFinite(savedVehicleMileage) || (savedVehicleMileage ?? 0) <= 0) {
+      return { failed: false, reason: "" };
+    }
+    const baseline = Number(savedVehicleMileage);
+    if (entered < baseline) {
+      return {
+        failed: true,
+        reason: `Mileage entered (${entered.toLocaleString()}) is lower than tracked mileage (${baseline.toLocaleString()}).`,
+      };
+    }
+    const delta = entered - baseline;
+    if (delta > 100) {
+      return {
+        failed: true,
+        reason: `Mileage jump (${delta.toLocaleString()} mi) is greater than 100 miles.`,
+      };
+    }
+    return { failed: false, reason: "" };
+  }, [mileage, savedVehicleMileage]);
+
+  const hasInspectionFailures = defectsFound || mileageConsistency.failed;
+
   const statusHint = useMemo(() => {
-    if (defectsFound && inspectionStatus === "Pass")
-      return "Defects found — status should not be Pass.";
+    if (hasInspectionFailures && inspectionStatus === "Pass")
+      return "Failed items found — status should not be Pass.";
+    if (mileageConsistency.failed) return mileageConsistency.reason;
     return "";
-  }, [defectsFound, inspectionStatus]);
+  }, [hasInspectionFailures, inspectionStatus, mileageConsistency.failed, mileageConsistency.reason]);
 
   function setApplicable(secId: string, applicable: boolean) {
     setSectionState((prev) => ({
@@ -1193,12 +1225,12 @@ export default function InspectionForm({
     }
     if (!inspectionStatus) return alert("Inspection status is required.");
 
-    if (defectsFound && !notes.trim())
-      return alert("Notes are required when any item is marked Fail.");
+    if (hasInspectionFailures && !notes.trim())
+      return alert("Notes are required when any item is marked Fail or mileage consistency fails.");
 
-    if (defectsFound && inspectionStatus === "Pass") {
+    if (hasInspectionFailures && inspectionStatus === "Pass") {
       return alert(
-        "Defects were found — set Inspection Status to Fail or Out of Service."
+        "A failed condition was found — set Inspection Status to Fail or Out of Service."
       );
     }
 
@@ -1275,7 +1307,7 @@ export default function InspectionForm({
     const checklist = {
       sections: sectionState,
       exiting: exitingItems ? exiting : undefined,
-      defectsFound,
+      defectsFound: hasInspectionFailures,
       inspectionStatus,
       notes: notes.trim(),
       employee: employee.trim(),
@@ -1322,6 +1354,16 @@ export default function InspectionForm({
           linkedInspectionId: trailerVehicleLinks[id] ?? null,
         };
       }),
+      mileageConsistency: {
+        failed: mileageConsistency.failed,
+        reason: mileageConsistency.reason || null,
+        baselineMileage:
+          Number.isFinite(savedVehicleMileage) && (savedVehicleMileage ?? 0) > 0
+            ? Number(savedVehicleMileage)
+            : null,
+        enteredMileage: Number.isFinite(m) && m > 0 ? m : null,
+        maxAllowedDelta: 100,
+      },
       type,
     };
 
@@ -1491,6 +1533,16 @@ export default function InspectionForm({
                 placeholder="e.g. 130120"
                 style={inputStyle()}
               />
+              {savedVehicleMileage != null ? (
+                <div style={{ marginTop: 6, opacity: 0.72, fontSize: 12 }}>
+                  Current tracked mileage: <strong>{savedVehicleMileage.toLocaleString()}</strong>
+                </div>
+              ) : null}
+              {mileageConsistency.failed ? (
+                <div style={{ marginTop: 6, color: "#ff9d9d", fontSize: 12 }}>
+                  {mileageConsistency.reason} This is treated as a failed inspection condition.
+                </div>
+              ) : null}
             </div>
 
             <div>
@@ -3019,14 +3071,14 @@ export default function InspectionForm({
 
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Notes {defectsFound ? "*" : ""}
+                Notes {hasInspectionFailures ? "*" : ""}
               </div>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={
-                  defectsFound
-                    ? "Required when any item is marked Fail"
+                  hasInspectionFailures
+                    ? "Required when any item fails or mileage consistency fails"
                     : "Optional"
                 }
                 style={{ ...inputStyle(), minHeight: 90, resize: "vertical" }}

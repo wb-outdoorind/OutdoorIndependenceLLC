@@ -485,12 +485,16 @@ export default function EquipmentDetailPage() {
   const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
-  const canShowPmButton = isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate;
-  const canEditEquipment =
+  const canManageEquipmentMaintenance =
     userRole === "owner" ||
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
+  const canShowPmButton =
+    canManageEquipmentMaintenance &&
+    (isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate);
+  const canEditEquipment =
+    canManageEquipmentMaintenance;
   const canViewMechanicScore =
     userRole === "owner" ||
     userRole === "operations_manager" ||

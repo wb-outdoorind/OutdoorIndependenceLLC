@@ -743,13 +743,18 @@ export default function VehicleDetailPage() {
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
-  const canShowVehiclePmButton = (vehicle?.type ?? "").trim().toLowerCase() === "truck";
-  const isTruck = normalizeVehicleType(vehicle?.type ?? null) === "truck";
-  const canEditVehicle =
+  const canManageVehicleMaintenance =
     userRole === "owner" ||
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
+  const normalizedVehicleType = normalizeVehicleType(vehicle?.type ?? null);
+  const canShowVehiclePmButton =
+    canManageVehicleMaintenance &&
+    (normalizedVehicleType === "truck" || normalizedVehicleType === "car");
+  const isTruck = normalizedVehicleType === "truck";
+  const canEditVehicle = canManageVehicleMaintenance;
+  const canEditVehicleMileage = canManageVehicleMaintenance;
   const canViewMechanicScore =
     userRole === "owner" ||
     userRole === "operations_manager" ||
@@ -873,6 +878,21 @@ export default function VehicleDetailPage() {
         return setEditError("Mileage must be a valid non-negative number.");
       }
       parsedMileage = m;
+    }
+
+    const currentMileage =
+      typeof vehicle.mileage === "number" && Number.isFinite(vehicle.mileage)
+        ? vehicle.mileage
+        : null;
+    if (
+      parsedMileage !== null &&
+      currentMileage !== null &&
+      parsedMileage !== currentMileage
+    ) {
+      const confirmed = window.confirm(
+        "Are you sure you want to change the mileage to this vehicle?"
+      );
+      if (!confirmed) return;
     }
 
     setEditSaving(true);
@@ -1084,7 +1104,13 @@ export default function VehicleDetailPage() {
               </div>
               <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
-                <input value={editDraft.mileage} onChange={(e) => updateDraft("mileage", e.target.value)} style={detailInputStyle} inputMode="numeric" />
+                <input
+                  value={editDraft.mileage}
+                  onChange={(e) => updateDraft("mileage", e.target.value)}
+                  style={detailInputStyle}
+                  inputMode="numeric"
+                  disabled={!canEditVehicleMileage}
+                />
               </div>
               <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>

@@ -192,6 +192,15 @@ function gradeInspectionRecord(row: {
   const missingCount = missingFields.length;
   const isComplete = missingCount === 0;
   const score = clampScore(100 - missingCount * 20 - (hasNa ? 12 : 0));
+  const mileageConsistencyObj =
+    checklistObj.mileageConsistency && typeof checklistObj.mileageConsistency === "object"
+      ? (checklistObj.mileageConsistency as Record<string, unknown>)
+      : null;
+  const mileageConsistencyFailed = mileageConsistencyObj?.failed === true;
+  const mileageConsistencyReason =
+    typeof mileageConsistencyObj?.reason === "string"
+      ? mileageConsistencyObj.reason.trim()
+      : "";
 
   return {
     submittedAt: row.created_at,
@@ -203,11 +212,15 @@ function gradeInspectionRecord(row: {
     hasNa,
     missingCount,
     missingFields,
-    accountabilityFlag: false,
-    accountabilityReason: null,
+    accountabilityFlag: mileageConsistencyFailed,
+    accountabilityReason: mileageConsistencyFailed
+      ? mileageConsistencyReason || "Mileage consistency check failed on inspection."
+      : null,
     metadata: {
       overallStatus: row.overall_status ?? null,
       failCount: countInspectionFails(checklistObj),
+      mileageConsistencyFailed,
+      mileageConsistencyReason: mileageConsistencyReason || null,
     },
   };
 }

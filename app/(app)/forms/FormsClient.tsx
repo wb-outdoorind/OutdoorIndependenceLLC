@@ -70,6 +70,7 @@ type FormOption = {
   label: string;
   assetType: "vehicle" | "equipment";
   requiresMaintenancePermission: boolean;
+  requiresPmPermission?: boolean;
 };
 
 const FORM_OPTIONS: FormOption[] = [
@@ -87,7 +88,13 @@ const FORM_OPTIONS: FormOption[] = [
     assetType: "vehicle",
     requiresMaintenancePermission: true,
   },
-  { id: "vehicle_pm", label: "Vehicle Preventative Maintenance", assetType: "vehicle", requiresMaintenancePermission: false },
+  {
+    id: "vehicle_pm",
+    label: "Vehicle Preventative Maintenance",
+    assetType: "vehicle",
+    requiresMaintenancePermission: false,
+    requiresPmPermission: true,
+  },
   {
     id: "equipment_maintenance_request",
     label: "Equipment Maintenance Request",
@@ -100,7 +107,13 @@ const FORM_OPTIONS: FormOption[] = [
     assetType: "equipment",
     requiresMaintenancePermission: true,
   },
-  { id: "equipment_pm", label: "Equipment Preventative Maintenance", assetType: "equipment", requiresMaintenancePermission: false },
+  {
+    id: "equipment_pm",
+    label: "Equipment Preventative Maintenance",
+    assetType: "equipment",
+    requiresMaintenancePermission: false,
+    requiresPmPermission: true,
+  },
 ];
 
 const FULL_HISTORY_ROLES = new Set([
@@ -172,6 +185,16 @@ function canCreateMaintenanceForms(role: string | null | undefined) {
   return (role ?? "").trim() !== "apprentice";
 }
 
+function canCreatePmForms(role: string | null | undefined) {
+  const r = (role ?? "").trim();
+  return (
+    r === "owner" ||
+    r === "operations_manager" ||
+    r === "office_admin" ||
+    r === "mechanic"
+  );
+}
+
 function canViewFullHistory(role: string | null | undefined) {
   return FULL_HISTORY_ROLES.has((role ?? "").trim());
 }
@@ -239,7 +262,12 @@ export default function FormsClient({
 
   const allowedFormOptions = useMemo(() => {
     const canCreateMaintenance = canCreateMaintenanceForms(role);
-    return FORM_OPTIONS.filter((opt) => !opt.requiresMaintenancePermission || canCreateMaintenance);
+    const canCreatePm = canCreatePmForms(role);
+    return FORM_OPTIONS.filter((opt) => {
+      if (opt.requiresMaintenancePermission && !canCreateMaintenance) return false;
+      if (opt.requiresPmPermission && !canCreatePm) return false;
+      return true;
+    });
   }, [role]);
 
   const [selectedFormType, setSelectedFormType] = useState<FormType>("pre_trip");
@@ -573,7 +601,7 @@ export default function FormsClient({
             </div>
 
             <div style={{ opacity: 0.72, fontSize: 12 }}>
-              Maintenance request/log forms are hidden for Apprentice role.
+              Maintenance request/log forms are hidden for Apprentice role. Preventative Maintenance forms are visible to mechanic and higher roles.
             </div>
           </>
         )}

@@ -86,6 +86,7 @@ export default function MaintenanceRequestPage() {
 
   const [vehicleName, setVehicleName] = useState("");
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
+  const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
 
   const [requestDate, setRequestDate] = useState(todayYYYYMMDD());
   const [employee, setEmployee] = useState("");
@@ -153,7 +154,10 @@ export default function MaintenanceRequestPage() {
       setVehicleType(isVehicleType(data?.type ?? null) ? (data?.type as VehicleType) : "truck");
       const dbMileage = Number(data?.mileage);
       if (Number.isFinite(dbMileage) && dbMileage > 0) {
+        setCurrentVehicleMileage(dbMileage);
         setMileage((prev) => (prev.trim() ? prev : String(dbMileage)));
+      } else {
+        setCurrentVehicleMileage(null);
       }
     })();
 
@@ -241,6 +245,11 @@ export default function MaintenanceRequestPage() {
     if (!requestDate) return alert("Request Date is required.");
     if (!employee.trim()) return alert("Teammate is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
+    if (currentVehicleMileage != null && m < currentVehicleMileage) {
+      return alert(
+        `Mileage cannot be lower than the current tracked mileage (${currentVehicleMileage.toLocaleString()}).`
+      );
+    }
     if (!issueIdentifiedDuring) return alert("Issue Identified During is required.");
     if (!drivabilityStatus) return alert("Drivability / Operational Status is required.");
     if (!unitStatus) return alert("Unit Status is required.");
@@ -384,14 +393,21 @@ export default function MaintenanceRequestPage() {
             </Field>
 
             <Field label="Mileage *">
-              <input
-                value={mileage}
-                onChange={(e) => setMileage(e.target.value)}
-                inputMode="numeric"
-                placeholder="e.g. 130120"
-                style={inputStyle()}
-                required
-              />
+              <>
+                <input
+                  value={mileage}
+                  onChange={(e) => setMileage(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="e.g. 130120"
+                  style={inputStyle()}
+                  required
+                />
+                {currentVehicleMileage != null ? (
+                  <div style={{ marginTop: 6, opacity: 0.72, fontSize: 12 }}>
+                    Current tracked mileage: <strong>{currentVehicleMileage.toLocaleString()}</strong>
+                  </div>
+                ) : null}
+              </>
             </Field>
 
             <Field label="Teammate *">
