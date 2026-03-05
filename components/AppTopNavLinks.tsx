@@ -81,6 +81,31 @@ export default function AppTopNavLinks() {
     };
   }, []);
 
+  useEffect(() => {
+    function syncStickyTop() {
+      const header = document.querySelector(".app-topnav");
+      if (!(header instanceof HTMLElement)) return;
+      const rect = header.getBoundingClientRect();
+      const stickyTop = Math.max(0, Math.ceil(rect.bottom + 6));
+      document.documentElement.style.setProperty("--table-sticky-top", `${stickyTop}px`);
+    }
+
+    syncStickyTop();
+    const header = document.querySelector(".app-topnav");
+    let observer: ResizeObserver | null = null;
+    if (header instanceof HTMLElement && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => syncStickyTop());
+      observer.observe(header);
+    }
+    window.addEventListener("resize", syncStickyTop);
+    window.addEventListener("orientationchange", syncStickyTop);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", syncStickyTop);
+      window.removeEventListener("orientationchange", syncStickyTop);
+    };
+  }, [pathname, unreadCount, pendingApprovals.length, actualRole, viewAsRole]);
+
   if (pathname === "/settings") return null;
 
   const showViewAsBadge = Boolean(
