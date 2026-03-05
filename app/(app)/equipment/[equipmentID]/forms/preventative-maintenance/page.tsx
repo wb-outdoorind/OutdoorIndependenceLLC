@@ -7,6 +7,7 @@ import { createSupabaseBrowser } from "@/lib/supabase/client";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -644,6 +645,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -737,6 +739,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -802,6 +805,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
     }
@@ -836,6 +840,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       return;
     }
 
+    requestFormDraftClear();
     router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
   }
 

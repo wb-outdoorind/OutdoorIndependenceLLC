@@ -3,6 +3,7 @@ import BackButton from "@/components/BackButton";
 import AppPreferences from "@/components/AppPreferences";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
 import NetworkStatusBanner from "@/components/NetworkStatusBanner";
+import FormDraftManager from "@/components/FormDraftManager";
 import packageJson from "../package.json";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <MustChangePasswordGate />
           <NetworkStatusBanner />
           <BackButton />
+          <FormDraftManager />
           <div className="app-content">{children}</div>
           <footer className="app-footer">
             <div className="app-footer-inner">

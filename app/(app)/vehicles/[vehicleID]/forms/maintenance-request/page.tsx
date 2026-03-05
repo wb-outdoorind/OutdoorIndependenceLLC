@@ -7,6 +7,7 @@ import { loadVehicleContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -499,6 +500,8 @@ export default function MaintenanceRequestPage() {
     } catch (vehicleMileageError) {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
+
+    requestFormDraftClear();
 
     if (returnTo && savedRequestId && linkSectionId && linkItemKey) {
       const q = new URLSearchParams({

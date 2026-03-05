@@ -7,6 +7,8 @@ import { loadVehicleContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
+  requestFormDraftClear,
+  requestFormDraftSave,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -59,25 +61,6 @@ type StoredInspectionRecord = {
 
   employeeSignature: string;
   managerSignature?: string;
-};
-
-type InspectionDraftData = {
-  inspectionDate?: string;
-  mileage?: string;
-  employee?: string;
-  dashLightsOn?: string[];
-  sectionState?: StoredInspectionRecord["sections"];
-  itemExtraValues?: Record<string, string>;
-  failRequestLinks?: Record<string, string>;
-  exiting?: Record<string, ChoiceOrBlank>;
-  inspectionStatus?: "Pass" | "Fail - Maintenance Required" | "Out of Service" | "";
-  notes?: string;
-  employeeSignature?: string;
-  managerSignature?: string;
-  sectionEquipmentIds?: Record<string, string[]>;
-  trailerVehicleIds?: string[];
-  trailerVehicleLinks?: Record<string, string>;
-  leadApproverId?: string;
 };
 
 type ExtraFieldConfig = {
@@ -419,7 +402,6 @@ export default function InspectionForm({
 
   // Track the last vehicleType used to initialize; when it changes, rebuild
   const lastInitType = useRef<VehicleType>("truck");
-  const restoredDraftRef = useRef(false);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -481,7 +463,6 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
-  const [draftUserId, setDraftUserId] = useState<string | null>(null);
   const bypassLeadSignoff = canBypassLeadSignoff(currentUserRole);
 
   useEffect(() => {
@@ -510,66 +491,6 @@ export default function InspectionForm({
       active = false;
     };
   }, [vehicleId]);
-
-  useEffect(() => {
-    if (!vehicleId || restoredDraftRef.current) return;
-    let active = true;
-    void (async () => {
-      const supabase = createSupabaseBrowser();
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData.user?.id ?? null;
-      if (!active) return;
-      setDraftUserId(uid);
-
-      const applyDraft = (draft: InspectionDraftData) => {
-        if (typeof draft.inspectionDate === "string") setInspectionDate(draft.inspectionDate);
-        if (typeof draft.mileage === "string") setMileage(draft.mileage);
-        if (typeof draft.employee === "string") setEmployee(draft.employee);
-        if (Array.isArray(draft.dashLightsOn)) setDashLightsOn(draft.dashLightsOn);
-        if (draft.sectionState && typeof draft.sectionState === "object") setSectionState(draft.sectionState);
-        if (draft.itemExtraValues && typeof draft.itemExtraValues === "object") setItemExtraValues(draft.itemExtraValues);
-        if (draft.failRequestLinks && typeof draft.failRequestLinks === "object") setFailRequestLinks(draft.failRequestLinks);
-        if (draft.exiting && typeof draft.exiting === "object") setExiting(draft.exiting);
-        if (typeof draft.inspectionStatus === "string") setInspectionStatus(draft.inspectionStatus);
-        if (typeof draft.notes === "string") setNotes(draft.notes);
-        if (typeof draft.employeeSignature === "string") setEmployeeSignature(draft.employeeSignature);
-        if (typeof draft.managerSignature === "string") setManagerSignature(draft.managerSignature);
-        if (draft.sectionEquipmentIds && typeof draft.sectionEquipmentIds === "object") {
-          setSectionEquipmentIds(draft.sectionEquipmentIds);
-        }
-        if (Array.isArray(draft.trailerVehicleIds)) {
-          setTrailerVehicleIds(draft.trailerVehicleIds);
-        }
-        if (draft.trailerVehicleLinks && typeof draft.trailerVehicleLinks === "object") {
-          setTrailerVehicleLinks(draft.trailerVehicleLinks);
-        }
-        if (typeof draft.leadApproverId === "string") {
-          setLeadApproverId(draft.leadApproverId);
-        }
-      };
-
-      if (uid) {
-        const { data, error } = await supabase
-          .from("vehicle_inspection_drafts")
-          .select("draft")
-          .eq("user_id", uid)
-          .eq("vehicle_id", vehicleId)
-          .eq("inspection_type", type)
-          .maybeSingle();
-        if (!active) return;
-        if (!error && data?.draft && typeof data.draft === "object") {
-          applyDraft(data.draft as InspectionDraftData);
-        } else if (error) {
-          console.error("Failed to restore inspection draft:", error);
-        }
-      }
-      restoredDraftRef.current = true;
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [vehicleId, type]);
 
   useEffect(() => {
     let active = true;
@@ -1035,72 +956,12 @@ export default function InspectionForm({
     return null;
   }
 
-  async function resolveDraftUserId() {
-    if (draftUserId) return draftUserId;
-    const supabase = createSupabaseBrowser();
-    const { data: authData, error } = await supabase.auth.getUser();
-    if (error) {
-      console.error("Failed to resolve auth user for inspection draft:", error);
-      return null;
-    }
-    const uid = authData.user?.id ?? null;
-    if (uid) setDraftUserId(uid);
-    return uid;
-  }
-
   async function saveDraft() {
-    if (!vehicleId) return;
-    const draft = {
-      inspectionDate,
-      mileage,
-      employee,
-      leadApproverId,
-      dashLightsOn,
-      sectionState,
-      itemExtraValues,
-      failRequestLinks,
-      sectionEquipmentIds,
-      exiting,
-      inspectionStatus,
-      notes,
-      employeeSignature,
-      managerSignature,
-      trailerVehicleIds,
-      trailerVehicleLinks,
-    };
-
-    const uid = await resolveDraftUserId();
-    if (!uid) return;
-
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from("vehicle_inspection_drafts").upsert(
-      {
-        user_id: uid,
-        vehicle_id: vehicleId,
-        inspection_type: type,
-        draft,
-      },
-      { onConflict: "user_id,vehicle_id,inspection_type" }
-    );
-    if (error) {
-      console.error("Failed to save inspection draft:", error);
-    }
+    requestFormDraftSave();
   }
 
   async function clearDraft() {
-    if (!vehicleId) return;
-    const uid = await resolveDraftUserId();
-    if (!uid) return;
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase
-      .from("vehicle_inspection_drafts")
-      .delete()
-      .eq("user_id", uid)
-      .eq("vehicle_id", vehicleId)
-      .eq("inspection_type", type);
-    if (error) {
-      console.error("Failed to clear inspection draft:", error);
-    }
+    requestFormDraftClear();
   }
 
   function addTrailerVehicle(id: string) {

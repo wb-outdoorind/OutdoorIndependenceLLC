@@ -7,6 +7,7 @@ import { loadEquipmentContext } from "@/lib/assetContext";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -417,6 +418,7 @@ export default function EquipmentMaintenanceRequestPage() {
       }
     }
 
+    requestFormDraftClear();
     router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
   }
 

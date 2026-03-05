@@ -8,6 +8,7 @@ import { loadEquipmentContext } from "@/lib/assetContext";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -581,6 +582,7 @@ export default function EquipmentMaintenanceLogPage() {
       });
     }
 
+    requestFormDraftClear();
     router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
   }
 

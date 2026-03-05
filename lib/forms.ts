@@ -3,6 +3,19 @@
 import { createElement, useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
+export const FORM_DRAFT_SAVE_EVENT = "oi:form-draft-save";
+export const FORM_DRAFT_CLEAR_EVENT = "oi:form-draft-clear";
+
+export function requestFormDraftSave() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(FORM_DRAFT_SAVE_EVENT));
+}
+
+export function requestFormDraftClear() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(FORM_DRAFT_CLEAR_EVENT));
+}
+
 export function useFormExitGuard(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
@@ -12,7 +25,7 @@ export function useFormExitGuard(enabled = true) {
 
     const onPopState = () => {
       const shouldLeave = window.confirm(
-        "Leave this form? Unsaved entries will be discarded, and you will not be able to return to this draft."
+        "Leave this form? Your local draft will stay available and auto-restore when you return."
       );
       if (!shouldLeave) {
         window.history.pushState({ formGuard: true }, "", window.location.href);
@@ -32,7 +45,7 @@ export function useFormExitGuard(enabled = true) {
       if (!href || href.startsWith("#")) return;
 
       const shouldLeave = window.confirm(
-        "Leave this form? Unsaved entries will be discarded, and you will not be able to return to this draft."
+        "Leave this form? Your local draft will stay available and auto-restore when you return."
       );
       if (!shouldLeave) {
         event.preventDefault();
@@ -62,7 +75,7 @@ export function useFormExitGuard(enabled = true) {
 
 export function confirmLeaveForm() {
   return window.confirm(
-    "Leave this form? Unsaved entries will be discarded, and you will not be able to return to this draft."
+    "Leave this form? Your local draft will stay available and auto-restore when you return."
   );
 }
 

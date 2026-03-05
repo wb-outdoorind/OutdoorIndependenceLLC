@@ -105,6 +105,11 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function hasRole(role: string | null | undefined, allowed: string[]) {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return allowed.includes(normalized);
+}
+
 function mechanicScoreBand(score: number) {
   if (score <= 25) return "Intervention";
   if (score <= 50) return "Needs Review";
@@ -485,24 +490,26 @@ export default function EquipmentDetailPage() {
   const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
-  const canManageEquipmentMaintenance =
-    userRole === "owner" ||
-    userRole === "operations_manager" ||
-    userRole === "office_admin" ||
-    userRole === "mechanic";
+  const canManageEquipmentMaintenance = hasRole(userRole, [
+    "owner",
+    "operations_manager",
+    "office_admin",
+    "mechanic",
+  ]);
   const canShowPmButton =
     canManageEquipmentMaintenance &&
     (isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate);
   const canEditEquipment =
     canManageEquipmentMaintenance;
-  const canViewMechanicScore =
-    userRole === "owner" ||
-    userRole === "operations_manager" ||
-    userRole === "office_admin" ||
-    userRole === "mechanic";
-  const canEditMechanicScore = userRole === "mechanic";
-  const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
-  const canCreateMaintenanceRequest = userRole !== "apprentice";
+  const canViewMechanicScore = hasRole(userRole, [
+    "owner",
+    "operations_manager",
+    "office_admin",
+    "mechanic",
+  ]);
+  const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
+  const canViewScoreTrends = hasRole(userRole, ["owner", "mechanic"]);
+  const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canViewMechanicScore;
 
   function updateDraft<K extends keyof EquipmentEditDraft>(key: K, value: EquipmentEditDraft[K]) {

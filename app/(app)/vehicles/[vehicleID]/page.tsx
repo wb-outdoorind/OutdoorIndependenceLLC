@@ -146,6 +146,11 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function hasRole(role: string | null | undefined, allowed: string[]) {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return allowed.includes(normalized);
+}
+
 function mechanicScoreBand(score: number) {
   if (score <= 25) return "Intervention";
   if (score <= 50) return "Needs Review";
@@ -772,23 +777,25 @@ export default function VehicleDetailPage() {
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
-  const canManageVehicleMaintenance =
-    userRole === "owner" ||
-    userRole === "operations_manager" ||
-    userRole === "office_admin" ||
-    userRole === "mechanic";
+  const canManageVehicleMaintenance = hasRole(userRole, [
+    "owner",
+    "operations_manager",
+    "office_admin",
+    "mechanic",
+  ]);
   const canShowVehiclePmButton = canManageVehicleMaintenance;
   const isTruck = normalizedVehicleType === "truck";
   const canEditVehicle = canManageVehicleMaintenance;
   const canEditVehicleMileage = canManageVehicleMaintenance;
-  const canViewMechanicScore =
-    userRole === "owner" ||
-    userRole === "operations_manager" ||
-    userRole === "office_admin" ||
-    userRole === "mechanic";
-  const canEditMechanicScore = userRole === "mechanic";
-  const canViewScoreTrends = userRole === "owner" || userRole === "mechanic";
-  const canCreateMaintenanceRequest = userRole !== "apprentice";
+  const canViewMechanicScore = hasRole(userRole, [
+    "owner",
+    "operations_manager",
+    "office_admin",
+    "mechanic",
+  ]);
+  const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
+  const canViewScoreTrends = hasRole(userRole, ["owner", "mechanic"]);
+  const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canEditVehicle;
 
   const scoreTrend = useMemo(() => {

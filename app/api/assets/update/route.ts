@@ -35,11 +35,12 @@ type MutableEquipmentPatch = {
 };
 
 function canManageAssets(role: string | null | undefined) {
+  const normalized = (role ?? "").trim().toLowerCase();
   return (
-    role === "owner" ||
-    role === "operations_manager" ||
-    role === "office_admin" ||
-    role === "mechanic"
+    normalized === "owner" ||
+    normalized === "operations_manager" ||
+    normalized === "office_admin" ||
+    normalized === "mechanic"
   );
 }
 

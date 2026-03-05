@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -453,6 +454,7 @@ export default function VehiclePreventativeMaintenanceForm() {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
 
+    requestFormDraftClear();
     router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 

@@ -7,6 +7,7 @@ import { loadVehicleContext } from "@/lib/assetContext";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
+  requestFormDraftClear,
   UnsavedChangesBanner,
   useFormExitGuard,
   useUnsavedChangesState,
@@ -769,6 +770,7 @@ export default function MaintenanceLogPage() {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
 
+    requestFormDraftClear();
     router.replace(returnTo || `/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
