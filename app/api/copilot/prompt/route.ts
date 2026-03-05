@@ -3,6 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { canAccessCopilot } from "@/lib/copilotAccess";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
+import { pruneCopilotContextEvents } from "@/lib/copilotRetention";
 
 export const runtime = "nodejs";
 
@@ -274,6 +275,8 @@ export async function POST(req: Request) {
   if (responseInsertError) {
     return NextResponse.json({ error: responseInsertError.message }, { status: 500 });
   }
+
+  void pruneCopilotContextEvents(admin, userId).catch(() => undefined);
 
   return NextResponse.json({
     ok: true,

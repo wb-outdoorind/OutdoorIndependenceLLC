@@ -63,7 +63,10 @@ export default function CopilotBubble() {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [busy, setBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [syncErrorMessage, setSyncErrorMessage] = useState<string | null>(null);
+  const [sessionNote, setSessionNote] = useState("");
   const [contextSavedAt, setContextSavedAt] = useState<string | null>(null);
   const lastRouteSentRef = useRef<string>("");
 
@@ -137,6 +140,42 @@ export default function CopilotBubble() {
     }
   }
 
+  async function onSyncSessionNote() {
+    const trimmed = sessionNote.trim();
+    if (!trimmed) return;
+
+    setSyncBusy(true);
+    setSyncErrorMessage(null);
+    try {
+      const res = await fetch("/api/copilot/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...context,
+          payload: {
+            ...context.payload,
+            kind: "session_summary",
+            source: "manual_chat_sync",
+            summary: trimmed.slice(0, 2000),
+          },
+        }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setSyncErrorMessage(json.error || "Session sync failed.");
+        return;
+      }
+
+      setSessionNote("");
+      setContextSavedAt(new Date().toLocaleTimeString());
+    } catch (error) {
+      setSyncErrorMessage(error instanceof Error ? error.message : "Session sync failed.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   if (allowed !== true) return null;
 
   return (
@@ -189,6 +228,49 @@ export default function CopilotBubble() {
               </>
             ) : null}
           </div>
+
+          <textarea
+            value={sessionNote}
+            onChange={(e) => setSessionNote(e.target.value)}
+            placeholder="Paste key chat/session notes to sync this context across devices..."
+            style={{
+              width: "100%",
+              marginTop: 10,
+              minHeight: 64,
+              resize: "vertical",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.16)",
+              background: "rgba(255,255,255,0.03)",
+              color: "inherit",
+              padding: 10,
+              fontSize: 12,
+            }}
+          />
+
+          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => void onSyncSessionNote()}
+              disabled={syncBusy || !sessionNote.trim()}
+              style={{
+                border: "1px solid rgba(144,190,255,0.4)",
+                borderRadius: 10,
+                background: "rgba(21,54,106,0.45)",
+                color: "#eaf3ff",
+                fontWeight: 800,
+                padding: "7px 11px",
+                cursor: syncBusy ? "default" : "pointer",
+                opacity: syncBusy || !sessionNote.trim() ? 0.72 : 1,
+                fontSize: 12,
+              }}
+            >
+              {syncBusy ? "Syncing..." : "Sync Session Note"}
+            </button>
+          </div>
+
+          {syncErrorMessage ? (
+            <div style={{ marginTop: 8, color: "#ffb3b3", fontSize: 12 }}>{syncErrorMessage}</div>
+          ) : null}
 
           <textarea
             value={prompt}
@@ -291,4 +373,3 @@ export default function CopilotBubble() {
     </div>
   );
 }
-
