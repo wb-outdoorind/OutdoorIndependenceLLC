@@ -352,7 +352,7 @@ export default function InventoryReportsClient() {
         ) : lowStockItems.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No low-stock items.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", overflowY: "clip" }}>
             <table style={tableStyle}>
               <thead>
                 <tr>
@@ -411,7 +411,7 @@ export default function InventoryReportsClient() {
           ) : usageRows.length === 0 ? (
             <div style={{ opacity: 0.75 }}>No usage transactions in this date range.</div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "auto", overflowY: "clip" }}>
               <table style={tableStyle}>
                 <thead>
                   <tr>
