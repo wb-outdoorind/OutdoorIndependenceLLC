@@ -81,6 +81,7 @@ type MaintenanceRequestRow = {
 
 type MaintenanceLogStatus = "Closed" | "In Progress";
 type Role = AppRole;
+type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
 type InventoryItem = {
   id: string;
@@ -108,6 +109,14 @@ function canManagePartsUsage(role: Role | null) {
 
 function canQuickLogOverride(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
+
+function isVehicleType(value: string | null | undefined): value is VehicleType {
+  return value === "truck" || value === "car" || value === "skidsteer" || value === "loader";
+}
+
+function isHoursBasedVehicleType(value: VehicleType) {
+  return value === "skidsteer" || value === "loader";
 }
 
 /* =========================
@@ -140,6 +149,18 @@ function parseBodyFromDescription(raw: string | null) {
   return lines.slice(2).join("\n").trim();
 }
 
+function parseFieldValue(raw: string | null, field: string) {
+  if (!raw) return "";
+  const prefix = `${field}:`;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim();
+    }
+  }
+  return "";
+}
+
 /* =========================
    Page
 ========================= */
@@ -152,7 +173,11 @@ export default function MaintenanceLogPage() {
   const sp = useSearchParams();
 
   const vehicleId = params?.vehicleID ? decodeURIComponent(params.vehicleID) : "";
-  const requestId = sp?.get("requestId") ? decodeURIComponent(sp.get("requestId")!) : "";
+  const queryRequestId = sp?.get("requestId") ? decodeURIComponent(sp.get("requestId")!) : "";
+  const editId = sp?.get("editId") ? decodeURIComponent(sp.get("editId")!) : "";
+  const rawReturnTo = (sp?.get("returnTo") || "").trim();
+  const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : "";
+  const isEditMode = editId.length > 0;
 
   const [title, setTitle] = useState("");
   const [mileage, setMileage] = useState("");
@@ -183,9 +208,14 @@ export default function MaintenanceLogPage() {
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
+  const [linkedRequestId, setLinkedRequestId] = useState(queryRequestId);
+  const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
+  const usesHours = isHoursBasedVehicleType(vehicleType);
+  const readingLabel = usesHours ? "Hours" : "Mileage";
+  const nextDueLabel = usesHours ? "Next Due Hours" : "Next Due Mileage";
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
 
@@ -199,6 +229,11 @@ export default function MaintenanceLogPage() {
       const { data: vehicleRow, error: vehicleErr } = await loadVehicleContext(supabase, vehicleId);
       if (!active) return;
       if (!vehicleErr) {
+        if (isVehicleType(vehicleRow?.type ?? null)) {
+          setVehicleType(vehicleRow?.type as VehicleType);
+        } else {
+          setVehicleType("truck");
+        }
         const m = Number(vehicleRow?.mileage);
         if (Number.isFinite(m) && m > 0) {
           setCurrentVehicleMileage(m);
@@ -206,77 +241,168 @@ export default function MaintenanceLogPage() {
         }
       }
 
-      if (!requestId) return;
-
-      const [requestRes, existingLogRes] = await Promise.all([
-        supabase
-          .from("maintenance_requests")
-          .select("id,vehicle_id,created_at,status,urgency,system_affected,drivability,description")
-          .eq("id", requestId)
-          .eq("vehicle_id", vehicleId)
-          .maybeSingle(),
-        supabase
+      if (isEditMode) {
+        const { data: logRow, error: logError } = await supabase
           .from("maintenance_logs")
-          .select("id")
-          .eq("request_id", requestId)
-          .limit(1),
-      ]);
-      if (!active) return;
+          .select("id,created_at,vehicle_id,request_id,mileage,status_update,mechanic_self_score,notes")
+          .eq("id", editId)
+          .eq("vehicle_id", vehicleId)
+          .maybeSingle();
+        if (!active) return;
+        if (logError || !logRow) {
+          console.error("Failed loading maintenance log for edit:", logError);
+          return;
+        }
 
-      if (requestRes.error) {
-        console.error("Failed loading linked maintenance request:", requestRes.error);
+        const parsedTitle = parseFieldValue(logRow.notes, "Title");
+        const parsedServiceDate = parseFieldValue(logRow.notes, "Service Date");
+        const parsedVendor = parseFieldValue(logRow.notes, "Vendor");
+        const parsedInvoice = parseFieldValue(logRow.notes, "Invoice");
+        const parsedLaborCost = parseFieldValue(logRow.notes, "Labor Cost");
+        const parsedPartsCost = parseFieldValue(logRow.notes, "Parts Cost");
+        const parsedNextDueMileage = parseFieldValue(logRow.notes, "Next Due Mileage");
+        const parsedNextDueHours = parseFieldValue(logRow.notes, "Next Due Hours");
+        const parsedResetOilLife = parseFieldValue(logRow.notes, "Reset Oil Life");
+
+        setLinkedRequestId(logRow.request_id ?? "");
+        setTitle(parsedTitle || "Maintenance Log");
+        setMileage(Number.isFinite(Number(logRow.mileage)) ? String(logRow.mileage) : "");
+        setStatus(
+          logRow.status_update === "Closed" || logRow.status_update === "In Progress"
+            ? logRow.status_update
+            : ""
+        );
+        setMechanicSelfScore(
+          Number.isFinite(Number(logRow.mechanic_self_score)) ? String(logRow.mechanic_self_score) : ""
+        );
+        setNotes(logRow.notes ?? "");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(parsedServiceDate)) {
+          setServiceDate(parsedServiceDate);
+        } else if (typeof logRow.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(logRow.created_at)) {
+          setServiceDate(logRow.created_at.slice(0, 10));
+        }
+        setVendorName(parsedVendor);
+        setInvoiceNumber(parsedInvoice);
+        setLaborCost(parsedLaborCost);
+        setPartsCost(parsedPartsCost);
+        setNextDueMileage(parsedNextDueMileage || parsedNextDueHours);
+        setResetOilLife(parsedResetOilLife.toLowerCase() === "yes");
+      } else if (queryRequestId) {
+        const [requestRes, existingLogRes] = await Promise.all([
+          supabase
+            .from("maintenance_requests")
+            .select("id,vehicle_id,created_at,status,urgency,system_affected,drivability,description")
+            .eq("id", queryRequestId)
+            .eq("vehicle_id", vehicleId)
+            .maybeSingle(),
+          supabase
+            .from("maintenance_logs")
+            .select("id")
+            .eq("request_id", queryRequestId)
+            .limit(1),
+        ]);
+        if (!active) return;
+
+        if (requestRes.error) {
+          console.error("Failed loading linked maintenance request:", requestRes.error);
+        }
+
+        const reqRow = requestRes.data as MaintenanceRequestRow | null;
+        const req = reqRow
+          ? ({
+              id: reqRow.id,
+              vehicleId: reqRow.vehicle_id,
+              createdAt: reqRow.created_at,
+              requestDate: reqRow.created_at.slice(0, 10),
+              employee: "",
+              drivabilityStatus: (reqRow.drivability as DrivabilityStatus) || "Yes – Drivable",
+              systemAffected: (reqRow.system_affected as SystemAffected) || "Other",
+              urgency: (reqRow.urgency as Urgency) || "Low",
+              title: parseTitleFromDescription(reqRow.description),
+              description: parseBodyFromDescription(reqRow.description),
+              status:
+                reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
+                  ? reqRow.status
+                  : "Open",
+            } as MaintenanceRequestRecord)
+          : null;
+        setLinkedRequest(req);
+
+        const hasExistingLog = (existingLogRes.data ?? []).length > 0;
+        if (hasExistingLog) {
+          alert("This request already has a maintenance log. Opening the vehicle instead.");
+          router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+          return;
+        }
+
+        if (req) {
+          setTitle((prev) => (prev.trim() ? prev : req.title));
+          setNotes((prev) =>
+            prev.trim()
+              ? prev
+              : [
+                  `From Request (${req.id})`,
+                  `Urgency: ${req.urgency}`,
+                  `System: ${req.systemAffected}`,
+                  `Drivability: ${req.drivabilityStatus}`,
+                  "",
+                  "Issue Description:",
+                  req.description,
+                ].join("\n")
+          );
+        }
       }
-
-      const reqRow = requestRes.data as MaintenanceRequestRow | null;
-      const req = reqRow
-        ? ({
-            id: reqRow.id,
-            vehicleId: reqRow.vehicle_id,
-            createdAt: reqRow.created_at,
-            requestDate: reqRow.created_at.slice(0, 10),
-            employee: "",
-            drivabilityStatus: (reqRow.drivability as DrivabilityStatus) || "Yes – Drivable",
-            systemAffected: (reqRow.system_affected as SystemAffected) || "Other",
-            urgency: (reqRow.urgency as Urgency) || "Low",
-            title: parseTitleFromDescription(reqRow.description),
-            description: parseBodyFromDescription(reqRow.description),
-            status:
-              reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
-                ? reqRow.status
-                : "Open",
-          } as MaintenanceRequestRecord)
-        : null;
-      setLinkedRequest(req);
-
-      const hasExistingLog = (existingLogRes.data ?? []).length > 0;
-      if (hasExistingLog) {
-        alert("This request already has a maintenance log. Opening the vehicle instead.");
-        router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
-        return;
-      }
-
-      if (!req) return;
-
-      setTitle((prev) => (prev.trim() ? prev : req.title));
-      setNotes((prev) =>
-        prev.trim()
-          ? prev
-          : [
-              `From Request (${req.id})`,
-              `Urgency: ${req.urgency}`,
-              `System: ${req.systemAffected}`,
-              `Drivability: ${req.drivabilityStatus}`,
-              "",
-              "Issue Description:",
-              req.description,
-            ].join("\n")
-      );
     })();
 
     return () => {
       active = false;
     };
-  }, [vehicleId, requestId, router]);
+  }, [editId, isEditMode, queryRequestId, router, vehicleId]);
+
+  useEffect(() => {
+    if (!vehicleId || !linkedRequestId) return;
+    let active = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select("id,vehicle_id,created_at,status,urgency,system_affected,drivability,description")
+        .eq("id", linkedRequestId)
+        .eq("vehicle_id", vehicleId)
+        .maybeSingle();
+      if (!active) return;
+      if (error || !data) {
+        if (error) {
+          console.error("Failed loading linked maintenance request:", error);
+        }
+        setLinkedRequest(null);
+        return;
+      }
+
+      const reqRow = data as MaintenanceRequestRow;
+      setLinkedRequest({
+        id: reqRow.id,
+        vehicleId: reqRow.vehicle_id,
+        createdAt: reqRow.created_at,
+        requestDate: reqRow.created_at.slice(0, 10),
+        employee: "",
+        drivabilityStatus: (reqRow.drivability as DrivabilityStatus) || "Yes – Drivable",
+        systemAffected: (reqRow.system_affected as SystemAffected) || "Other",
+        urgency: (reqRow.urgency as Urgency) || "Low",
+        title: parseTitleFromDescription(reqRow.description),
+        description: parseBodyFromDescription(reqRow.description),
+        status:
+          reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
+            ? reqRow.status
+            : "Open",
+      });
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [linkedRequestId, vehicleId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -446,20 +572,20 @@ export default function MaintenanceLogPage() {
     }
 
     const m = Number(mileage);
+    const effectiveRequestId = linkedRequestId.trim();
     if (!title.trim()) return alert("Please enter a title (what was done).");
-    if (!Number.isFinite(m) || m <= 0) return alert("Please enter a valid mileage.");
+    if (!Number.isFinite(m) || m <= 0) return alert(`Please enter valid ${readingLabel.toLowerCase()}.`);
     if (!status) return alert("Please select a status.");
-    if (!requestId && !useQuickLogOverride) {
+    if (!isEditMode && !effectiveRequestId && !useQuickLogOverride) {
       return alert("Link this log to a maintenance request, or enable Quick Maintenance Log Override.");
     }
-    if (!requestId && useQuickLogOverride && !canUseQuickOverride) {
+    if (!isEditMode && !effectiveRequestId && useQuickLogOverride && !canUseQuickOverride) {
       return alert("You do not have permission to create a quick maintenance log.");
     }
 
-    // mileage rollback guard
     if (currentVehicleMileage != null && m < currentVehicleMileage) {
       return alert(
-        `Mileage cannot be less than the current stored vehicle mileage (${currentVehicleMileage}).`
+        `${readingLabel} cannot be less than the current stored value (${currentVehicleMileage}).`
       );
     }
 
@@ -473,48 +599,72 @@ export default function MaintenanceLogPage() {
 
     const l = Number(laborCost);
     const p = Number(partsCost);
+    const notesValue = notes.trim()
+      ? notes.trim()
+      : [
+          `Title: ${title.trim()}`,
+          serviceDate ? `Service Date: ${serviceDate}` : "",
+          vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
+          invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
+          Number.isFinite(l) ? `Labor Cost: ${l}` : "",
+          Number.isFinite(p) ? `Parts Cost: ${p}` : "",
+          totalCost.trim() ? `Total Cost: ${totalCost}` : "",
+          nextDueMileage.trim() ? `${nextDueLabel}: ${nextDueMileage.trim()}` : "",
+          resetOilLife ? "Reset Oil Life: Yes" : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
     const supabase = createSupabaseBrowser();
-    const { data: insertedLog, error } = await supabase
-      .from("maintenance_logs")
-      .insert({
-      vehicle_id: vehicleId,
-      request_id: requestId || null,
-      mechanic_self_score: parsedMechanicSelfScore,
-      mileage: m,
-      notes: notes.trim()
-        ? notes.trim()
-        : [
-            `Title: ${title.trim()}`,
-            serviceDate ? `Service Date: ${serviceDate}` : "",
-            vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
-            invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
-            Number.isFinite(l) ? `Labor Cost: ${l}` : "",
-            Number.isFinite(p) ? `Parts Cost: ${p}` : "",
-            totalCost.trim() ? `Total Cost: ${totalCost}` : "",
-            nextDueMileage.trim() ? `Next Due Mileage: ${nextDueMileage.trim()}` : "",
-            resetOilLife ? "Reset Oil Life: Yes" : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-      status_update: status,
-      })
-      .select("id")
-      .single();
+    let savedLogId = editId;
+    let error: { message: string } | null = null;
+
+    if (isEditMode) {
+      const { data: updatedLog, error: updateError } = await supabase
+        .from("maintenance_logs")
+        .update({
+          request_id: effectiveRequestId || null,
+          mechanic_self_score: parsedMechanicSelfScore,
+          mileage: m,
+          notes: notesValue,
+          status_update: status,
+        })
+        .eq("id", editId)
+        .eq("vehicle_id", vehicleId)
+        .select("id")
+        .maybeSingle();
+      error = updateError;
+      savedLogId = updatedLog?.id ?? editId;
+    } else {
+      const { data: insertedLog, error: insertError } = await supabase
+        .from("maintenance_logs")
+        .insert({
+          vehicle_id: vehicleId,
+          request_id: effectiveRequestId || null,
+          mechanic_self_score: parsedMechanicSelfScore,
+          mileage: m,
+          notes: notesValue,
+          status_update: status,
+        })
+        .select("id")
+        .single();
+      error = insertError;
+      savedLogId = insertedLog?.id ?? "";
+    }
 
     if (error) {
-      console.error("Maintenance log insert failed:", error);
+      console.error("Maintenance log save failed:", error);
       setSubmitError(error.message);
       return;
     }
 
-    if (requestId) {
+    if (effectiveRequestId) {
       const { error: requestUpdateError } = await supabase
         .from("maintenance_requests")
         .update({
           status: status === "Closed" ? "Closed" : "In Progress",
         })
-        .eq("id", requestId);
+        .eq("id", effectiveRequestId);
 
       if (requestUpdateError) {
         console.error("Maintenance request status update failed:", requestUpdateError);
@@ -556,7 +706,7 @@ export default function MaintenanceLogPage() {
         change_qty: -Math.abs(part.quantity_used),
         reason: "usage",
         reference_type: "maintenance_log",
-        reference_id: insertedLog.id,
+        reference_id: savedLogId,
         notes: null,
         created_by: authData.user.id,
       }));
@@ -583,7 +733,7 @@ export default function MaintenanceLogPage() {
         action: "inventory_usage",
         table_name: "inventory_transactions",
         meta: {
-          maintenance_log_id: insertedLog.id,
+          maintenance_log_id: savedLogId,
           items: partsUsed.map((part) => ({
             item_id: part.item_id,
             qty: part.quantity_used,
@@ -619,29 +769,29 @@ export default function MaintenanceLogPage() {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
 
-    router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
+    router.replace(returnTo || `/vehicles/${encodeURIComponent(vehicleId)}`);
   }
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Maintenance Log</h1>
+      <h1 style={{ marginBottom: 6 }}>{isEditMode ? "Edit Maintenance Log" : "Maintenance Log"}</h1>
       <div style={{ opacity: 0.75, lineHeight: 1.4 }}>
         Vehicle ID: <strong>{vehicleId || "(missing)"}</strong>
-        {requestId ? (
+        {linkedRequestId ? (
           <>
             {" "}
-            • Linked Request: <strong>{requestId}</strong>
+            • Linked Request: <strong>{linkedRequestId}</strong>
           </>
         ) : null}
       </div>
 
-      {requestId && !linkedRequest ? (
+      {linkedRequestId && !linkedRequest ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.9 }}>
           Could not find the linked request for this vehicle. You can still log manually.
         </div>
       ) : null}
 
-      {!requestId ? (
+      {!isEditMode && !linkedRequestId ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.92 }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>
             No linked maintenance request
@@ -684,7 +834,7 @@ export default function MaintenanceLogPage() {
               />
             </Field>
 
-            <Field label="Mileage *">
+            <Field label={`${readingLabel} *`}>
               <input
                 value={mileage}
                 onChange={(e) => setMileage(e.target.value)}
@@ -695,7 +845,7 @@ export default function MaintenanceLogPage() {
               />
               {currentVehicleMileage != null ? (
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-                  Current stored mileage: <strong>{currentVehicleMileage}</strong>
+                  Current stored {readingLabel.toLowerCase()}: <strong>{currentVehicleMileage}</strong>
                 </div>
               ) : null}
             </Field>
@@ -733,7 +883,7 @@ export default function MaintenanceLogPage() {
               </label>
             </Field>
 
-            <Field label="Next Due Mileage (optional)">
+            <Field label={`${nextDueLabel} (optional)`}>
               <input
                 value={nextDueMileage}
                 onChange={(e) => setNextDueMileage(e.target.value)}
@@ -987,7 +1137,7 @@ export default function MaintenanceLogPage() {
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle}>
-            Save Maintenance Log
+            {isEditMode ? "Save Changes" : "Save Maintenance Log"}
           </button>
 
           <button

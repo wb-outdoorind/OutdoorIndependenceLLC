@@ -14,6 +14,7 @@ type AssetTypeFilter = "All" | "Vehicles" | "Equipment";
 type VehicleRow = {
   id: string;
   name: string;
+  type: string | null;
   year: number | null;
   status: string | null;
   mileage: number | null;
@@ -159,9 +160,35 @@ type AssetHealthRow = {
 };
 
 const VEHICLE_PM_INTERVAL_MILES = 5000;
+const SKID_LOADER_PM_INTERVAL_HOURS = 200;
 const EQUIPMENT_PM_INTERVAL_HOURS = 250;
 const VEHICLE_DUE_SOON_WINDOW_MILES = Math.max(100, Math.round(VEHICLE_PM_INTERVAL_MILES * 0.1));
 const EQUIPMENT_DUE_SOON_WINDOW_HOURS = Math.max(10, Math.round(EQUIPMENT_PM_INTERVAL_HOURS * 0.1));
+
+function normalizeVehicleType(value: string | null | undefined) {
+  const type = (value ?? "").trim().toLowerCase();
+  if (type === "skidsteer" || type === "skid steer" || type === "skid_steer") return "skidsteer";
+  if (type === "loader") return "loader";
+  if (type === "car") return "car";
+  return "truck";
+}
+
+function isHoursBasedVehicleType(value: string | null | undefined) {
+  const type = normalizeVehicleType(value);
+  return type === "skidsteer" || type === "loader";
+}
+
+function vehiclePmInterval(value: string | null | undefined) {
+  return isHoursBasedVehicleType(value) ? SKID_LOADER_PM_INTERVAL_HOURS : VEHICLE_PM_INTERVAL_MILES;
+}
+
+function vehicleDueSoonWindow(value: string | null | undefined) {
+  const interval = vehiclePmInterval(value);
+  if (isHoursBasedVehicleType(value)) {
+    return Math.max(10, Math.round(interval * 0.1));
+  }
+  return VEHICLE_DUE_SOON_WINDOW_MILES;
+}
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -436,7 +463,7 @@ export default function OpsPage({
         };
 
         const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehiclePmRes, vehicleLogsRes, equipmentLogsRes, pmWaiversRes] = await Promise.all([
-          supabase.from("vehicles").select("id,name,year,status,mileage,updated_at"),
+          supabase.from("vehicles").select("id,name,type,year,status,mileage,updated_at"),
           supabase.from("equipment").select("id,name,year,status,current_hours,updated_at"),
           fetchRequestsWithOptionalClosedAt("maintenance_requests", "vehicle_id"),
           fetchRequestsWithOptionalClosedAt("equipment_maintenance_requests", "equipment_id"),
@@ -674,12 +701,14 @@ export default function OpsPage({
 
       const lastPm = vehicleLastPm.get(v.id);
       const lastValue = Number(lastPm?.mileage ?? 0);
-      const dueAt = lastValue + VEHICLE_PM_INTERVAL_MILES;
+      const interval = vehiclePmInterval(v.type);
+      const dueSoonWindow = vehicleDueSoonWindow(v.type);
+      const dueAt = lastValue + interval;
       const delta = dueAt - current;
 
       let status: "Due Soon" | "Overdue" | null = null;
       if (current >= dueAt) status = "Overdue";
-      else if (delta <= VEHICLE_DUE_SOON_WINDOW_MILES) status = "Due Soon";
+      else if (delta <= dueSoonWindow) status = "Due Soon";
 
       if (!status) continue;
       const rowKey = `vehicle:${v.id}:${Math.round(dueAt)}`;
@@ -690,7 +719,7 @@ export default function OpsPage({
         assetName: v.name || v.id,
         assetType: "Vehicle",
         currentValue: current,
-        unit: "miles",
+        unit: isHoursBasedVehicleType(v.type) ? "hours" : "miles",
         lastPmValue: Number.isFinite(lastValue) ? lastValue : null,
         lastPmDate: lastPm?.date ?? null,
         dueAt,
@@ -861,16 +890,18 @@ export default function OpsPage({
 
       const lastPm = vehicleLastPm.get(v.id);
       const lastPmValue = Number(lastPm?.mileage ?? 0);
-      const dueAt = lastPmValue + VEHICLE_PM_INTERVAL_MILES;
+      const interval = vehiclePmInterval(v.type);
+      const dueSoonWindow = vehicleDueSoonWindow(v.type);
+      const dueAt = lastPmValue + interval;
       const delta = dueAt - current;
 
       let status: PmLifeStatus = "On Track";
       if (current >= dueAt) status = "Overdue";
-      else if (delta <= VEHICLE_DUE_SOON_WINDOW_MILES) status = "Due Soon";
+      else if (delta <= dueSoonWindow) status = "Due Soon";
 
-      const pmLifePercent = clampPercent(100 - ((current - lastPmValue) / VEHICLE_PM_INTERVAL_MILES) * 100);
+      const pmLifePercent = clampPercent(100 - ((current - lastPmValue) / interval) * 100);
       const oilAnchor = vehicleLastOilChangeMileage.get(v.id) ?? lastPmValue;
-      const derivedOilLifePercent = clampPercent(100 - ((current - oilAnchor) / VEHICLE_PM_INTERVAL_MILES) * 100);
+      const derivedOilLifePercent = clampPercent(100 - ((current - oilAnchor) / interval) * 100);
       const oilLifePercent = vehicleLastReportedOilLife.get(v.id) ?? derivedOilLifePercent;
 
       rows.push({
@@ -878,7 +909,7 @@ export default function OpsPage({
         assetName: v.name || v.id,
         assetType: "Vehicle",
         currentValue: current,
-        unit: "miles",
+        unit: isHoursBasedVehicleType(v.type) ? "hours" : "miles",
         lastPmValue: Number.isFinite(lastPmValue) ? lastPmValue : null,
         lastPmDate: lastPm?.date ?? null,
         pmDueDate: addMonthsToIso(lastPm?.date ?? null, 4),

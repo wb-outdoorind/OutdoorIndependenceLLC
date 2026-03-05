@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type EquipmentRequestRow = {
   id: string;
@@ -48,6 +49,11 @@ type TimelineItem = {
 };
 
 type FilterValue = "All" | TimelineType;
+type Role = AppRole;
+
+function canManageMaintenance(role: Role | null) {
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
 
 function parseTitleAndDescription(raw: string | null) {
   if (!raw) return { title: "", description: "" };
@@ -138,6 +144,40 @@ export default function EquipmentHistoryPage() {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
   const [pmError, setPmError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  const [actionBusyKey, setActionBusyKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!active) return;
+
+      if (!authData.user) {
+        setUserRole("employee");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (!active) return;
+      setUserRole(
+        resolveEffectiveRole(
+          (profile?.role as Role | undefined) ?? "employee",
+          readRoleViewOverride()
+        ) as Role
+      );
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -299,6 +339,45 @@ export default function EquipmentHistoryPage() {
     if (filter === "All") return items;
     return items.filter((x) => x.type === filter);
   }, [items, filter]);
+  const canManage = canManageMaintenance(userRole);
+
+  async function deleteEquipmentRequest(id: string) {
+    if (!canManage) return;
+    const ok = window.confirm("Delete this maintenance request?");
+    if (!ok) return;
+    setActionBusyKey(`request:${id}`);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("equipment_maintenance_requests")
+      .delete()
+      .eq("id", id)
+      .eq("equipment_id", equipmentId);
+    setActionBusyKey(null);
+    if (error) {
+      alert(error.message || "Failed to delete maintenance request.");
+      return;
+    }
+    setRequestRows((prev) => prev.filter((row) => row.id !== id));
+  }
+
+  async function deleteEquipmentLog(id: string) {
+    if (!canManage) return;
+    const ok = window.confirm("Delete this maintenance log?");
+    if (!ok) return;
+    setActionBusyKey(`log:${id}`);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("equipment_maintenance_logs")
+      .delete()
+      .eq("id", id)
+      .eq("equipment_id", equipmentId);
+    setActionBusyKey(null);
+    if (error) {
+      alert(error.message || "Failed to delete maintenance log.");
+      return;
+    }
+    setLogRows((prev) => prev.filter((row) => row.id !== id));
+  }
 
   return (
     <main style={{ paddingBottom: 32 }}>
@@ -377,33 +456,90 @@ export default function EquipmentHistoryPage() {
           </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {filtered.map((x) => (
-              <div
-                key={`${x.type}:${x.id}`}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 14,
-                  padding: 12,
-                  background: "rgba(255,255,255,0.02)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={badgeStyle(x.type)}>{x.type}</span>
-                    <div style={{ fontWeight: 900 }}>{x.title}</div>
+            {filtered.map((x) => {
+              const isManageableType = x.type === "Maintenance Request" || x.type === "Maintenance Log";
+              const canEditDelete = canManage && isManageableType;
+              const backToHistory = `/equipment/${encodeURIComponent(equipmentId)}/history`;
+              const editHref =
+                x.type === "Maintenance Request"
+                  ? `/equipment/${encodeURIComponent(equipmentId)}/forms/maintenance-request?editId=${encodeURIComponent(x.id)}&returnTo=${encodeURIComponent(backToHistory)}`
+                  : x.type === "Maintenance Log"
+                    ? `/equipment/${encodeURIComponent(equipmentId)}/forms/maintenance-log?editId=${encodeURIComponent(x.id)}&returnTo=${encodeURIComponent(backToHistory)}`
+                    : "";
+
+              return (
+                <div
+                  key={`${x.type}:${x.id}`}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 14,
+                    padding: 12,
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={badgeStyle(x.type)}>{x.type}</span>
+                      <div style={{ fontWeight: 900 }}>{x.title}</div>
+                    </div>
+
+                    <div style={{ opacity: 0.75, fontSize: 13 }}>{formatDateTime(x.createdAt)}</div>
                   </div>
 
-                  <div style={{ opacity: 0.75, fontSize: 13 }}>{formatDateTime(x.createdAt)}</div>
-                </div>
+                  <div style={{ marginTop: 6, opacity: 0.82, fontSize: 13 }}>
+                    {typeof x.hours === "number" ? <span>{x.hours.toLocaleString()} hrs</span> : null}
+                    {x.subtitle ? <span>{typeof x.hours === "number" ? " • " : ""}{x.subtitle}</span> : null}
+                  </div>
 
-                <div style={{ marginTop: 6, opacity: 0.82, fontSize: 13 }}>
-                  {typeof x.hours === "number" ? <span>{x.hours.toLocaleString()} hrs</span> : null}
-                  {x.subtitle ? <span>{typeof x.hours === "number" ? " • " : ""}{x.subtitle}</span> : null}
-                </div>
+                  {x.notes ? <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{x.notes}</div> : null}
 
-                {x.notes ? <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{x.notes}</div> : null}
-              </div>
-            ))}
+                  {canEditDelete ? (
+                    <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <Link
+                        href={editHref}
+                        style={{
+                          textDecoration: "none",
+                          color: "inherit",
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(255,255,255,0.04)",
+                          fontSize: 13,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Edit
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (x.type === "Maintenance Request") {
+                            void deleteEquipmentRequest(x.id);
+                          } else {
+                            void deleteEquipmentLog(x.id);
+                          }
+                        }}
+                        disabled={actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(255,120,120,0.35)",
+                          background: "rgba(255,120,120,0.10)",
+                          color: "inherit",
+                          fontSize: 13,
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`
+                          ? "Deleting..."
+                          : "Delete"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

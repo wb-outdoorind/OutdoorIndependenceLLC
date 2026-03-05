@@ -79,6 +79,18 @@ function parseTitle(description: string | null) {
   return "Request";
 }
 
+function parseFieldValue(raw: string | null, field: string) {
+  if (!raw) return "";
+  const prefix = `${field}:`;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim();
+    }
+  }
+  return "";
+}
+
 export default function EquipmentMaintenanceLogPage() {
   const router = useRouter();
   const { isDirty } = useUnsavedChangesState();
@@ -88,6 +100,10 @@ export default function EquipmentMaintenanceLogPage() {
 
   const equipmentId = params?.equipmentID ? decodeURIComponent(params.equipmentID) : "";
   const queryRequestId = sp?.get("requestId") ? decodeURIComponent(sp.get("requestId")!) : "";
+  const editId = sp?.get("editId") ? decodeURIComponent(sp.get("editId")!) : "";
+  const rawReturnTo = (sp?.get("returnTo") || "").trim();
+  const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : "";
+  const isEditMode = editId.length > 0;
 
   const [title, setTitle] = useState("");
   const [hours, setHours] = useState("");
@@ -173,9 +189,14 @@ export default function EquipmentMaintenanceLogPage() {
       const options = data as EquipmentRequestOption[];
       setRequestOptions(options);
 
-      const linked = queryRequestId && options.some((r) => r.id === queryRequestId) ? queryRequestId : "";
-      setSelectedRequestId(linked);
-      if (linked) {
+      const linked =
+        !isEditMode && queryRequestId && options.some((r) => r.id === queryRequestId)
+          ? queryRequestId
+          : "";
+      if (!isEditMode) {
+        setSelectedRequestId(linked);
+      }
+      if (!isEditMode && linked) {
         const req = options.find((r) => r.id === linked);
         if (req) {
           setTitle((prev) => (prev.trim() ? prev : parseTitle(req.description)));
@@ -188,7 +209,7 @@ export default function EquipmentMaintenanceLogPage() {
     return () => {
       alive = false;
     };
-  }, [equipmentId, queryRequestId]);
+  }, [equipmentId, isEditMode, queryRequestId]);
 
   useEffect(() => {
     if (!equipmentId) return;
@@ -211,6 +232,60 @@ export default function EquipmentMaintenanceLogPage() {
       active = false;
     };
   }, [equipmentId]);
+
+  useEffect(() => {
+    if (!isEditMode || !equipmentId) return;
+    let active = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment_maintenance_logs")
+        .select("id,created_at,equipment_id,request_id,hours,notes,status_update,mechanic_self_score")
+        .eq("id", editId)
+        .eq("equipment_id", equipmentId)
+        .maybeSingle();
+      if (!active) return;
+
+      if (error || !data) {
+        console.error("[equipment-maintenance-log] failed to load maintenance log for edit:", error);
+        setSubmitError(error?.message || "Failed to load maintenance log.");
+        return;
+      }
+
+      const parsedServiceDate = parseFieldValue(data.notes, "Service Date");
+      const parsedVendor = parseFieldValue(data.notes, "Vendor");
+      const parsedInvoice = parseFieldValue(data.notes, "Invoice");
+      const parsedLabor = parseFieldValue(data.notes, "Labor Cost");
+      const parsedParts = parseFieldValue(data.notes, "Parts Cost");
+      const parsedNextDueHours = parseFieldValue(data.notes, "Next Due Hours");
+
+      setSelectedRequestId(data.request_id ?? "");
+      setTitle(parseFieldValue(data.notes, "Title") || "Maintenance Log");
+      setHours(Number.isFinite(Number(data.hours)) ? String(data.hours) : "");
+      setStatus(
+        data.status_update === "Closed" || data.status_update === "In Progress"
+          ? data.status_update
+          : ""
+      );
+      setMechanicSelfScore(Number.isFinite(Number(data.mechanic_self_score)) ? String(data.mechanic_self_score) : "");
+      setNotes(data.notes ?? "");
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parsedServiceDate)) {
+        setServiceDate(parsedServiceDate);
+      } else if (typeof data.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(data.created_at)) {
+        setServiceDate(data.created_at.slice(0, 10));
+      }
+      setVendorName(parsedVendor);
+      setInvoiceNumber(parsedInvoice);
+      setLaborCost(parsedLabor);
+      setPartsCost(parsedParts);
+      setNextDueHours(parsedNextDueHours);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [editId, equipmentId, isEditMode]);
 
   const totalCost = useMemo(() => {
     const l = Number(laborCost);
@@ -343,10 +418,10 @@ export default function EquipmentMaintenanceLogPage() {
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(h) || h < 0) return alert("Please enter valid hours.");
     if (!status) return alert("Please select a status.");
-    if (!selectedRequestId && !useQuickLogOverride) {
+    if (!isEditMode && !selectedRequestId && !useQuickLogOverride) {
       return alert("Link this log to a maintenance request, or enable Quick Maintenance Log Override.");
     }
-    if (!selectedRequestId && useQuickLogOverride && !canUseQuickOverride) {
+    if (!isEditMode && !selectedRequestId && useQuickLogOverride && !canUseQuickOverride) {
       return alert("You do not have permission to create a quick maintenance log.");
     }
 
@@ -364,36 +439,60 @@ export default function EquipmentMaintenanceLogPage() {
 
     const l = Number(laborCost);
     const p = Number(partsCost);
+    const notesValue = notes.trim()
+      ? notes.trim()
+      : [
+          `Title: ${title.trim()}`,
+          serviceDate ? `Service Date: ${serviceDate}` : "",
+          vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
+          invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
+          Number.isFinite(l) ? `Labor Cost: ${l}` : "",
+          Number.isFinite(p) ? `Parts Cost: ${p}` : "",
+          totalCost.trim() ? `Total Cost: ${totalCost}` : "",
+          nextDueHours.trim() ? `Next Due Hours: ${nextDueHours.trim()}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
     const supabase = createSupabaseBrowser();
-    const { data: insertedLog, error } = await supabase
-      .from("equipment_maintenance_logs")
-      .insert({
-        equipment_id: equipmentId,
-        request_id: selectedRequestId || null,
-        mechanic_self_score: parsedMechanicSelfScore,
-        hours: h,
-        notes: notes.trim()
-          ? notes.trim()
-          : [
-              `Title: ${title.trim()}`,
-              serviceDate ? `Service Date: ${serviceDate}` : "",
-              vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
-              invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
-              Number.isFinite(l) ? `Labor Cost: ${l}` : "",
-              Number.isFinite(p) ? `Parts Cost: ${p}` : "",
-              totalCost.trim() ? `Total Cost: ${totalCost}` : "",
-              nextDueHours.trim() ? `Next Due Hours: ${nextDueHours.trim()}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-        status_update: status,
-      })
-      .select("id")
-      .single();
+    let savedLogId = editId;
+    let error: { message: string } | null = null;
+
+    if (isEditMode) {
+      const { data: updatedLog, error: updateError } = await supabase
+        .from("equipment_maintenance_logs")
+        .update({
+          request_id: selectedRequestId || null,
+          mechanic_self_score: parsedMechanicSelfScore,
+          hours: h,
+          notes: notesValue,
+          status_update: status,
+        })
+        .eq("id", editId)
+        .eq("equipment_id", equipmentId)
+        .select("id")
+        .maybeSingle();
+      error = updateError;
+      savedLogId = updatedLog?.id ?? editId;
+    } else {
+      const { data: insertedLog, error: insertError } = await supabase
+        .from("equipment_maintenance_logs")
+        .insert({
+          equipment_id: equipmentId,
+          request_id: selectedRequestId || null,
+          mechanic_self_score: parsedMechanicSelfScore,
+          hours: h,
+          notes: notesValue,
+          status_update: status,
+        })
+        .select("id")
+        .single();
+      error = insertError;
+      savedLogId = insertedLog?.id ?? "";
+    }
 
     if (error) {
-      console.error("Equipment maintenance log insert failed:", error);
+      console.error("Equipment maintenance log save failed:", error);
       setSubmitError(error.message);
       return;
     }
@@ -446,7 +545,7 @@ export default function EquipmentMaintenanceLogPage() {
         change_qty: -Math.abs(part.quantity_used),
         reason: "usage",
         reference_type: "maintenance_log",
-        reference_id: insertedLog.id,
+        reference_id: savedLogId,
         notes: null,
         created_by: authData.user.id,
       }));
@@ -473,7 +572,7 @@ export default function EquipmentMaintenanceLogPage() {
         action: "inventory_usage",
         table_name: "inventory_transactions",
         meta: {
-          maintenance_log_id: insertedLog.id,
+          maintenance_log_id: savedLogId,
           items: partsUsed.map((part) => ({
             item_id: part.item_id,
             qty: part.quantity_used,
@@ -482,35 +581,37 @@ export default function EquipmentMaintenanceLogPage() {
       });
     }
 
-    router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+    router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
   }
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Equipment Maintenance Log</h1>
+      <h1 style={{ marginBottom: 6 }}>{isEditMode ? "Edit Equipment Maintenance Log" : "Equipment Maintenance Log"}</h1>
       <div style={{ opacity: 0.75, lineHeight: 1.4 }}>
         Equipment ID: <strong>{equipmentId || "(missing)"}</strong>
       </div>
 
-      <div style={{ marginTop: 12, ...cardStyle, opacity: 0.92 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>
-          Workflow
+      {!isEditMode ? (
+        <div style={{ marginTop: 12, ...cardStyle, opacity: 0.92 }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>
+            Workflow
+          </div>
+          <div style={{ opacity: 0.75, marginBottom: 10 }}>
+            Standard workflow links logs to a maintenance request first.
+          </div>
+          <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={useQuickLogOverride}
+              disabled={!canUseQuickOverride}
+              onChange={(e) => setUseQuickLogOverride(e.target.checked)}
+            />
+            <span style={{ opacity: canUseQuickOverride ? 0.9 : 0.7 }}>
+              Quick Maintenance Log Override (mechanic/admin only)
+            </span>
+          </label>
         </div>
-        <div style={{ opacity: 0.75, marginBottom: 10 }}>
-          Standard workflow links logs to a maintenance request first.
-        </div>
-        <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={useQuickLogOverride}
-            disabled={!canUseQuickOverride}
-            onChange={(e) => setUseQuickLogOverride(e.target.checked)}
-          />
-          <span style={{ opacity: canUseQuickOverride ? 0.9 : 0.7 }}>
-            Quick Maintenance Log Override (mechanic/admin only)
-          </span>
-        </label>
-      </div>
+      ) : null}
 
       {loadError ? (
         <div style={{ marginTop: 12, ...cardStyle, opacity: 0.95, color: "#ff9d9d" }}>
@@ -776,14 +877,14 @@ export default function EquipmentMaintenanceLogPage() {
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle}>
-            Save Maintenance Log
+            {isEditMode ? "Save Changes" : "Save Maintenance Log"}
           </button>
 
           <button
             type="button"
             onClick={() => {
               if (!confirmLeaveForm()) return;
-              router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+              router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
             }}
             style={secondaryButtonStyle}
           >Discard & Return</button>

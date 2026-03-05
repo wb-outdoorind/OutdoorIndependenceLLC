@@ -123,6 +123,19 @@ function normalizeVehicleType(t: string | null): VehicleType {
   return "truck";
 }
 
+function isHoursBasedVehicleType(t: VehicleType) {
+  return t === "skidsteer" || t === "loader";
+}
+
+function vehiclePmInterval(t: VehicleType) {
+  return isHoursBasedVehicleType(t) ? 200 : 5000;
+}
+
+function vehicleDueSoonWindow(t: VehicleType) {
+  const interval = vehiclePmInterval(t);
+  return isHoursBasedVehicleType(t) ? Math.max(10, Math.round(interval * 0.1)) : Math.max(100, Math.round(interval * 0.1));
+}
+
 function formatDateTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -338,12 +351,13 @@ function badgeStyle(label: string): React.CSSProperties {
 
 function computeOilLifePercent(
   currentMileage: number | undefined,
-  lastOilChangeMileage: number | undefined
+  lastOilChangeMileage: number | undefined,
+  vehicleType: VehicleType
 ) {
   if (typeof currentMileage !== "number") return null;
   if (typeof lastOilChangeMileage !== "number") return null;
 
-  const interval = 5000;
+  const interval = vehiclePmInterval(vehicleType);
   const used = currentMileage - lastOilChangeMileage;
   const remaining = interval - used;
   const pct = Math.round((remaining / interval) * 100);
@@ -637,6 +651,9 @@ export default function VehicleDetailPage() {
   const displayFuel = vehicle?.fuel ?? "—";
   const displayOilType = vehicle?.oil_type ?? "—";
   const displayStatus = vehicle?.status ?? "—";
+  const normalizedVehicleType = normalizeVehicleType(vehicle?.type ?? null);
+  const readingLabel = isHoursBasedVehicleType(normalizedVehicleType) ? "Hours" : "Mileage";
+  const readingUnit = isHoursBasedVehicleType(normalizedVehicleType) ? "hrs" : "mi";
 
   const currentMileage = useMemo(() => {
     return typeof vehicle?.mileage === "number" ? vehicle.mileage : undefined;
@@ -649,11 +666,15 @@ export default function VehicleDetailPage() {
     return oilChanges.length ? oilChanges[0].mileage : undefined;
   }, [pmRecords]);
 
-  const oilLifePercent = computeOilLifePercent(currentMileage, lastOilChangeMileage);
+  const oilLifePercent = computeOilLifePercent(
+    currentMileage,
+    lastOilChangeMileage,
+    normalizedVehicleType
+  );
 
   const vehicleHealthSummary = useMemo<AssetHealthSummary>(() => {
-    const interval = 5000;
-    const dueSoonWindow = 500;
+    const interval = vehiclePmInterval(normalizedVehicleType);
+    const dueSoonWindow = vehicleDueSoonWindow(normalizedVehicleType);
     const lastPmMileage = typeof lastOilChangeMileage === "number" ? lastOilChangeMileage : 0;
     const current = typeof currentMileage === "number" ? currentMileage : null;
 
@@ -694,7 +715,15 @@ export default function VehicleDetailPage() {
       openRequests: openRequestCountForHealth,
       pmStatus,
     };
-  }, [currentMileage, lastOilChangeMileage, logPreviewRows, openRequestCountForHealth, vehicle?.status, vehicle?.year]);
+  }, [
+    currentMileage,
+    lastOilChangeMileage,
+    logPreviewRows,
+    normalizedVehicleType,
+    openRequestCountForHealth,
+    vehicle?.status,
+    vehicle?.year,
+  ]);
 
   const historyPreview = useMemo<HistoryPreviewItem[]>(() => {
     const requestItems = requestPreviewRows.map((r) => {
@@ -748,10 +777,7 @@ export default function VehicleDetailPage() {
     userRole === "operations_manager" ||
     userRole === "office_admin" ||
     userRole === "mechanic";
-  const normalizedVehicleType = normalizeVehicleType(vehicle?.type ?? null);
-  const canShowVehiclePmButton =
-    canManageVehicleMaintenance &&
-    (normalizedVehicleType === "truck" || normalizedVehicleType === "car");
+  const canShowVehiclePmButton = canManageVehicleMaintenance;
   const isTruck = normalizedVehicleType === "truck";
   const canEditVehicle = canManageVehicleMaintenance;
   const canEditVehicleMileage = canManageVehicleMaintenance;
@@ -1103,7 +1129,7 @@ export default function VehicleDetailPage() {
                 <input value={editDraft.vin} onChange={(e) => updateDraft("vin", e.target.value)} style={detailInputStyle} />
               </div>
               <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>{readingLabel}</div>
                 <input
                   value={editDraft.mileage}
                   onChange={(e) => updateDraft("mileage", e.target.value)}
@@ -1170,9 +1196,9 @@ export default function VehicleDetailPage() {
               <div style={{ fontWeight: 900, wordBreak: "break-all" }}>{displayVin}</div>
             </div>
             <div>
-              <div style={{ opacity: 0.7, fontSize: 12 }}>Mileage</div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>{readingLabel}</div>
               <div style={{ fontWeight: 900 }}>
-                {typeof currentMileage === "number" ? `${currentMileage.toLocaleString()} mi` : "—"}
+                {typeof currentMileage === "number" ? `${currentMileage.toLocaleString()} ${readingUnit}` : "—"}
               </div>
             </div>
             <div>

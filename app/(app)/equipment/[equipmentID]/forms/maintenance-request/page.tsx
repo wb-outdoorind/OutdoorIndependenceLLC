@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { loadEquipmentContext } from "@/lib/assetContext";
@@ -57,12 +57,44 @@ function todayYYYYMMDD() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function parseTitleAndDescription(raw: string | null) {
+  if (!raw) return { title: "", description: "" };
+  const lines = raw.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+
+  let title = "";
+  if (firstLine.startsWith("Title:")) {
+    title = firstLine.slice("Title:".length).trim();
+  }
+
+  if (lines.length <= 2) return { title, description: raw.trim() };
+  const description = lines.slice(2).join("\n").trim();
+  return { title, description };
+}
+
+function parseFieldValue(raw: string | null, field: string) {
+  if (!raw) return "";
+  const prefix = `${field}:`;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim();
+    }
+  }
+  return "";
+}
+
 export default function EquipmentMaintenanceRequestPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isDirty } = useUnsavedChangesState();
   useFormExitGuard(isDirty);
   const params = useParams<{ equipmentID?: string }>();
   const equipmentId = params?.equipmentID ? decodeURIComponent(params.equipmentID) : "";
+  const editId = (searchParams.get("editId") || "").trim();
+  const rawReturnTo = (searchParams.get("returnTo") || "").trim();
+  const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : "";
+  const isEditMode = editId.length > 0;
 
   const [equipmentName, setEquipmentName] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
@@ -84,7 +116,7 @@ export default function EquipmentMaintenanceRequestPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
-  const [status] = useState<RequestStatus>("Open");
+  const [status, setStatus] = useState<RequestStatus>("Open");
   const [mitigationApplied, setMitigationApplied] = useState<TriState | "">("");
   const [affectsNextShift, setAffectsNextShift] = useState<TriState | "">("");
   const [downtimeExpected, setDowntimeExpected] = useState<TriState | "">("");
@@ -144,6 +176,112 @@ export default function EquipmentMaintenanceRequestPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!isEditMode || !equipmentId) return;
+    let active = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("equipment_maintenance_requests")
+        .select(
+          "id,equipment_id,status,urgency,system_affected,drivability,unit_status,issue_identified_during,description,created_at"
+        )
+        .eq("id", editId)
+        .eq("equipment_id", equipmentId)
+        .maybeSingle();
+
+      if (!active) return;
+      if (error || !data) {
+        console.error("Failed loading equipment maintenance request for edit:", error);
+        return;
+      }
+
+      const parsed = parseTitleAndDescription(data.description);
+      const teammate = parseFieldValue(data.description, "Teammate");
+      const parsedRequestDate = parseFieldValue(data.description, "Request Date");
+      const parsedHours = parseFieldValue(data.description, "Hours");
+      const mitigation = parseFieldValue(data.description, "Mitigation Applied");
+      const affects = parseFieldValue(data.description, "Affects Next Shift");
+      const downtime = parseFieldValue(data.description, "Downtime Expected");
+      const location = parseFieldValue(data.description, "Location Note");
+
+      setStatus(
+        data.status === "Open" || data.status === "In Progress" || data.status === "Closed"
+          ? data.status
+          : "Open"
+      );
+      setIssueIdentifiedDuring(
+        data.issue_identified_during === "Pre-Use Inspection" ||
+          data.issue_identified_during === "Post-Use Inspection" ||
+          data.issue_identified_during === "During Operation" ||
+          data.issue_identified_during === "Jobsite Use" ||
+          data.issue_identified_during === "Other"
+          ? data.issue_identified_during
+          : ""
+      );
+      setDrivabilityStatus(
+        data.drivability === "Yes – Drivable" ||
+          data.drivability === "Limited – Operate with caution" ||
+          data.drivability === "No – Out of Service"
+          ? data.drivability
+          : ""
+      );
+      setUnitStatus(
+        data.unit_status === "Active" ||
+          data.unit_status === "Red Tagged" ||
+          data.unit_status === "Parked in Yard" ||
+          data.unit_status === "On Jobsite" ||
+          data.unit_status === "Other"
+          ? data.unit_status
+          : ""
+      );
+      setSystemAffected(
+        data.system_affected === "Engine" ||
+          data.system_affected === "Electrical" ||
+          data.system_affected === "Hydraulics" ||
+          data.system_affected === "Tires / Wheels" ||
+          data.system_affected === "Brakes" ||
+          data.system_affected === "Steering" ||
+          data.system_affected === "Body / Frame" ||
+          data.system_affected === "Attachment / Implement" ||
+          data.system_affected === "Other"
+          ? data.system_affected
+          : ""
+      );
+      setUrgency(
+        data.urgency === "Low" || data.urgency === "Medium" || data.urgency === "High" || data.urgency === "Urgent"
+          ? data.urgency
+          : ""
+      );
+      setTitle(parsed.title || "");
+      setDescription(parsed.description || "");
+      if (teammate) setEmployee(teammate);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parsedRequestDate)) {
+        setRequestDate(parsedRequestDate);
+      } else if (typeof data.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(data.created_at)) {
+        setRequestDate(data.created_at.slice(0, 10));
+      }
+      if (parsedHours && Number.isFinite(Number(parsedHours))) {
+        setHours(parsedHours);
+      }
+      if (mitigation === "Yes" || mitigation === "No" || mitigation === "Not sure") {
+        setMitigationApplied(mitigation);
+      }
+      if (affects === "Yes" || affects === "No" || affects === "Not sure") {
+        setAffectsNextShift(affects);
+      }
+      if (downtime === "Yes" || downtime === "No" || downtime === "Not sure") {
+        setDowntimeExpected(downtime);
+      }
+      if (location) setLocationNote(location);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [editId, equipmentId, isEditMode]);
 
   const suggestedTitle = useMemo(() => {
     const base = `${systemAffected}`;
@@ -218,35 +356,60 @@ export default function EquipmentMaintenanceRequestPage() {
       .join("\n");
 
     const supabase = createSupabaseBrowser();
-    const { data: insertedRequest, error } = await supabase
-      .from("equipment_maintenance_requests")
-      .insert({
-        equipment_id: equipmentId,
-        status,
-        urgency,
-        system_affected: systemAffected,
-        drivability: drivabilityStatus,
-        unit_status: unitStatus,
-        issue_identified_during: issueIdentifiedDuring,
-        description: combinedDescription,
-      })
-      .select("id")
-      .single();
+    let savedRequestId = editId;
+    let error: { message: string } | null = null;
+
+    if (isEditMode) {
+      const { data: updatedRequest, error: updateError } = await supabase
+        .from("equipment_maintenance_requests")
+        .update({
+          status,
+          urgency,
+          system_affected: systemAffected,
+          drivability: drivabilityStatus,
+          unit_status: unitStatus,
+          issue_identified_during: issueIdentifiedDuring,
+          description: combinedDescription,
+        })
+        .eq("id", editId)
+        .eq("equipment_id", equipmentId)
+        .select("id")
+        .maybeSingle();
+      error = updateError;
+      savedRequestId = updatedRequest?.id ?? editId;
+    } else {
+      const { data: insertedRequest, error: insertError } = await supabase
+        .from("equipment_maintenance_requests")
+        .insert({
+          equipment_id: equipmentId,
+          status,
+          urgency,
+          system_affected: systemAffected,
+          drivability: drivabilityStatus,
+          unit_status: unitStatus,
+          issue_identified_during: issueIdentifiedDuring,
+          description: combinedDescription,
+        })
+        .select("id")
+        .single();
+      error = insertError;
+      savedRequestId = insertedRequest?.id ?? "";
+    }
 
     if (error) {
-      console.error("Equipment maintenance request insert failed:", error);
+      console.error("Equipment maintenance request save failed:", error);
       setSubmitError(error.message);
       return;
     }
 
-    if (insertedRequest?.id) {
+    if (savedRequestId) {
       try {
         await fetch("/api/form-reports/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             formType: "equipment_maintenance_request",
-            recordId: insertedRequest.id,
+            recordId: savedRequestId,
           }),
         });
       } catch (gradeError) {
@@ -254,12 +417,14 @@ export default function EquipmentMaintenanceRequestPage() {
       }
     }
 
-    router.replace(`/equipment/${encodeURIComponent(equipmentId)}`);
+    router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
   }
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Equipment Maintenance Request</h1>
+      <h1 style={{ marginBottom: 6 }}>
+        {isEditMode ? "Edit Equipment Maintenance Request" : "Equipment Maintenance Request"}
+      </h1>
 
       <div style={{ opacity: 0.75, lineHeight: 1.4 }}>
         Equipment ID: <strong>{equipmentId || "(missing)"}</strong>
@@ -410,7 +575,7 @@ export default function EquipmentMaintenanceRequestPage() {
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle()}>
-            Submit Maintenance Request
+            {isEditMode ? "Save Changes" : "Submit Maintenance Request"}
           </button>
 
           <button

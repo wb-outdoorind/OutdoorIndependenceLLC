@@ -14,6 +14,7 @@ import { createSupabaseBrowser } from "@/lib/supabase/client";
 type PMChoice = "" | "pass" | "fail" | "na";
 type YesNo = "" | "yes" | "no";
 type PMResult = "" | "pass" | "pass_with_repairs" | "fail_out_of_service";
+type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
 type TruckPMRecord = {
   id: string;
@@ -175,6 +176,18 @@ function addMonthsIso(dateIso: string, months: number) {
   return dt.toISOString().slice(0, 10);
 }
 
+function normalizeVehicleType(value: string | null | undefined): VehicleType {
+  const type = (value ?? "").trim().toLowerCase();
+  if (type === "car") return "car";
+  if (type === "skidsteer" || type === "skid steer" || type === "skid_steer") return "skidsteer";
+  if (type === "loader") return "loader";
+  return "truck";
+}
+
+function isHoursBasedVehicleType(type: VehicleType) {
+  return type === "skidsteer" || type === "loader";
+}
+
 export default function VehiclePreventativeMaintenanceForm() {
   const router = useRouter();
   const { isDirty } = useUnsavedChangesState();
@@ -185,6 +198,7 @@ export default function VehiclePreventativeMaintenanceForm() {
   const todayIso = new Date().toISOString().slice(0, 10);
 
   const [initialSavedMileage, setInitialSavedMileage] = useState<number | null>(null);
+  const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
   const [inspectionDate, setInspectionDate] = useState(todayIso);
   const [inspectorName, setInspectorName] = useState("");
   const [mileage, setMileage] = useState("");
@@ -226,6 +240,9 @@ export default function VehiclePreventativeMaintenanceForm() {
   const [signature, setSignature] = useState("");
   const [nextPmDueDate, setNextPmDueDate] = useState(() => addMonthsIso(todayIso, 4));
 
+  const usesHours = isHoursBasedVehicleType(vehicleType);
+  const readingLabel = usesHours ? "Hours" : "Mileage";
+  const frequencyLabel = usesHours ? "200 hours" : "5,000 miles";
   const nextPmRecommended = useMemo(() => addMonthsIso(inspectionDate, 4), [inspectionDate]);
 
   useEffect(() => {
@@ -242,12 +259,13 @@ export default function VehiclePreventativeMaintenanceForm() {
       const supabase = createSupabaseBrowser();
       const { data, error } = await supabase
         .from("vehicles")
-        .select("mileage")
+        .select("type,mileage")
         .eq("id", vehicleId)
         .maybeSingle();
       if (!alive) return;
 
       if (!error) {
+        setVehicleType(normalizeVehicleType(data?.type));
         const parsedDbMileage = Number(data?.mileage);
         if (Number.isFinite(parsedDbMileage) && parsedDbMileage > 0) {
           setInitialSavedMileage(parsedDbMileage);
@@ -275,12 +293,12 @@ export default function VehiclePreventativeMaintenanceForm() {
 
     const m = Number(mileage);
     if (!Number.isInteger(m) || m <= 0) {
-      alert("Mileage must be a valid integer greater than zero.");
+      alert(`${readingLabel} must be a valid integer greater than zero.`);
       return;
     }
 
     if (initialSavedMileage != null && m < initialSavedMileage) {
-      alert(`Mileage cannot be lower than current saved mileage (${initialSavedMileage.toLocaleString()}).`);
+      alert(`${readingLabel} cannot be lower than current saved value (${initialSavedMileage.toLocaleString()}).`);
       return;
     }
 
@@ -440,10 +458,10 @@ export default function VehiclePreventativeMaintenanceForm() {
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", paddingBottom: 36 }}>
-      <h1 style={{ marginBottom: 6 }}>Truck Preventative Maintenance Inspection</h1>
+      <h1 style={{ marginBottom: 6 }}>Vehicle Preventative Maintenance Inspection</h1>
       <div style={{ opacity: 0.78, lineHeight: 1.42 }}>
-        The Truck Preventative Maintenance (PM) Inspection is a scheduled mechanical and safety inspection performed
-        to ensure company trucks remain in safe operating condition and proactively identify wear, defects, or
+        The Vehicle Preventative Maintenance (PM) Inspection is a scheduled mechanical and safety inspection performed
+        to ensure company vehicles remain in safe operating condition and proactively identify wear, defects, or
         maintenance needs. Any unsafe condition found must be documented and corrected before returning the vehicle to service.
       </div>
 
@@ -462,7 +480,7 @@ export default function VehiclePreventativeMaintenanceForm() {
             <Field label="Employee / Inspector *">
               <input value={inspectorName} onChange={(e) => setInspectorName(e.target.value)} style={inputStyle} required />
             </Field>
-            <Field label="Mileage * (Integer)">
+            <Field label={`${readingLabel} * (Integer)`}>
               <input value={mileage} onChange={(e) => setMileage(e.target.value)} inputMode="numeric" style={inputStyle} required />
             </Field>
           </div>
@@ -666,13 +684,16 @@ export default function VehiclePreventativeMaintenanceForm() {
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>
                 Suggested: {nextPmRecommended || "-"} (approximately 4 months after inspection date)
               </div>
+              <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>
+                Standard PM frequency for this unit type: {frequencyLabel}.
+              </div>
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>Date format: mm/dd/yyyy</div>
             </Field>
           </div>
         </section>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button type="submit" style={primaryButtonStyle}>Save Truck PM Inspection</button>
+          <button type="submit" style={primaryButtonStyle}>Save PM Inspection</button>
           <button
             type="button"
             onClick={() => {

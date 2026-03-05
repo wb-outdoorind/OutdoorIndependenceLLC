@@ -62,6 +62,37 @@ function todayYYYYMMDD() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function isHoursBasedVehicleType(type: VehicleType) {
+  return type === "skidsteer" || type === "loader";
+}
+
+function parseTitleAndDescription(raw: string | null) {
+  if (!raw) return { title: "", description: "" };
+  const lines = raw.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+
+  let title = "";
+  if (firstLine.startsWith("Title:")) {
+    title = firstLine.slice("Title:".length).trim();
+  }
+
+  if (lines.length <= 2) return { title, description: raw.trim() };
+  const description = lines.slice(2).join("\n").trim();
+  return { title, description };
+}
+
+function parseFieldValue(raw: string | null, field: string) {
+  if (!raw) return "";
+  const prefix = `${field}:`;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim();
+    }
+  }
+  return "";
+}
+
 export default function MaintenanceRequestPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -75,9 +106,11 @@ export default function MaintenanceRequestPage() {
   const prefillDetails = (searchParams.get("details") || "").trim();
   const sourceMileage = (searchParams.get("sourceMileage") || "").trim();
   const rawReturnTo = (searchParams.get("returnTo") || "").trim();
+  const editId = (searchParams.get("editId") || "").trim();
   const linkSectionId = (searchParams.get("linkSectionId") || "").trim();
   const linkItemKey = (searchParams.get("linkItemKey") || "").trim();
   const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : "";
+  const isEditMode = editId.length > 0;
   const parsedSourceMileage = Number(sourceMileage);
 
   // ✅ folder: app/(app)/vehicles/[vehicleID]/maintenance-request/page.tsx
@@ -123,7 +156,7 @@ export default function MaintenanceRequestPage() {
       : ""
   );
 
-  const [status] = useState<RequestStatus>("Open");
+  const [status, setStatus] = useState<RequestStatus>("Open");
   const [mileage, setMileage] = useState(() =>
     Number.isFinite(parsedSourceMileage) && parsedSourceMileage > 0
       ? String(parsedSourceMileage)
@@ -137,6 +170,8 @@ export default function MaintenanceRequestPage() {
   const [downtimeExpected, setDowntimeExpected] =
     useState<TriState | "">("");
   const [userRole, setUserRole] = useState<Role | null>(null);
+  const usesHours = isHoursBasedVehicleType(vehicleType);
+  const readingLabel = usesHours ? "Hours" : "Mileage";
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -199,6 +234,108 @@ export default function MaintenanceRequestPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (!isEditMode || !vehicleId) return;
+    let active = true;
+
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("maintenance_requests")
+        .select(
+          "id,vehicle_id,status,urgency,system_affected,drivability,unit_status,issue_identified_during,description,created_at"
+        )
+        .eq("id", editId)
+        .eq("vehicle_id", vehicleId)
+        .maybeSingle();
+
+      if (!active) return;
+      if (error || !data) {
+        console.error("Failed loading maintenance request for edit:", error);
+        return;
+      }
+
+      const parsed = parseTitleAndDescription(data.description);
+      const teammate = parseFieldValue(data.description, "Teammate");
+      const parsedRequestDate = parseFieldValue(data.description, "Request Date");
+      const mitigation = parseFieldValue(data.description, "Mitigation Applied");
+      const affects = parseFieldValue(data.description, "Affects Next Shift");
+      const downtime = parseFieldValue(data.description, "Downtime Expected");
+      const location = parseFieldValue(data.description, "Location Note");
+
+      setStatus(
+        data.status === "Open" || data.status === "In Progress" || data.status === "Closed"
+          ? data.status
+          : "Open"
+      );
+      setIssueIdentifiedDuring(
+        data.issue_identified_during === "Pre-Trip Inspection" ||
+          data.issue_identified_during === "Post-Trip Inspection" ||
+          data.issue_identified_during === "During Operation" ||
+          data.issue_identified_during === "Jobsite Use" ||
+          data.issue_identified_during === "Other"
+          ? data.issue_identified_during
+          : ""
+      );
+      setDrivabilityStatus(
+        data.drivability === "Yes – Drivable" ||
+          data.drivability === "Limited – Operate with caution" ||
+          data.drivability === "No – Out of Service"
+          ? data.drivability
+          : ""
+      );
+      setUnitStatus(
+        data.unit_status === "Active" ||
+          data.unit_status === "Red Tagged" ||
+          data.unit_status === "Parked in Yard" ||
+          data.unit_status === "On Jobsite" ||
+          data.unit_status === "Other"
+          ? data.unit_status
+          : ""
+      );
+      setSystemAffected(
+        data.system_affected === "Engine" ||
+          data.system_affected === "Electrical" ||
+          data.system_affected === "Hydraulics" ||
+          data.system_affected === "Tires / Wheels" ||
+          data.system_affected === "Brakes" ||
+          data.system_affected === "Steering" ||
+          data.system_affected === "Body / Frame" ||
+          data.system_affected === "Attachment / Implement" ||
+          data.system_affected === "Other"
+          ? data.system_affected
+          : ""
+      );
+      setUrgency(
+        data.urgency === "Low" || data.urgency === "Medium" || data.urgency === "High" || data.urgency === "Urgent"
+          ? data.urgency
+          : ""
+      );
+      setTitle(parsed.title || "");
+      setDescription(parsed.description || "");
+      if (teammate) setEmployee(teammate);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parsedRequestDate)) {
+        setRequestDate(parsedRequestDate);
+      } else if (typeof data.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(data.created_at)) {
+        setRequestDate(data.created_at.slice(0, 10));
+      }
+      if (mitigation === "Yes" || mitigation === "No" || mitigation === "Not sure") {
+        setMitigationApplied(mitigation);
+      }
+      if (affects === "Yes" || affects === "No" || affects === "Not sure") {
+        setAffectsNextShift(affects);
+      }
+      if (downtime === "Yes" || downtime === "No" || downtime === "Not sure") {
+        setDowntimeExpected(downtime);
+      }
+      if (location) setLocationNote(location);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [editId, isEditMode, vehicleId]);
+
   const suggestedTitle = useMemo(() => {
     const base = `${systemAffected}`;
     const end = urgency === "Urgent" ? " (URGENT)" : "";
@@ -244,10 +381,10 @@ export default function MaintenanceRequestPage() {
     const m = Number(mileage);
     if (!requestDate) return alert("Request Date is required.");
     if (!employee.trim()) return alert("Teammate is required.");
-    if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
+    if (!Number.isFinite(m) || m <= 0) return alert(`Enter valid ${readingLabel.toLowerCase()}.`);
     if (currentVehicleMileage != null && m < currentVehicleMileage) {
       return alert(
-        `Mileage cannot be lower than the current tracked mileage (${currentVehicleMileage.toLocaleString()}).`
+        `${readingLabel} cannot be lower than the current tracked value (${currentVehicleMileage.toLocaleString()}).`
       );
     }
     if (!issueIdentifiedDuring) return alert("Issue Identified During is required.");
@@ -277,34 +414,59 @@ export default function MaintenanceRequestPage() {
       .filter(Boolean)
       .join("\n");
 
-    const { data: insertedRequest, error } = await supabase
-      .from("maintenance_requests")
-      .insert({
-        vehicle_id: vehicleId,
-        status,
-        urgency,
-        system_affected: systemAffected,
-        drivability: drivabilityStatus,
-        unit_status: unitStatus,
-        issue_identified_during: issueIdentifiedDuring,
-        description: combinedDescription,
-      })
-      .select("id")
-      .single();
+    let savedRequestId = editId;
+    let error: { message: string } | null = null;
+
+    if (isEditMode) {
+      const { data: updatedRequest, error: updateError } = await supabase
+        .from("maintenance_requests")
+        .update({
+          status,
+          urgency,
+          system_affected: systemAffected,
+          drivability: drivabilityStatus,
+          unit_status: unitStatus,
+          issue_identified_during: issueIdentifiedDuring,
+          description: combinedDescription,
+        })
+        .eq("id", editId)
+        .eq("vehicle_id", vehicleId)
+        .select("id")
+        .maybeSingle();
+      error = updateError;
+      savedRequestId = updatedRequest?.id ?? editId;
+    } else {
+      const { data: insertedRequest, error: insertError } = await supabase
+        .from("maintenance_requests")
+        .insert({
+          vehicle_id: vehicleId,
+          status,
+          urgency,
+          system_affected: systemAffected,
+          drivability: drivabilityStatus,
+          unit_status: unitStatus,
+          issue_identified_during: issueIdentifiedDuring,
+          description: combinedDescription,
+        })
+        .select("id")
+        .single();
+      error = insertError;
+      savedRequestId = insertedRequest?.id ?? "";
+    }
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    if (insertedRequest?.id) {
+    if (savedRequestId) {
       try {
         await fetch("/api/form-reports/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             formType: "vehicle_maintenance_request",
-            recordId: insertedRequest.id,
+            recordId: savedRequestId,
           }),
         });
       } catch (gradeError) {
@@ -338,9 +500,9 @@ export default function MaintenanceRequestPage() {
       console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
     }
 
-    if (returnTo && insertedRequest?.id && linkSectionId && linkItemKey) {
+    if (returnTo && savedRequestId && linkSectionId && linkItemKey) {
       const q = new URLSearchParams({
-        linkedRequestId: insertedRequest.id,
+        linkedRequestId: savedRequestId,
         linkSectionId,
         linkItemKey,
       });
@@ -353,7 +515,9 @@ export default function MaintenanceRequestPage() {
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
-      <h1 style={{ marginBottom: 6 }}>Maintenance Request Form</h1>
+      <h1 style={{ marginBottom: 6 }}>
+        {isEditMode ? "Edit Maintenance Request" : "Maintenance Request Form"}
+      </h1>
 
       <div style={{ opacity: 0.75, lineHeight: 1.4 }}>
         Vehicle ID: <strong>{vehicleId || "(missing)"}</strong>
@@ -392,7 +556,7 @@ export default function MaintenanceRequestPage() {
               />
             </Field>
 
-            <Field label="Mileage *">
+            <Field label={`${readingLabel} *`}>
               <>
                 <input
                   value={mileage}
@@ -404,7 +568,7 @@ export default function MaintenanceRequestPage() {
                 />
                 {currentVehicleMileage != null ? (
                   <div style={{ marginTop: 6, opacity: 0.72, fontSize: 12 }}>
-                    Current tracked mileage: <strong>{currentVehicleMileage.toLocaleString()}</strong>
+                    Current tracked {readingLabel.toLowerCase()}: <strong>{currentVehicleMileage.toLocaleString()}</strong>
                   </div>
                 ) : null}
               </>
@@ -605,7 +769,7 @@ export default function MaintenanceRequestPage() {
         {/* Actions */}
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle()}>
-            Submit Maintenance Request
+            {isEditMode ? "Save Changes" : "Submit Maintenance Request"}
           </button>
 
           <button
