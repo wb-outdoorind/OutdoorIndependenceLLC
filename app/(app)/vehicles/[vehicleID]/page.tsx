@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
+import { MAINTENANCE_ACTIVE_STATUSES, isMaintenanceClosedStatus } from "@/lib/maintenanceStatus";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
@@ -177,7 +178,9 @@ function legacyAssetAllowance(year: number | null | undefined) {
 function maintenanceLogObjectiveScore(log: MaintenanceLogPreviewRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if ((log.status_update ?? "").trim() && !isMaintenanceClosedStatus((log.status_update ?? "").trim())) {
+    objectiveScore -= 8;
+  }
   if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) objectiveScore -= 8;
@@ -593,7 +596,7 @@ export default function VehicleDetailPage() {
           .from("maintenance_requests")
           .select("id", { count: "exact", head: true })
           .eq("vehicle_id", params.vehicleID)
-          .in("status", ["Open", "In Progress"]),
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
         supabase
           .from("vehicle_pm_events")
           .select("id,vehicle_id,created_at,mileage,notes,result")

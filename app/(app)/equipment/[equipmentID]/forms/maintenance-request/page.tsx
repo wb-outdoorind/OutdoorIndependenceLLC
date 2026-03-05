@@ -12,10 +12,15 @@ import {
   useFormExitGuard,
   useUnsavedChangesState,
 } from "@/lib/forms";
+import {
+  coerceMaintenanceRequestStatus,
+  MAINTENANCE_REQUEST_STATUSES,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
-type RequestStatus = "Open" | "In Progress" | "Closed";
+type RequestStatus = MaintenanceRequestStatus;
 
 type IssueIdentifiedDuring =
   | "Pre-Use Inspection"
@@ -219,9 +224,7 @@ export default function EquipmentMaintenanceRequestPage() {
       const location = parseFieldValue(data.description, "Location Note");
 
       setStatus(
-        data.status === "Open" || data.status === "In Progress" || data.status === "Closed"
-          ? data.status
-          : "Open"
+        coerceMaintenanceRequestStatus(data.status, "Open")
       );
       setIssueIdentifiedDuring(
         data.issue_identified_during === "Pre-Use Inspection" ||
@@ -578,6 +581,20 @@ export default function EquipmentMaintenanceRequestPage() {
                 <option>High</option>
                 <option>Urgent</option>
               </select>
+            </Field>
+
+            <Field label="Status">
+              {isEditMode && canEditExistingManagedForms ? (
+                <select value={status} onChange={(e) => setStatus(e.target.value as RequestStatus)} style={inputStyle()}>
+                  {MAINTENANCE_REQUEST_STATUSES.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input value={status} readOnly style={{ ...inputStyle(), opacity: 0.8 }} />
+              )}
             </Field>
 
             <Field label="Title * (auto-suggested)">

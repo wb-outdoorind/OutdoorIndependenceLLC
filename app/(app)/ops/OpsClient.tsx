@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import {
+  isMaintenanceActiveStatus,
+  isMaintenanceClosedStatus,
+} from "@/lib/maintenanceStatus";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type OpsTab = "Overview" | "Preventative Maintenance Overview" | "Downtime" | "Failures" | "Performance";
@@ -286,7 +290,9 @@ function legacyAssetAllowance(year: number | null | undefined) {
 function maintenanceLogObjectiveScore(log: MaintenanceLogRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if ((log.status_update ?? "").trim() && !isMaintenanceClosedStatus((log.status_update ?? "").trim())) {
+    objectiveScore -= 8;
+  }
   if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
 
   const notesLength = (log.notes ?? "").trim().length;
@@ -608,13 +614,13 @@ export default function OpsPage({
 
         const openRequests = requestRows.filter((r) => {
           const s = (r.status ?? "").trim();
-          return s === "Open" || s === "In Progress";
+          return isMaintenanceActiveStatus(s);
         });
 
         const now = Date.now();
         const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
 
-        const closed = requestRows.filter((r) => (r.status ?? "").trim() === "Closed");
+        const closed = requestRows.filter((r) => isMaintenanceClosedStatus((r.status ?? "").trim()));
         const closed7 = closed.filter((r) => {
           const t = new Date(r.updated_at).getTime();
           return Number.isFinite(t) && t >= sevenDaysAgo;
@@ -989,7 +995,7 @@ export default function OpsPage({
     const openRequestsByAsset = new Map<string, RequestRow[]>();
     for (const row of allRequests) {
       const status = (row.status ?? "").trim();
-      if (status !== "Open" && status !== "In Progress") continue;
+      if (!isMaintenanceActiveStatus(status)) continue;
       const assetKey = row.vehicle_id
         ? `Vehicle:${row.vehicle_id}`
         : row.equipment_id
@@ -1100,7 +1106,7 @@ export default function OpsPage({
 
     for (const row of allRequests) {
       const status = (row.status ?? "").trim();
-      if (status !== "Open" && status !== "In Progress") continue;
+      if (!isMaintenanceActiveStatus(status)) continue;
 
       if (row.vehicle_id) {
         const key = `Vehicle:${row.vehicle_id}`;
@@ -1140,7 +1146,7 @@ export default function OpsPage({
     const openRequestCountByAsset = new Map<string, number>();
     for (const req of allRequests) {
       const status = (req.status ?? "").trim();
-      if (status !== "Open" && status !== "In Progress") continue;
+      if (!isMaintenanceActiveStatus(status)) continue;
       const key = req.vehicle_id
         ? `Vehicle:${req.vehicle_id}`
         : req.equipment_id
@@ -1431,7 +1437,7 @@ export default function OpsPage({
     () =>
       performanceRequestsInRange.filter((row) => {
         const status = (row.status ?? "").trim();
-        return status === "Open" || status === "In Progress";
+        return isMaintenanceActiveStatus(status);
       }).length,
     [performanceRequestsInRange]
   );
@@ -1440,7 +1446,7 @@ export default function OpsPage({
     () =>
       performanceRequestsInRange.filter((row) => {
         const status = (row.status ?? "").trim();
-        return status === "Closed";
+        return isMaintenanceClosedStatus(status);
       }),
     [performanceRequestsInRange]
   );
@@ -2532,9 +2538,9 @@ const thStyle: React.CSSProperties = {
 const thStickyStyle: React.CSSProperties = {
   ...thStyle,
   position: "sticky",
-  top: 0,
-  zIndex: 2,
-  background: "rgba(12,14,18,0.96)",
+  top: "var(--table-sticky-top)",
+  zIndex: 30,
+  background: "var(--topnav-bg)",
   backdropFilter: "blur(2px)",
 };
 

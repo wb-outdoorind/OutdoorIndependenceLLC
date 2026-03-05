@@ -5,10 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import OpsClient from "@/app/(app)/ops/OpsClient";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import {
+  coerceMaintenanceRequestStatus,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
 import { getMaintenanceRequestSla, type SlaLevel } from "@/lib/sla";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
-type RequestStatus = "Open" | "In Progress" | "Closed";
+type RequestStatus = MaintenanceRequestStatus;
 type DrivabilityStatus =
   | "Yes – Drivable"
   | "Limited – Operate with caution"
@@ -77,6 +81,14 @@ type StatusTab = "Open" | "In Progress" | "Closed";
 type MaintenanceSection = "queue" | "operations";
 type Role = AppRole;
 
+const OPEN_TAB_STATUSES: RequestStatus[] = ["Open", "Pending Approval", "Scheduled"];
+const IN_PROGRESS_TAB_STATUSES: RequestStatus[] = [
+  "In Progress",
+  "Waiting on Parts",
+  "External Repair",
+  "On Hold",
+];
+
 type GradeRow = {
   score: number | null;
   submitted_at: string;
@@ -114,8 +126,7 @@ function urgencyRank(u: Urgency): number {
 }
 
 function asStatus(v: string | null): RequestStatus {
-  if (v === "Open" || v === "In Progress" || v === "Closed") return v;
-  return "Open";
+  return coerceMaintenanceRequestStatus(v, "Open");
 }
 
 function asUrgency(v: string | null): Urgency {
@@ -437,9 +448,15 @@ export default function MaintenanceCenterPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const tabStatuses =
+      tab === "Open"
+        ? OPEN_TAB_STATUSES
+        : tab === "In Progress"
+          ? IN_PROGRESS_TAB_STATUSES
+          : (["Closed"] as RequestStatus[]);
 
     return rows
-      .filter((r) => r.status === tab)
+      .filter((r) => tabStatuses.includes(r.status))
       .filter((r) => {
         if (entityScope === "All") return true;
         if (entityScope === "Vehicles") return r.entityType === "vehicle";
@@ -476,12 +493,21 @@ export default function MaintenanceCenterPage() {
         const tb = Date.parse(b.createdAt) || 0;
         return ta - tb;
       });
-  }, [rows, tab, entityScope, search, onlyOutOfService, onlyUrgentHigh, vehicleMetaMap, equipmentMetaMap]);
+  }, [
+    rows,
+    tab,
+    entityScope,
+    search,
+    onlyOutOfService,
+    onlyUrgentHigh,
+    vehicleMetaMap,
+    equipmentMetaMap,
+  ]);
 
   const counts = useMemo(() => {
     return {
-      open: rows.filter((r) => r.status === "Open").length,
-      inProgress: rows.filter((r) => r.status === "In Progress").length,
+      open: rows.filter((r) => OPEN_TAB_STATUSES.includes(r.status)).length,
+      inProgress: rows.filter((r) => IN_PROGRESS_TAB_STATUSES.includes(r.status)).length,
       closed: rows.filter((r) => r.status === "Closed").length,
     };
   }, [rows]);
@@ -538,7 +564,9 @@ export default function MaintenanceCenterPage() {
               </span>
             ) : null}
           </div>
-          <div style={{ opacity: 0.78, marginTop: 8 }}>Open, in-progress, and closed requests across vehicles and equipment.</div>
+          <div style={{ opacity: 0.78, marginTop: 8 }}>
+            Open, pending approval, scheduled, in-progress, waiting on parts, external repair, on hold, and closed requests.
+          </div>
         </button>
 
         <button
@@ -645,10 +673,10 @@ export default function MaintenanceCenterPage() {
 
       <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <TabButton active={tab === "Open"} onClick={() => setTab("Open")}>
-          Open ({counts.open})
+          Open / Approval ({counts.open})
         </TabButton>
         <TabButton active={tab === "In Progress"} onClick={() => setTab("In Progress")}>
-          In Progress ({counts.inProgress})
+          Active Work ({counts.inProgress})
         </TabButton>
         <TabButton active={tab === "Closed"} onClick={() => setTab("Closed")}>
           Closed ({counts.closed})

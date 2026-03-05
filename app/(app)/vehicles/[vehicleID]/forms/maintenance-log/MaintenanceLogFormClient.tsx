@@ -12,13 +12,17 @@ import {
   useFormExitGuard,
   useUnsavedChangesState,
 } from "@/lib/forms";
+import {
+  coerceMaintenanceRequestStatus,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 /* =========================
    Types (aligned with request)
 ========================= */
 
-type RequestStatus = "Open" | "In Progress" | "Closed";
+type RequestStatus = MaintenanceRequestStatus;
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type DrivabilityStatus =
   | "Yes – Drivable"
@@ -80,9 +84,19 @@ type MaintenanceRequestRow = {
   description: string | null;
 };
 
-type MaintenanceLogStatus = "Closed" | "In Progress";
+type MaintenanceLogStatus = Exclude<MaintenanceRequestStatus, "Open">;
 type Role = AppRole;
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
+
+const MAINTENANCE_LOG_STATUS_OPTIONS: MaintenanceLogStatus[] = [
+  "Pending Approval",
+  "Scheduled",
+  "In Progress",
+  "Waiting on Parts",
+  "External Repair",
+  "On Hold",
+  "Closed",
+];
 
 type InventoryItem = {
   id: string;
@@ -274,9 +288,9 @@ export default function MaintenanceLogPage() {
         setTitle(parsedTitle || "Maintenance Log");
         setMileage(Number.isFinite(Number(logRow.mileage)) ? String(logRow.mileage) : "");
         setStatus(
-          logRow.status_update === "Closed" || logRow.status_update === "In Progress"
-            ? logRow.status_update
-            : ""
+          coerceMaintenanceRequestStatus(logRow.status_update, "In Progress") === "Open"
+            ? ""
+            : (coerceMaintenanceRequestStatus(logRow.status_update, "In Progress") as MaintenanceLogStatus)
         );
         setMechanicSelfScore(
           Number.isFinite(Number(logRow.mechanic_self_score)) ? String(logRow.mechanic_self_score) : ""
@@ -327,9 +341,7 @@ export default function MaintenanceLogPage() {
               title: parseTitleFromDescription(reqRow.description),
               description: parseBodyFromDescription(reqRow.description),
               status:
-                reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
-                  ? reqRow.status
-                  : "Open",
+                coerceMaintenanceRequestStatus(reqRow.status, "Open"),
             } as MaintenanceRequestRecord)
           : null;
         setLinkedRequest(req);
@@ -399,9 +411,7 @@ export default function MaintenanceLogPage() {
         title: parseTitleFromDescription(reqRow.description),
         description: parseBodyFromDescription(reqRow.description),
         status:
-          reqRow.status === "Open" || reqRow.status === "In Progress" || reqRow.status === "Closed"
-            ? reqRow.status
-            : "Open",
+          coerceMaintenanceRequestStatus(reqRow.status, "Open"),
       });
     })();
 
@@ -674,7 +684,7 @@ export default function MaintenanceLogPage() {
       const { error: requestUpdateError } = await supabase
         .from("maintenance_requests")
         .update({
-          status: status === "Closed" ? "Closed" : "In Progress",
+          status,
         })
         .eq("id", effectiveRequestId);
 
@@ -886,8 +896,11 @@ export default function MaintenanceLogPage() {
                 style={inputStyle}
               >
                 <option value="">Select...</option>
-                <option value="Closed">Closed</option>
-                <option value="In Progress">In Progress</option>
+                {MAINTENANCE_LOG_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             </Field>
 

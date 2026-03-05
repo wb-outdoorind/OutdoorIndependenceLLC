@@ -7,6 +7,7 @@ import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { canAccessRoute } from "@/lib/routeAccess";
+import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -504,11 +505,11 @@ export default async function Home() {
         supabase
           .from("maintenance_requests")
           .select("status,urgency")
-          .in("status", ["Open", "In Progress"]),
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
         supabase
           .from("equipment_maintenance_requests")
           .select("status,urgency")
-          .in("status", ["Open", "In Progress"]),
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
         supabase
           .from("form_submission_grades")
           .select("score,accountability_flag")
@@ -625,11 +626,11 @@ export default async function Home() {
         supabase
           .from("maintenance_requests")
           .select("status,urgency")
-          .in("status", ["Open", "In Progress"]),
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
         supabase
           .from("equipment_maintenance_requests")
           .select("status,urgency")
-          .in("status", ["Open", "In Progress"]),
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
       ]);
 
       const vehicleReqs = (vehicleReqRes.data ?? []) as VehicleRequestRow[];
@@ -689,13 +690,13 @@ export default async function Home() {
         supabase
           .from("maintenance_requests")
           .select("status,description")
-          .in("status", ["Open", "In Progress"])
+          .in("status", MAINTENANCE_ACTIVE_STATUSES)
           .order("created_at", { ascending: false })
           .limit(300),
         supabase
           .from("equipment_maintenance_requests")
           .select("status,description")
-          .in("status", ["Open", "In Progress"])
+          .in("status", MAINTENANCE_ACTIVE_STATUSES)
           .order("created_at", { ascending: false })
           .limit(300),
       ]);

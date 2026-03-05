@@ -23,6 +23,7 @@
   --logo-filter: none;
   --text-scale: 1;
   --app-max-width: 1100px;
+  --table-sticky-top: calc(98px + env(safe-area-inset-top));
 }
 
 [data-theme="light"] {
@@ -257,6 +258,10 @@ a:focus-visible {
 }
 
 @media (max-width: 860px) {
+  :root {
+    --table-sticky-top: calc(156px + env(safe-area-inset-top));
+  }
+
   .app-topnav-inner {
     flex-direction: column;
     align-items: stretch;

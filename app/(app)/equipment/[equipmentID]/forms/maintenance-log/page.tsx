@@ -13,10 +13,24 @@ import {
   useFormExitGuard,
   useUnsavedChangesState,
 } from "@/lib/forms";
+import {
+  coerceMaintenanceRequestStatus,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
-type MaintenanceLogStatus = "Closed" | "In Progress";
+type MaintenanceLogStatus = Exclude<MaintenanceRequestStatus, "Open">;
 type Role = AppRole;
+
+const MAINTENANCE_LOG_STATUS_OPTIONS: MaintenanceLogStatus[] = [
+  "Pending Approval",
+  "Scheduled",
+  "In Progress",
+  "Waiting on Parts",
+  "External Repair",
+  "On Hold",
+  "Closed",
+];
 
 type EquipmentRequestOption = {
   id: string;
@@ -270,9 +284,9 @@ export default function EquipmentMaintenanceLogPage() {
       setTitle(parseFieldValue(data.notes, "Title") || "Maintenance Log");
       setHours(Number.isFinite(Number(data.hours)) ? String(data.hours) : "");
       setStatus(
-        data.status_update === "Closed" || data.status_update === "In Progress"
-          ? data.status_update
-          : ""
+        coerceMaintenanceRequestStatus(data.status_update, "In Progress") === "Open"
+          ? ""
+          : (coerceMaintenanceRequestStatus(data.status_update, "In Progress") as MaintenanceLogStatus)
       );
       setMechanicSelfScore(Number.isFinite(Number(data.mechanic_self_score)) ? String(data.mechanic_self_score) : "");
       setNotes(data.notes ?? "");
@@ -513,7 +527,7 @@ export default function EquipmentMaintenanceLogPage() {
       const { error: requestUpdateError } = await supabase
         .from("equipment_maintenance_requests")
         .update({
-          status: status === "Closed" ? "Closed" : "In Progress",
+          status,
         })
         .eq("id", selectedRequestId);
 
@@ -676,8 +690,11 @@ export default function EquipmentMaintenanceLogPage() {
             <Field label="Status">
               <select value={status} onChange={(e) => setStatus(e.target.value as MaintenanceLogStatus)} style={inputStyle}>
                 <option value="">Select...</option>
-                <option value="Closed">Closed</option>
-                <option value="In Progress">In Progress</option>
+                {MAINTENANCE_LOG_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             </Field>
 
@@ -699,7 +716,8 @@ export default function EquipmentMaintenanceLogPage() {
                 <option value="">None</option>
                 {requestOptions.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {parseTitle(r.description)} • {new Date(r.created_at).toLocaleDateString()} • {r.status ?? "Open"}
+                    {parseTitle(r.description)} • {new Date(r.created_at).toLocaleDateString()} •{" "}
+                    {coerceMaintenanceRequestStatus(r.status, "Open")}
                   </option>
                 ))}
               </select>

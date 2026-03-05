@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { confirmLeaveForm, useFormExitGuard } from "@/lib/forms";
+import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
 
 type OpenRequest = {
   id: string;
@@ -44,7 +45,7 @@ export default function LinkCurrentRequestPage() {
         .from("maintenance_requests")
         .select("id,created_at,status,urgency,system_affected,issue_identified_during,drivability,description")
         .eq("vehicle_id", vehicleId)
-        .in("status", ["Open", "In Progress"])
+        .in("status", MAINTENANCE_ACTIVE_STATUSES)
         .order("created_at", { ascending: false });
 
       if (!alive) return;

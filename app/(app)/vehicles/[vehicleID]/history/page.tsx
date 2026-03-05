@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { coerceMaintenanceRequestStatus, type MaintenanceRequestStatus } from "@/lib/maintenanceStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 /* =========================
@@ -69,7 +70,7 @@ type VehiclePmEventRow = {
   result: unknown;
 };
 
-type RequestStatus = "Open" | "In Progress" | "Closed";
+type RequestStatus = MaintenanceRequestStatus;
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 
 type MaintenanceRequestRecord = {
@@ -450,10 +451,7 @@ export default function VehicleHistoryPage() {
           createdAt: r.created_at,
           requestDate: r.created_at.slice(0, 10),
           title: parsed.title || (r.system_affected ? `${r.system_affected} issue` : "Maintenance Request"),
-          status:
-            r.status === "Open" || r.status === "In Progress" || r.status === "Closed"
-              ? r.status
-              : "Open",
+          status: coerceMaintenanceRequestStatus(r.status, "Open"),
           urgency:
             r.urgency === "Low" || r.urgency === "Medium" || r.urgency === "High" || r.urgency === "Urgent"
               ? r.urgency

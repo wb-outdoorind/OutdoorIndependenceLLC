@@ -1,3 +1,9 @@
+import {
+  isMaintenanceClosedStatus,
+  isMaintenanceInProgressStatus,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
+
 export type SlaLevel = "on_track" | "due_soon" | "overdue";
 
 export type SlaStatus = {
@@ -7,7 +13,6 @@ export type SlaStatus = {
   hoursTarget: number;
 };
 
-type RequestStatus = "Open" | "In Progress" | "Closed";
 type FlagReviewStatus = "open" | "in_review" | "resolved";
 
 type RequestUrgency = "Low" | "Medium" | "High" | "Urgent";
@@ -66,11 +71,11 @@ export function getApprovalSla(params: {
 
 export function getMaintenanceRequestSla(params: {
   createdAt: string | null | undefined;
-  status: RequestStatus;
+  status: MaintenanceRequestStatus;
   urgency: RequestUrgency;
   nowMs?: number;
 }) {
-  if (params.status === "Closed") return null;
+  if (isMaintenanceClosedStatus(params.status)) return null;
   const nowMs = params.nowMs ?? Date.now();
   const elapsed = hoursBetween(nowMs, params.createdAt);
   if (elapsed === null) return null;
@@ -82,7 +87,7 @@ export function getMaintenanceRequestSla(params: {
     Low: 48,
   };
   const baseTarget = targetByUrgency[params.urgency] ?? 24;
-  const effectiveTarget = params.status === "In Progress" ? baseTarget * 1.5 : baseTarget;
+  const effectiveTarget = isMaintenanceInProgressStatus(params.status) ? baseTarget * 1.5 : baseTarget;
 
   return toSla(elapsed, effectiveTarget);
 }

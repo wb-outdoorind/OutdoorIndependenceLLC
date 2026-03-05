@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import AccountabilityTrackerPanel from "@/components/accountability/AccountabilityTrackerPanel";
+import { isMaintenanceClosedStatus } from "@/lib/maintenanceStatus";
 import { getFlaggedQueueSla, type SlaLevel } from "@/lib/sla";
 
 type ScorePeriod = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
@@ -263,7 +264,9 @@ function slaPill(level: SlaLevel, text: string) {
 function maintenanceLogQualityScore(log: MaintenanceLogScoreRow) {
   let objectiveScore = 100;
   if (!log.request_id) objectiveScore -= 6;
-  if ((log.status_update ?? "").trim() === "In Progress") objectiveScore -= 8;
+  if ((log.status_update ?? "").trim() && !isMaintenanceClosedStatus((log.status_update ?? "").trim())) {
+    objectiveScore -= 8;
+  }
   if (!(log.status_update ?? "").trim()) objectiveScore -= 10;
   const notesLength = (log.notes ?? "").trim().length;
   if (notesLength < 20) objectiveScore -= 8;

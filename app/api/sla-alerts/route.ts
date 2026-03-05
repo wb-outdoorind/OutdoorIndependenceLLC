@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  coerceMaintenanceRequestStatus,
+  MAINTENANCE_ACTIVE_STATUSES,
+  type MaintenanceRequestStatus,
+} from "@/lib/maintenanceStatus";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { getApprovalSla, getFlaggedQueueSla, getMaintenanceRequestSla } from "@/lib/sla";
 
@@ -34,7 +39,7 @@ type InspectionSlaRow = {
 type VehicleRequestRow = {
   id: string;
   vehicle_id: string;
-  status: "Open" | "In Progress" | "Closed" | null;
+  status: MaintenanceRequestStatus | null;
   urgency: "Low" | "Medium" | "High" | "Urgent" | null;
   created_at: string;
 };
@@ -42,7 +47,7 @@ type VehicleRequestRow = {
 type EquipmentRequestRow = {
   id: string;
   equipment_id: string;
-  status: "Open" | "In Progress" | "Closed" | null;
+  status: MaintenanceRequestStatus | null;
   urgency: "Low" | "Medium" | "High" | "Urgent" | null;
   created_at: string;
 };
@@ -138,13 +143,13 @@ async function runSlaAlertScan() {
     admin
       .from("maintenance_requests")
       .select("id,vehicle_id,status,urgency,created_at")
-      .in("status", ["Open", "In Progress"])
+      .in("status", MAINTENANCE_ACTIVE_STATUSES)
       .order("created_at", { ascending: true })
       .limit(1000),
     admin
       .from("equipment_maintenance_requests")
       .select("id,equipment_id,status,urgency,created_at")
-      .in("status", ["Open", "In Progress"])
+      .in("status", MAINTENANCE_ACTIVE_STATUSES)
       .order("created_at", { ascending: true })
       .limit(1000),
     admin
@@ -204,7 +209,7 @@ async function runSlaAlertScan() {
   }
 
   for (const row of (vehicleReqRes.data ?? []) as VehicleRequestRow[]) {
-    const status = row.status === "In Progress" ? "In Progress" : "Open";
+    const status = coerceMaintenanceRequestStatus(row.status, "Open");
     const urgency = row.urgency ?? "Medium";
     const sla = getMaintenanceRequestSla({
       createdAt: row.created_at,
@@ -230,7 +235,7 @@ async function runSlaAlertScan() {
   }
 
   for (const row of (equipmentReqRes.data ?? []) as EquipmentRequestRow[]) {
-    const status = row.status === "In Progress" ? "In Progress" : "Open";
+    const status = coerceMaintenanceRequestStatus(row.status, "Open");
     const urgency = row.urgency ?? "Medium";
     const sla = getMaintenanceRequestSla({
       createdAt: row.created_at,
