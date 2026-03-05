@@ -26,6 +26,18 @@ const ALLOWED_DEPARTMENTS = new Set([
   "Maintenance",
 ]);
 
+function parseNamePartsFromFullName(fullName: string) {
+  const normalized = fullName.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return { first_name: "", middle_initial: "", last_name: "" };
+  }
+  const parts = normalized.split(" ").filter(Boolean);
+  const first_name = parts[0] ?? "";
+  const middle_initial = parts.length >= 3 ? (parts[1] ?? "").slice(0, 1).toUpperCase() : "";
+  const last_name = parts.length >= 2 ? parts[parts.length - 1] ?? "" : "";
+  return { first_name, middle_initial, last_name };
+}
+
 export async function POST(req: Request) {
   try {
     const ip = readClientIp(req);
@@ -65,13 +77,25 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const email = String(body.email || "").trim().toLowerCase();
-    const full_name = String(body.full_name || "").trim();
+    const legacyFullName = String(body.full_name || "").trim();
+    let first_name = String(body.first_name || "").trim();
+    let middle_initial = String(body.middle_initial || "").trim();
+    let last_name = String(body.last_name || "").trim();
+    const parsedName = parseNamePartsFromFullName(legacyFullName);
+    if (!first_name) first_name = parsedName.first_name;
+    if (!middle_initial) middle_initial = parsedName.middle_initial;
+    if (!last_name) last_name = parsedName.last_name;
+    middle_initial = middle_initial ? middle_initial.slice(0, 1).toUpperCase() : "";
+    let nickname = String(body.nickname || "").trim();
+    if (!nickname) nickname = first_name;
+    const full_name = [first_name, middle_initial || null, last_name].filter(Boolean).join(" ");
     const role = String(body.role || "").trim();
     const phone = String(body.phone || "").trim();
     const department = String(body.department || "").trim();
 
     if (!email) return NextResponse.json({ error: "Email is required" }, { status: 400 });
-    if (!full_name) return NextResponse.json({ error: "Full name is required" }, { status: 400 });
+    if (!first_name) return NextResponse.json({ error: "First name is required" }, { status: 400 });
+    if (!last_name) return NextResponse.json({ error: "Last name is required" }, { status: 400 });
     if (!role) return NextResponse.json({ error: "Role is required" }, { status: 400 });
     if (!phone) return NextResponse.json({ error: "Phone is required" }, { status: 400 });
     if (!department) return NextResponse.json({ error: "Department is required" }, { status: 400 });
@@ -159,6 +183,10 @@ export async function POST(req: Request) {
           id: userId,
           email,
           full_name,
+          first_name,
+          middle_initial: middle_initial || null,
+          last_name,
+          nickname,
           role,
           status: "Active",
           phone,
@@ -184,7 +212,16 @@ export async function POST(req: Request) {
       eventType: "teammate_invited",
       entityType: "profile",
       entityId: userId,
-      afterData: { role, department, email, full_name },
+      afterData: {
+        role,
+        department,
+        email,
+        full_name,
+        first_name,
+        middle_initial: middle_initial || null,
+        last_name,
+        nickname,
+      },
       meta: { requesterRole },
     });
 

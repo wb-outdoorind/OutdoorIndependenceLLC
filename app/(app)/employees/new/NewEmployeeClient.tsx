@@ -27,7 +27,11 @@ type AssignableRole =
 export default function NewEmployeeClient() {
   const router = useRouter();
 
-  const [full_name, setFullName] = useState("");
+  const [first_name, setFirstName] = useState("");
+  const [middle_initial, setMiddleInitial] = useState("");
+  const [last_name, setLastName] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [nicknameTouched, setNicknameTouched] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("team_member_1");
   const [phone, setPhone] = useState("");
@@ -41,14 +45,18 @@ export default function NewEmployeeClient() {
     setMsg(null);
 
     const payload = {
-      full_name: full_name.trim(),
+      first_name: first_name.trim(),
+      middle_initial: middle_initial.trim().slice(0, 1).toUpperCase(),
+      last_name: last_name.trim(),
+      nickname: (nickname.trim() || first_name.trim()),
       email: email.trim().toLowerCase(),
       role,
       phone: phone.trim(),
       department,
     };
 
-    if (!payload.full_name) return setMsg("Full name is required.");
+    if (!payload.first_name) return setMsg("First name is required.");
+    if (!payload.last_name) return setMsg("Last name is required.");
     if (!payload.email) return setMsg("Email is required.");
     if (!payload.phone) return setMsg("Phone is required.");
 
@@ -88,6 +96,17 @@ export default function NewEmployeeClient() {
     }
   }
 
+  function onFirstNameChange(value: string) {
+    const previousFirstName = first_name;
+    setFirstName(value);
+    const nextTrimmed = value.trim();
+    const prevTrimmed = previousFirstName.trim();
+    const nicknameTrimmed = nickname.trim();
+    if (!nicknameTouched || !nicknameTrimmed || nicknameTrimmed === prevTrimmed) {
+      setNickname(nextTrimmed);
+    }
+  }
+
   return (
     <main style={{ padding: 32, maxWidth: 760, margin: "0 auto" }}>
       <div
@@ -113,11 +132,41 @@ export default function NewEmployeeClient() {
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Teammate Details</div>
 
         <div style={gridStyle}>
-          <Field label="Full Name *">
+          <Field label="First Name *">
             <input
-              value={full_name}
-              onChange={(e) => setFullName(e.target.value)}
+              value={first_name}
+              onChange={(e) => onFirstNameChange(e.target.value)}
               style={inputStyle}
+            />
+          </Field>
+
+          <Field label="MI (optional)">
+            <input
+              value={middle_initial}
+              onChange={(e) => setMiddleInitial(e.target.value.slice(0, 1).toUpperCase())}
+              style={inputStyle}
+              maxLength={1}
+            />
+          </Field>
+
+          <Field label="Last Name *">
+            <input
+              value={last_name}
+              onChange={(e) => setLastName(e.target.value)}
+              style={inputStyle}
+            />
+          </Field>
+
+          <Field label="Nickname *">
+            <input
+              value={nickname}
+              onChange={(e) => {
+                setNicknameTouched(true);
+                setNickname(e.target.value);
+              }}
+              style={inputStyle}
+              placeholder="Defaults to first name"
+              required
             />
           </Field>
 

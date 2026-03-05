@@ -7,13 +7,35 @@ import { writeAudit } from "@/lib/audit";
 
 type Teammate = {
   id: string;
-  full_name: string;
+  full_name: string | null;
+  first_name: string | null;
+  middle_initial: string | null;
+  last_name: string | null;
+  nickname: string | null;
   role: string;
   status: string;
   email: string | null;
   phone: string | null;
   department: string | null;
 };
+
+function buildLegalName(emp: Teammate) {
+  const first = (emp.first_name ?? "").trim();
+  const middle = (emp.middle_initial ?? "").trim().slice(0, 1).toUpperCase();
+  const last = (emp.last_name ?? "").trim();
+  const joined = [first, middle || null, last].filter(Boolean).join(" ").trim();
+  return joined || (emp.full_name ?? "").trim();
+}
+
+function displayName(emp: Teammate) {
+  return (
+    (emp.nickname ?? "").trim() ||
+    (emp.first_name ?? "").trim() ||
+    (emp.full_name ?? "").trim() ||
+    (emp.email ?? "").trim() ||
+    emp.id
+  );
+}
 
 export default function EmployeesClient({ role }: { role: string }) {
   const [employees, setEmployees] = useState<Teammate[]>([]);
@@ -36,8 +58,9 @@ export default function EmployeesClient({ role }: { role: string }) {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, role, status, email, phone, department")
-        .order("full_name");
+        .select("id, full_name, first_name, middle_initial, last_name, nickname, role, status, email, phone, department")
+        .order("last_name")
+        .order("first_name");
 
       if (!error && data) {
         setEmployees(data);
@@ -73,6 +96,7 @@ export default function EmployeesClient({ role }: { role: string }) {
       if (!query) return true;
 
       const hay = [e.full_name, e.email ?? "", e.phone ?? "", e.department ?? "", e.role ?? "", e.status ?? ""]
+        .concat([e.first_name ?? "", e.middle_initial ?? "", e.last_name ?? "", e.nickname ?? ""])
         .join(" ")
         .toLowerCase();
 
@@ -219,12 +243,19 @@ export default function EmployeesClient({ role }: { role: string }) {
                       flexWrap: "wrap",
                     }}
                   >
-                    <div style={{ fontWeight: 900, fontSize: 16 }}>{emp.full_name}</div>
+                    <div style={{ fontWeight: 900, fontSize: 16 }}>{displayName(emp)}</div>
 
                     <span style={badgeStyle()}>{prettyRole(emp.role)}</span>
 
                     <span style={badgeStyle()}>{emp.status || "Unknown"}</span>
                   </div>
+
+                  {(() => {
+                    const legalName = buildLegalName(emp);
+                    const display = displayName(emp);
+                    if (!legalName || legalName.toLowerCase() === display.toLowerCase()) return null;
+                    return <div style={{ marginTop: 4, opacity: 0.66, fontSize: 12 }}>Legal: {legalName}</div>;
+                  })()}
 
                   <div
                     style={{

@@ -7,6 +7,10 @@ import { createSupabaseBrowser } from "@/lib/supabase/client";
 type Teammate = {
   id: string;
   full_name: string | null;
+  first_name: string | null;
+  middle_initial: string | null;
+  last_name: string | null;
+  nickname: string | null;
   role: string | null;
   status: string | null;
   email: string | null;
@@ -105,6 +109,26 @@ function rolePresetAllowed(role: string | null, perm: string) {
   return false;
 }
 
+function buildFullName(parts: {
+  first_name?: string | null;
+  middle_initial?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+}) {
+  const first = (parts.first_name ?? "").trim();
+  const middle = (parts.middle_initial ?? "").trim().slice(0, 1).toUpperCase();
+  const last = (parts.last_name ?? "").trim();
+  const joined = [first, middle || null, last].filter(Boolean).join(" ").trim();
+  return joined || (parts.full_name ?? "").trim();
+}
+
+function teammateDisplayName(row: Teammate | null) {
+  if (!row) return "this teammate";
+  const nickname = (row.nickname ?? "").trim();
+  if (nickname) return nickname;
+  return buildFullName(row) || row.email?.trim() || row.id;
+}
+
 export default function EditEmployeeClient({ id }: { id: string }) {
   const router = useRouter();
 
@@ -152,7 +176,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, role, status, email, phone, department")
+        .select("id, full_name, first_name, middle_initial, last_name, nickname, role, status, email, phone, department")
         .eq("id", safeId)
         .maybeSingle();
 
@@ -170,7 +194,11 @@ export default function EditEmployeeClient({ id }: { id: string }) {
         return;
       }
 
-      setEmployee(data);
+      setEmployee({
+        ...(data as Teammate),
+        middle_initial: data.middle_initial?.trim().slice(0, 1).toUpperCase() || null,
+        nickname: data.nickname?.trim() || data.first_name?.trim() || null,
+      });
 
       if (!canManage) {
         setAllowMap({});
@@ -294,6 +322,14 @@ export default function EditEmployeeClient({ id }: { id: string }) {
       alert("Email is required.");
       return;
     }
+    if (!employee.first_name?.trim()) {
+      alert("First name is required.");
+      return;
+    }
+    if (!employee.last_name?.trim()) {
+      alert("Last name is required.");
+      return;
+    }
     if (!employee.phone?.trim()) {
       alert("Phone is required.");
       return;
@@ -307,7 +343,11 @@ export default function EditEmployeeClient({ id }: { id: string }) {
     const { error } = await supabase
       .from("profiles")
       .update({
-        full_name: employee.full_name,
+        full_name: buildFullName(employee),
+        first_name: employee.first_name?.trim() || null,
+        middle_initial: employee.middle_initial?.trim().slice(0, 1).toUpperCase() || null,
+        last_name: employee.last_name?.trim() || null,
+        nickname: employee.nickname?.trim() || employee.first_name?.trim() || null,
         role: employee.role,
         status: employee.status,
         phone: employee.phone?.trim() ?? null,
@@ -334,7 +374,7 @@ export default function EditEmployeeClient({ id }: { id: string }) {
     }
 
     const ok = confirm(
-      `Deactivate ${employee.full_name || "this employee"}?\n\nThey will remain in the system but marked Inactive.`
+      `Deactivate ${teammateDisplayName(employee)}?\n\nThey will remain in the system but marked Inactive.`
     );
     if (!ok) return;
 
@@ -420,12 +460,58 @@ export default function EditEmployeeClient({ id }: { id: string }) {
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Profile</div>
 
         <div style={gridStyle}>
-          <Field label="Full Name">
+          <Field label="First Name *">
             <input
-              value={employee.full_name ?? ""}
-              onChange={(e) => setEmployee({ ...employee, full_name: e.target.value })}
-              placeholder="Full Name"
+              value={employee.first_name ?? ""}
+              onChange={(e) => {
+                const nextFirstName = e.target.value;
+                const prevFirstName = (employee.first_name ?? "").trim();
+                const currentNickname = (employee.nickname ?? "").trim();
+                const shouldSyncNickname = !currentNickname || currentNickname === prevFirstName;
+                setEmployee({
+                  ...employee,
+                  first_name: nextFirstName,
+                  nickname: shouldSyncNickname ? nextFirstName.trim() : employee.nickname,
+                });
+              }}
+              placeholder="First name"
               style={inputStyle}
+              required
+            />
+          </Field>
+
+          <Field label="MI (optional)">
+            <input
+              value={employee.middle_initial ?? ""}
+              onChange={(e) =>
+                setEmployee({
+                  ...employee,
+                  middle_initial: e.target.value.slice(0, 1).toUpperCase(),
+                })
+              }
+              placeholder="M"
+              style={inputStyle}
+              maxLength={1}
+            />
+          </Field>
+
+          <Field label="Last Name *">
+            <input
+              value={employee.last_name ?? ""}
+              onChange={(e) => setEmployee({ ...employee, last_name: e.target.value })}
+              placeholder="Last name"
+              style={inputStyle}
+              required
+            />
+          </Field>
+
+          <Field label="Nickname *">
+            <input
+              value={employee.nickname ?? ""}
+              onChange={(e) => setEmployee({ ...employee, nickname: e.target.value })}
+              placeholder="Nickname"
+              style={inputStyle}
+              required
             />
           </Field>
 
