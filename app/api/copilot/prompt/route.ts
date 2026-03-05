@@ -87,7 +87,7 @@ async function askOpenAI(params: {
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -96,19 +96,28 @@ async function askOpenAI(params: {
     body: JSON.stringify({
       model,
       temperature: 0.2,
-      messages: [
+      input: [
         {
           role: "system",
-          content:
-            "You are the Outdoor Independence in-app edit copilot. Be concise, practical, and specific to the provided app context.",
+          content: [
+            {
+              type: "input_text",
+              text: "You are the Outdoor Independence in-app edit copilot. Be concise, practical, and specific to the provided app context.",
+            },
+          ],
         },
         {
           role: "user",
           content: [
-            `Prompt:\n${params.prompt}`,
-            "\nRecent shared app context timeline (newest first):",
-            params.contextJson,
-          ].join("\n"),
+            {
+              type: "input_text",
+              text: [
+                `Prompt:\n${params.prompt}`,
+                "\nRecent shared app context timeline (newest first):",
+                params.contextJson,
+              ].join("\n"),
+            },
+          ],
         },
       ],
     }),
@@ -120,10 +129,27 @@ async function askOpenAI(params: {
   }
 
   const json = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string | null } }>;
+    output_text?: string;
+    output?: Array<{
+      content?: Array<{
+        type?: string;
+        text?: string;
+      }>;
+    }>;
   };
-  const content = json.choices?.[0]?.message?.content?.trim() || "";
-  return content || null;
+
+  const direct = typeof json.output_text === "string" ? json.output_text.trim() : "";
+  if (direct) return direct;
+
+  const stitched = (json.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === "output_text" && typeof part.text === "string")
+    .map((part) => (part.text ?? "").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  return stitched || null;
 }
 
 export async function POST(req: Request) {
