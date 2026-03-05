@@ -111,7 +111,6 @@ async function askOpenAI(params: {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.2,
       input: [
         {
           role: "system",
