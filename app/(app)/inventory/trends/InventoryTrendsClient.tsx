@@ -543,7 +543,7 @@ export default function InventoryTrendsClient() {
 
               <div style={{ marginTop: 16, ...cardStyle() }}>
                 <div style={{ fontWeight: 900, marginBottom: 12 }}>Usage by Week</div>
-                <div style={{ overflowX: "auto", overflowY: "clip" }}>
+                <div style={{ overflowX: "auto" }}>
                   <table style={tableStyle}>
                     <thead>
                       <tr>
@@ -589,7 +589,7 @@ export default function InventoryTrendsClient() {
                   Export Items CSV
                 </button>
               </div>
-              <div style={{ marginTop: 12, overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ marginTop: 12, overflowX: "auto" }}>
                 <table style={tableStyle}>
                   <thead>
                     <tr>
@@ -631,7 +631,7 @@ export default function InventoryTrendsClient() {
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>
                     Item Drilldown: {itemMap[selectedItemId]?.name ?? selectedItemId}
                   </div>
-                  <div style={{ overflowX: "auto", overflowY: "clip" }}>
+                  <div style={{ overflowX: "auto" }}>
                     <table style={tableStyle}>
                       <thead>
                         <tr>
@@ -671,7 +671,7 @@ export default function InventoryTrendsClient() {
                   Export Categories CSV
                 </button>
               </div>
-              <div style={{ marginTop: 12, overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ marginTop: 12, overflowX: "auto" }}>
                 <table style={tableStyle}>
                   <thead>
                     <tr>
@@ -710,7 +710,7 @@ export default function InventoryTrendsClient() {
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>
                     Top Items in {selectedCategory}
                   </div>
-                  <div style={{ overflowX: "auto", overflowY: "clip" }}>
+                  <div style={{ overflowX: "auto" }}>
                     <table style={tableStyle}>
                       <thead>
                         <tr>
@@ -747,7 +747,7 @@ export default function InventoryTrendsClient() {
                   Export Reference CSV
                 </button>
               </div>
-              <div style={{ marginTop: 12, overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ marginTop: 12, overflowX: "auto" }}>
                 <table style={tableStyle}>
                   <thead>
                     <tr>
@@ -799,7 +799,7 @@ export default function InventoryTrendsClient() {
                   locations on inventory transactions.
                 </div>
               ) : (
-                <div style={{ marginTop: 12, overflowX: "auto", overflowY: "clip" }}>
+                <div style={{ marginTop: 12, overflowX: "auto" }}>
                   <table style={tableStyle}>
                     <thead>
                       <tr>

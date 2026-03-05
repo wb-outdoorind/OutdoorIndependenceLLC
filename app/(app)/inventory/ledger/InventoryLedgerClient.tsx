@@ -318,7 +318,7 @@ export default function InventoryLedgerClient() {
         ) : filteredRows.length === 0 ? (
           <div style={{ opacity: 0.75 }}>No ledger rows match these filters.</div>
         ) : (
-          <div style={{ overflowX: "auto", overflowY: "clip" }}>
+          <div style={{ overflowX: "auto" }}>
             <table style={tableStyle}>
               <thead>
                 <tr>

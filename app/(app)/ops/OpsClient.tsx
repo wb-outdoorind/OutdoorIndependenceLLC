@@ -1574,7 +1574,7 @@ export default function OpsPage({
             {assetHealthRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No assets loaded.</div>
             ) : (
-              <div style={{ overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr>
@@ -1833,7 +1833,7 @@ export default function OpsPage({
             filteredPmRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No due or overdue PM units match the current filters.</div>
             ) : (
-              <div style={{ overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr>
@@ -1904,7 +1904,7 @@ export default function OpsPage({
           ) : filteredPmLifeRows.length === 0 ? (
             <div style={{ opacity: 0.75 }}>No PM lifecycle rows match the current filters.</div>
           ) : (
-            <div style={{ overflowX: "auto", overflowY: "clip" }}>
+            <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                 <thead>
                   <tr>
@@ -2047,7 +2047,7 @@ export default function OpsPage({
             {filteredDowntimeRows.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No downtime units match the current filters.</div>
             ) : (
-              <div style={{ overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr>
@@ -2187,7 +2187,7 @@ export default function OpsPage({
                   })()}
                 </svg>
 
-                <div style={{ overflowX: "auto", overflowY: "clip", marginTop: 8 }}>
+                <div style={{ overflowX: "auto", marginTop: 8 }}>
                   <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                     <thead>
                       <tr>
@@ -2230,7 +2230,7 @@ export default function OpsPage({
             {topRepeatAssets.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No repeat assets found for the current filters.</div>
             ) : (
-              <div style={{ overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr>
@@ -2440,7 +2440,7 @@ export default function OpsPage({
                   })()}
                 </svg>
 
-                <div style={{ overflowX: "auto", overflowY: "clip", marginTop: 8 }}>
+                <div style={{ overflowX: "auto", marginTop: 8 }}>
                   <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                     <thead>
                       <tr>
@@ -2487,7 +2487,7 @@ export default function OpsPage({
             ) : performanceByMechanic.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No maintenance logs found in the selected date range.</div>
             ) : (
-              <div style={{ overflowX: "auto", overflowY: "clip" }}>
+              <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
                   <thead>
                     <tr>

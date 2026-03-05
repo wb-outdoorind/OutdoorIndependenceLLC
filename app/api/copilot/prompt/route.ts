@@ -66,16 +66,25 @@ function toRecentContextSummary(rows: ContextRow[]) {
   return JSON.stringify(compact, null, 2);
 }
 
-function fallbackResponse(prompt: string, rows: ContextRow[]) {
-  const latest = rows[0];
-  const route = latest?.route ?? "unknown route";
-  const asset = latest?.asset_id ? `${latest.asset_type ?? "asset"} ${latest.asset_id}` : "no asset selected";
+function fallbackResponse(params: { prompt: string; rows: ContextRow[]; modelError: string | null }) {
+  const latestContext =
+    params.rows.find((row) => Boolean(row.route || row.asset_id || row.form_type || row.page_title)) ?? null;
+  const route = latestContext?.route ?? "unknown route";
+  const asset = latestContext?.asset_id
+    ? `${latestContext.asset_type ?? "asset"} ${latestContext.asset_id}`
+    : "no asset selected";
+  const hasKey = Boolean(process.env.OPENAI_API_KEY);
+  const reason = hasKey
+    ? params.modelError
+      ? `OpenAI request failed: ${params.modelError.slice(0, 180)}`
+      : "No model response was returned by OpenAI."
+    : "OpenAI API is not configured on the server yet.";
   return [
     "Copilot context captured successfully.",
     `Current location: ${route}.`,
     `Current asset context: ${asset}.`,
-    "OpenAI API is not configured on the server yet, so this is a fallback response.",
-    `Prompt received: "${prompt.slice(0, 240)}"`,
+    `${reason} Using fallback response.`,
+    `Prompt received: "${params.prompt.slice(0, 240)}"`,
   ].join(" ");
 }
 
@@ -258,7 +267,7 @@ export async function POST(req: Request) {
   }
 
   if (!responseText) {
-    responseText = fallbackResponse(prompt, recent);
+    responseText = fallbackResponse({ prompt, rows: recent, modelError });
   }
 
   const { error: responseInsertError } = await admin.from("copilot_context_events").insert({
