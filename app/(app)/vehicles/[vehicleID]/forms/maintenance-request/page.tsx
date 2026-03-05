@@ -94,6 +94,15 @@ function parseFieldValue(raw: string | null, field: string) {
   return "";
 }
 
+function canEditManagedForms(role: Role | null) {
+  return (
+    role === "owner" ||
+    role === "operations_manager" ||
+    role === "office_admin" ||
+    role === "mechanic"
+  );
+}
+
 export default function MaintenanceRequestPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -173,6 +182,7 @@ export default function MaintenanceRequestPage() {
   const [userRole, setUserRole] = useState<Role | null>(null);
   const usesHours = isHoursBasedVehicleType(vehicleType);
   const readingLabel = usesHours ? "Hours" : "Mileage";
+  const canEditExistingManagedForms = canEditManagedForms(userRole);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -371,12 +381,46 @@ export default function MaintenanceRequestPage() {
     );
   }
 
+  if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+    return (
+      <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
+        <h1 style={{ marginBottom: 6 }}>Vehicle Maintenance Request</h1>
+        <div style={{ opacity: 0.8, marginTop: 12 }}>
+          Only mechanic and higher roles can edit existing maintenance requests.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={() => router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`)}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "inherit",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Back to Vehicle
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
     if (userRole === "apprentice") {
       return alert("Apprentice role cannot submit maintenance requests.");
+    }
+    if (isEditMode && userRole === null) {
+      return alert("Loading permissions. Please try again.");
+    }
+    if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+      return alert("Only mechanic and higher roles can edit maintenance requests.");
     }
 
     const m = Number(mileage);

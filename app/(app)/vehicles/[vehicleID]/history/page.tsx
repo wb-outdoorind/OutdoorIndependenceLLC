@@ -703,6 +703,41 @@ export default function VehicleHistoryPage() {
     setLogRows((prev) => prev.filter((row) => row.id !== id));
   }
 
+  async function editVehiclePmDate(id: string, currentIso: string) {
+    if (!canManage) return;
+    const suggested = /^\d{4}-\d{2}-\d{2}/.test(currentIso) ? currentIso.slice(0, 10) : "";
+    const input = window.prompt("Set PM date (YYYY-MM-DD)", suggested)?.trim() ?? "";
+    if (!input) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      alert("Date must be in YYYY-MM-DD format.");
+      return;
+    }
+
+    setActionBusyKey(`pm:${id}`);
+    const response = await fetch("/api/pm-events/update-date", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assetType: "vehicle",
+        assetId: vehicleId,
+        eventId: id,
+        date: input,
+      }),
+    });
+    const json = (await response.json().catch(() => ({}))) as { error?: string; createdAt?: string };
+    setActionBusyKey(null);
+
+    if (!response.ok) {
+      alert(json.error || "Failed to update PM date.");
+      return;
+    }
+
+    const createdAt = json.createdAt || `${input}T12:00:00.000Z`;
+    setPmRows((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, createdAt } : row))
+    );
+  }
+
   useEffect(() => {
     if (!focusId) return;
     const timer = window.setTimeout(() => {
@@ -887,6 +922,29 @@ export default function VehicleHistoryPage() {
                         {actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`
                           ? "Deleting..."
                           : "Delete"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {canManage && x.type === "Vehicle PM" ? (
+                    <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => void editVehiclePmDate(x.id, x.createdAt)}
+                        disabled={actionBusyKey === `pm:${x.id}`}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(255,255,255,0.04)",
+                          color: "inherit",
+                          fontSize: 13,
+                          fontWeight: 800,
+                          cursor: "pointer",
+                          opacity: actionBusyKey === `pm:${x.id}` ? 0.65 : 1,
+                        }}
+                      >
+                        {actionBusyKey === `pm:${x.id}` ? "Saving..." : "Edit PM Date"}
                       </button>
                     </div>
                   ) : null}

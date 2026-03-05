@@ -1572,16 +1572,16 @@ export default function OpsPage({
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Asset</th>
-                      <th style={thStyle}>Type</th>
-                      <th style={thStyle}>Health</th>
-                      <th style={thStyle}>Operational</th>
-                      <th style={thStyle}>Mechanic (Objective)</th>
-                      <th style={thStyle}>Mechanic Opinion</th>
-                      <th style={thStyle}>Mechanic (Blended)</th>
-                      <th style={thStyle}>Mechanic Band</th>
-                      <th style={thStyle}>Open Requests</th>
-                      <th style={thStyle}>PM Status</th>
+                      <th style={thStickyStyle}>Asset</th>
+                      <th style={thStickyStyle}>Type</th>
+                      <th style={thStickyStyle}>Health</th>
+                      <th style={thStickyStyle}>Operational</th>
+                      <th style={thStickyStyle}>Mechanic (Objective)</th>
+                      <th style={thStickyStyle}>Mechanic Opinion</th>
+                      <th style={thStickyStyle}>Mechanic (Blended)</th>
+                      <th style={thStickyStyle}>Mechanic Band</th>
+                      <th style={thStickyStyle}>Open Requests</th>
+                      <th style={thStickyStyle}>PM Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1831,13 +1831,13 @@ export default function OpsPage({
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Asset</th>
-                      <th style={thStyle}>Type</th>
-                      <th style={thStyle}>Current</th>
-                      <th style={thStyle}>Last PM</th>
-                      <th style={thStyle}>Due At</th>
-                      <th style={thStyle}>Status</th>
-                      <th style={thStyle}>Actions</th>
+                      <th style={thStickyStyle}>Asset</th>
+                      <th style={thStickyStyle}>Type</th>
+                      <th style={thStickyStyle}>Current</th>
+                      <th style={thStickyStyle}>Last PM</th>
+                      <th style={thStickyStyle}>Due At</th>
+                      <th style={thStickyStyle}>Status</th>
+                      <th style={thStickyStyle}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1902,16 +1902,16 @@ export default function OpsPage({
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>Asset</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Current</th>
-                    <th style={thStyle}>Last PM</th>
-                    <th style={thStyle}>PM Due Date</th>
-                    <th style={thStyle}>Due At</th>
-                    <th style={thStyle}>Oil Life %</th>
-                    <th style={thStyle}>PM Life %</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Actions</th>
+                    <th style={thStickyStyle}>Asset</th>
+                    <th style={thStickyStyle}>Type</th>
+                    <th style={thStickyStyle}>Current</th>
+                    <th style={thStickyStyle}>Last PM</th>
+                    <th style={thStickyStyle}>PM Due Date</th>
+                    <th style={thStickyStyle}>Due At</th>
+                    <th style={thStickyStyle}>Oil Life %</th>
+                    <th style={thStickyStyle}>PM Life %</th>
+                    <th style={thStickyStyle}>Status</th>
+                    <th style={thStickyStyle}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2045,13 +2045,13 @@ export default function OpsPage({
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Asset</th>
-                      <th style={thStyle}>Type</th>
-                      <th style={thStyle}>Status</th>
-                      <th style={thStyle}>Down Since</th>
-                      <th style={thStyle}>Days Down</th>
-                      <th style={thStyle}>Open Requests Count</th>
-                      <th style={thStyle}>Last Maintenance Log Date</th>
+                      <th style={thStickyStyle}>Asset</th>
+                      <th style={thStickyStyle}>Type</th>
+                      <th style={thStickyStyle}>Status</th>
+                      <th style={thStickyStyle}>Down Since</th>
+                      <th style={thStickyStyle}>Days Down</th>
+                      <th style={thStickyStyle}>Open Requests Count</th>
+                      <th style={thStickyStyle}>Last Maintenance Log Date</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2185,8 +2185,8 @@ export default function OpsPage({
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr>
-                        <th style={thStyle}>System Affected</th>
-                        <th style={thStyle}>Count</th>
+                        <th style={thStickyStyle}>System Affected</th>
+                        <th style={thStickyStyle}>Count</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2228,9 +2228,9 @@ export default function OpsPage({
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Asset</th>
-                      <th style={thStyle}>Type</th>
-                      <th style={thStyle}>Failures</th>
+                      <th style={thStickyStyle}>Asset</th>
+                      <th style={thStickyStyle}>Type</th>
+                      <th style={thStickyStyle}>Failures</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2438,9 +2438,9 @@ export default function OpsPage({
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr>
-                        <th style={thStyle}>Week Start</th>
-                        <th style={thStyle}>Created</th>
-                        <th style={thStyle}>Closed</th>
+                        <th style={thStickyStyle}>Week Start</th>
+                        <th style={thStickyStyle}>Created</th>
+                        <th style={thStickyStyle}>Closed</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2485,11 +2485,11 @@ export default function OpsPage({
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Mechanic</th>
-                      <th style={thStyle}>Created By</th>
-                      <th style={thStyle}>Logs</th>
-                      <th style={thStyle}>Mechanic Score</th>
-                      <th style={thStyle}>Band</th>
+                      <th style={thStickyStyle}>Mechanic</th>
+                      <th style={thStickyStyle}>Created By</th>
+                      <th style={thStickyStyle}>Logs</th>
+                      <th style={thStickyStyle}>Mechanic Score</th>
+                      <th style={thStickyStyle}>Band</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2527,6 +2527,15 @@ const thStyle: React.CSSProperties = {
   padding: "10px 8px",
   borderBottom: "1px solid rgba(255,255,255,0.18)",
   opacity: 0.8,
+};
+
+const thStickyStyle: React.CSSProperties = {
+  ...thStyle,
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
+  background: "rgba(12,14,18,0.96)",
+  backdropFilter: "blur(2px)",
 };
 
 const tdStyle: React.CSSProperties = {

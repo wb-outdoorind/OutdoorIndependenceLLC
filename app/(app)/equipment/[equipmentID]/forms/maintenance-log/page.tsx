@@ -62,6 +62,10 @@ function canQuickLogOverride(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
 }
 
+function canEditManagedForms(role: Role | null) {
+  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+}
+
 function todayYYYYMMDD() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -137,6 +141,7 @@ export default function EquipmentMaintenanceLogPage() {
   const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
+  const canEditExistingManagedForms = canEditManagedForms(userRole);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -414,6 +419,12 @@ export default function EquipmentMaintenanceLogPage() {
     if (userRole === "apprentice") {
       return alert("Apprentice role cannot submit maintenance logs.");
     }
+    if (isEditMode && userRole === null) {
+      return alert("Loading permissions. Please try again.");
+    }
+    if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+      return alert("Only mechanic and higher roles can edit maintenance logs.");
+    }
 
     const h = Number(hours);
     if (!title.trim()) return alert("Please enter a title (what was done).");
@@ -584,6 +595,22 @@ export default function EquipmentMaintenanceLogPage() {
 
     requestFormDraftClear();
     router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
+  }
+
+  if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+    return (
+      <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
+        <h1 style={{ marginBottom: 6 }}>Equipment Maintenance Log</h1>
+        <div style={{ marginTop: 12, ...cardStyle, color: "#ffb3b3" }}>
+          Only mechanic and higher roles can edit existing maintenance logs.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button type="button" onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)} style={secondaryButtonStyle}>
+            Back to Equipment
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (

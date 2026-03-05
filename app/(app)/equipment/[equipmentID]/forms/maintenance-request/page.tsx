@@ -85,6 +85,15 @@ function parseFieldValue(raw: string | null, field: string) {
   return "";
 }
 
+function canEditManagedForms(role: Role | null) {
+  return (
+    role === "owner" ||
+    role === "operations_manager" ||
+    role === "office_admin" ||
+    role === "mechanic"
+  );
+}
+
 export default function EquipmentMaintenanceRequestPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -123,6 +132,7 @@ export default function EquipmentMaintenanceRequestPage() {
   const [downtimeExpected, setDowntimeExpected] = useState<TriState | "">("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<Role | null>(null);
+  const canEditExistingManagedForms = canEditManagedForms(userRole);
 
   useEffect(() => {
     if (!equipmentId) return;
@@ -318,6 +328,34 @@ export default function EquipmentMaintenanceRequestPage() {
     );
   }
 
+  if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+    return (
+      <main style={{ maxWidth: 900, margin: "0 auto", paddingBottom: 32 }}>
+        <h1 style={{ marginBottom: 6 }}>Equipment Maintenance Request</h1>
+        <div style={{ opacity: 0.8, marginTop: 12 }}>
+          Only mechanic and higher roles can edit existing maintenance requests.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            onClick={() => router.replace(`/equipment/${encodeURIComponent(equipmentId)}`)}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "inherit",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Back to Equipment
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -325,6 +363,12 @@ export default function EquipmentMaintenanceRequestPage() {
     if (!equipmentId) return alert("Missing equipment ID in the URL.");
     if (userRole === "apprentice") {
       return alert("Apprentice role cannot submit maintenance requests.");
+    }
+    if (isEditMode && userRole === null) {
+      return alert("Loading permissions. Please try again.");
+    }
+    if (isEditMode && userRole !== null && !canEditExistingManagedForms) {
+      return alert("Only mechanic and higher roles can edit maintenance requests.");
     }
 
     const h = Number(hours);
