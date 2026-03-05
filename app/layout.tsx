@@ -1,9 +1,11 @@
 import "./globals.css";
+import { Suspense } from "react";
 import BackButton from "@/components/BackButton";
 import AppPreferences from "@/components/AppPreferences";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
 import NetworkStatusBanner from "@/components/NetworkStatusBanner";
 import FormDraftManager from "@/components/FormDraftManager";
+import CopilotBubble from "@/components/CopilotBubble";
 import packageJson from "../package.json";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <NetworkStatusBanner />
           <BackButton />
           <FormDraftManager />
+          <Suspense fallback={null}>
+            <CopilotBubble />
+          </Suspense>
           <div className="app-content">{children}</div>
           <footer className="app-footer">
             <div className="app-footer-inner">
