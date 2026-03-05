@@ -25,6 +25,12 @@ type ContextRow = {
   created_at: string;
 };
 
+function resolveOpenAiModel() {
+  const configuredModel = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+  if (configuredModel === "gpt-5.2-code") return "gpt-5.2-codex";
+  return configuredModel;
+}
+
 function normalizeText(value: unknown, maxLen = 256) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -95,7 +101,7 @@ async function askOpenAI(params: {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const model = resolveOpenAiModel();
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -260,7 +266,7 @@ export async function POST(req: Request) {
     const aiResponse = await askOpenAI({ prompt, contextJson });
     if (aiResponse) {
       responseText = aiResponse;
-      model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+      model = resolveOpenAiModel();
     }
   } catch (error) {
     modelError = error instanceof Error ? error.message : "Unexpected AI error";
