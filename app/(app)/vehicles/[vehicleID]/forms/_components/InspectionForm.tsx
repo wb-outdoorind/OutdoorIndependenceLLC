@@ -102,6 +102,7 @@ type Role = AppRole;
 
 function canBypassLeadSignoff(role: Role | null) {
   return (
+    role === "team_lead_1" ||
     role === "team_lead_2" ||
     role === "mechanic" ||
     role === "office_admin" ||
@@ -1424,7 +1425,7 @@ export default function InspectionForm({
                   Lead Sign-Off
                 </div>
                 <div style={{ ...inputStyle(), opacity: 0.85 }}>
-                  Not required for Team Lead 2+ roles.
+                  Not required for Team Lead or higher roles.
                 </div>
               </div>
             ) : (
