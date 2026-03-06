@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { canAccessRoute } from "@/lib/routeAccess";
 import {
   canUseRoleView,
   readRoleViewOverride,
@@ -119,6 +120,8 @@ export default function AppTopNavLinks() {
     actualRole === "operations_manager" ||
     actualRole === "office_admin" ||
     actualRole === "mechanic";
+  const effectiveNavRole = viewAsRole ?? actualRole;
+  const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
 
   return (
     <nav className="app-topnav-links">
@@ -128,7 +131,7 @@ export default function AppTopNavLinks() {
       <Link href="/equipment" className="app-topnav-link">Equipment</Link>
       <Link href="/forms" className="app-topnav-link">Forms</Link>
       <Link href="/inventory" className="app-topnav-link">Inventory</Link>
-      <Link href="/maintenance" className="app-topnav-link">Maintenance Center</Link>
+      {canViewMaintenanceCenter ? <Link href="/maintenance" className="app-topnav-link">Maintenance Center</Link> : null}
       <Link href="/academy" className="app-topnav-link">OI Academy</Link>
       <Link href="/employees" className="app-topnav-link">Teammates</Link>
       <Link href="/notifications" className="app-topnav-link">

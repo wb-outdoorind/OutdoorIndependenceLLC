@@ -17,7 +17,6 @@ const baseTiles = [
   { title: "Equipment", href: "/equipment", desc: "Track equipment records, specs, and history" },
   { title: "Forms", href: "/forms", desc: "Create blank forms and review submission history" },
   { title: "Inventory", href: "/inventory?filter=low", desc: "Parts, stock levels, reorder tracking" },
-  { title: "Maintenance Center", href: "/maintenance", desc: "Queue, PM planning, downtime, and maintenance operations" },
   { title: "Notifications", href: "/notifications", desc: "Inbox for alerts, accountability, and digests" },
   { title: "OI Academy", href: "/academy", desc: "SOP PDFs and training videos" },
   { title: "Teammates", href: "/employees", desc: "Team list, roles, and permissions" },
@@ -252,6 +251,20 @@ export default async function Home() {
       role === "team_member_2" ||
       role === "team_lead_1" ||
       role === "team_lead_2";
+    const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
+
+    if (canViewMaintenanceCenter) {
+      const maintenanceTile = {
+        title: "Maintenance Center",
+        href: "/maintenance",
+        desc: "Queue, PM planning, downtime, and maintenance operations",
+      };
+      const notificationsIndex = tiles.findIndex((tile) => tile.title === "Notifications");
+      tiles =
+        notificationsIndex >= 0
+          ? [...tiles.slice(0, notificationsIndex), maintenanceTile, ...tiles.slice(notificationsIndex)]
+          : [...tiles, maintenanceTile];
+    }
 
     if (canAccessRoute(role, "lead_approvals")) {
       tiles = [
@@ -489,17 +502,6 @@ export default async function Home() {
       ];
     }
 
-    if (role === "apprentice") {
-      tiles = tiles.map((tile) =>
-        tile.title === "Maintenance Center"
-          ? {
-              ...tile,
-              desc: "View-only queue and operations dashboards. Request/log creation is restricted.",
-            }
-          : tile
-      );
-    }
-
     if (isLeadership) {
       const [vehicleReqRes, equipmentReqRes, gradesRes, slaRunsRes] = await Promise.all([
         supabase
@@ -657,7 +659,6 @@ export default async function Home() {
         ],
       };
     } else if (isTeammateOpsRole) {
-      const maintenanceHref = role === "apprentice" ? "/maintenance" : "/maintenance?section=operations";
       dashboard = {
         title: "Teammate Operations Dashboard",
         subtitle: "Average form score metrics for apprentice through team lead 2 roles.",
@@ -669,8 +670,8 @@ export default async function Home() {
           { label: "Tracked Forms", value: String(teammateOpsStats?.formCount ?? 0) },
         ],
         actions: [
-          { label: role === "apprentice" ? "Open Maintenance (View Only)" : "Open Maintenance Center", href: maintenanceHref },
           { label: "Open Scan QR", href: "/scan" },
+          { label: "Open Vehicles", href: "/vehicles" },
           { label: "Open Notifications", href: "/notifications" },
         ],
       };

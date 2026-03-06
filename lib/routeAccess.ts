@@ -2,6 +2,7 @@ import { normalizeRole, type AppRole } from "@/lib/roleView";
 
 export type RouteAccessKey =
   | "ops_dashboard"
+  | "maintenance_center"
   | "accountability_center"
   | "vehicles_create"
   | "equipment_create"
@@ -27,6 +28,7 @@ const LEAD_APPROVAL_ROLES: AppRole[] = [
 
 const ACCESS_MATRIX: Record<RouteAccessKey, AppRole[]> = {
   ops_dashboard: MANAGEMENT_OR_MECHANIC_ROLES,
+  maintenance_center: MANAGEMENT_OR_MECHANIC_ROLES,
   accountability_center: MANAGEMENT_OR_MECHANIC_ROLES,
   vehicles_create: MANAGEMENT_OR_MECHANIC_ROLES,
   equipment_create: MANAGEMENT_OR_MECHANIC_ROLES,

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { canAccessRoute } from "@/lib/routeAccess";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type NotificationRow = {
@@ -337,7 +338,7 @@ function severityColor(severity: NotificationRow["severity"]) {
   return "rgba(120,180,255,0.18)";
 }
 
-function notificationHref(row: NotificationRow) {
+function notificationHref(row: NotificationRow, canViewMaintenanceCenter: boolean) {
   if (row.kind === "trend_actions_digest" && row.entity_id) {
     return `/notifications/digest/${encodeURIComponent(row.entity_id)}`;
   }
@@ -351,6 +352,7 @@ function notificationHref(row: NotificationRow) {
     return `/approvals?inspection=${encodeURIComponent(row.entity_id)}`;
   }
   if (row.kind === "sla_maintenance_request_overdue" && row.entity_id) {
+    if (!canViewMaintenanceCenter) return null;
     if (row.entity_type === "equipment_maintenance_request") {
       return `/maintenance?section=queue&equipmentRequest=${encodeURIComponent(row.entity_id)}`;
     }
@@ -376,14 +378,14 @@ function parseEquipmentIdFromBody(body: string) {
   return match?.[1] ?? null;
 }
 
-function notificationActions(row: NotificationRow) {
+function notificationActions(row: NotificationRow, canViewMaintenanceCenter: boolean) {
   const actions: Array<{ label: string; href: string }> = [];
-  const primary = notificationHref(row);
+  const primary = notificationHref(row, canViewMaintenanceCenter);
   if (primary) {
     actions.push({ label: "View Details", href: primary });
   }
 
-  if (row.kind === "vehicle_maintenance_request_created") {
+  if (row.kind === "vehicle_maintenance_request_created" && canViewMaintenanceCenter) {
     actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
     const vehicleId = parseVehicleIdFromBody(row.body);
     if (vehicleId) {
@@ -394,7 +396,7 @@ function notificationActions(row: NotificationRow) {
     }
   }
 
-  if (row.kind === "equipment_maintenance_request_created") {
+  if (row.kind === "equipment_maintenance_request_created" && canViewMaintenanceCenter) {
     actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
     const equipmentId = parseEquipmentIdFromBody(row.body);
     if (equipmentId) {
@@ -457,6 +459,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
+  const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
   const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
     const fromQuery = searchParams.get("sla");
     if (isSlaStatusFilter(fromQuery)) return fromQuery;
@@ -1654,7 +1657,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
                         Resolve
                       </button>
                     ) : null}
-                    {notificationActions(row).map((action) => (
+                    {notificationActions(row, canViewMaintenanceCenter).map((action) => (
                       <Link key={`${row.id}-${action.href}`} href={action.href} style={buttonStyle()}>
                         {action.label}
                       </Link>
