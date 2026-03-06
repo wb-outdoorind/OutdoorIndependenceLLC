@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
@@ -50,6 +50,14 @@ type TimelineItem = {
 
 type FilterValue = "All" | TimelineType;
 type Role = AppRole;
+
+function isTimelineType(value: string | null): value is TimelineType {
+  return (
+    value === "Maintenance Request" ||
+    value === "Maintenance Log" ||
+    value === "Preventative Maintenance"
+  );
+}
 
 function canManageMaintenance(role: Role | null) {
   return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
@@ -134,9 +142,13 @@ function badgeStyle(type: TimelineType): React.CSSProperties {
 
 export default function EquipmentHistoryPage() {
   const params = useParams<{ equipmentID: string }>();
+  const searchParams = useSearchParams();
   const equipmentId = decodeURIComponent(params.equipmentID);
+  const focusId = (searchParams.get("focusId") || "").trim();
+  const focusTypeRaw = (searchParams.get("focusType") || "").trim();
+  const focusType: TimelineType | null = isTimelineType(focusTypeRaw) ? focusTypeRaw : null;
 
-  const [filter, setFilter] = useState<FilterValue>("All");
+  const [filter, setFilter] = useState<FilterValue>(focusType ?? "All");
   const [requestRows, setRequestRows] = useState<EquipmentRequestRow[]>([]);
   const [logRows, setLogRows] = useState<EquipmentLogRow[]>([]);
   const [pmRows, setPmRows] = useState<EquipmentPmEventRow[]>([]);
@@ -414,6 +426,16 @@ export default function EquipmentHistoryPage() {
     );
   }
 
+  useEffect(() => {
+    if (!focusId) return;
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById(`timeline-item-${focusId}`);
+      if (!node) return;
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [focusId, filtered.length]);
+
   return (
     <main style={{ paddingBottom: 32 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -494,7 +516,11 @@ export default function EquipmentHistoryPage() {
             {filtered.map((x) => {
               const isManageableType = x.type === "Maintenance Request" || x.type === "Maintenance Log";
               const canEditDelete = canManage && isManageableType;
-              const backToHistory = `/equipment/${encodeURIComponent(equipmentId)}/history`;
+              const focusQuery = new URLSearchParams({
+                focusType: x.type,
+                focusId: x.id,
+              }).toString();
+              const backToHistory = `/equipment/${encodeURIComponent(equipmentId)}/history?${focusQuery}`;
               const editHref =
                 x.type === "Maintenance Request"
                   ? `/equipment/${encodeURIComponent(equipmentId)}/forms/maintenance-request?editId=${encodeURIComponent(x.id)}&returnTo=${encodeURIComponent(backToHistory)}`
@@ -505,11 +531,18 @@ export default function EquipmentHistoryPage() {
               return (
                 <div
                   key={`${x.type}:${x.id}`}
+                  id={`timeline-item-${x.id}`}
                   style={{
-                    border: "1px solid rgba(255,255,255,0.12)",
+                    border:
+                      focusId === x.id && (!focusType || focusType === x.type)
+                        ? "1px solid rgba(126,255,167,0.45)"
+                        : "1px solid rgba(255,255,255,0.12)",
                     borderRadius: 14,
                     padding: 12,
-                    background: "rgba(255,255,255,0.02)",
+                    background:
+                      focusId === x.id && (!focusType || focusType === x.type)
+                        ? "rgba(126,255,167,0.10)"
+                        : "rgba(255,255,255,0.02)",
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -528,6 +561,22 @@ export default function EquipmentHistoryPage() {
 
                   {x.notes ? <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{x.notes}</div> : null}
 
+                  <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <Link
+                      href={backToHistory}
+                      style={{
+                        textDecoration: "none",
+                        color: "inherit",
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.14)",
+                        background: "rgba(255,255,255,0.04)",
+                        fontSize: 13,
+                        fontWeight: 800,
+                      }}
+                    >
+                      See Form
+                    </Link>
                   {canEditDelete ? (
                     <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <Link
@@ -595,6 +644,7 @@ export default function EquipmentHistoryPage() {
                       </button>
                     </div>
                   ) : null}
+                  </div>
                 </div>
               );
             })}

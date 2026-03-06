@@ -611,13 +611,19 @@ export default function MaintenanceLogPage() {
       );
     }
 
-    const parsedMechanicSelfScore = mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
+    const canSetMechanicSelfScore = userRole === "mechanic";
+    const parsedMechanicSelfScore =
+      canSetMechanicSelfScore && mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
     if (
+      canSetMechanicSelfScore &&
       parsedMechanicSelfScore != null &&
       (!Number.isFinite(parsedMechanicSelfScore) || parsedMechanicSelfScore < 0 || parsedMechanicSelfScore > 100)
     ) {
       return alert("Mechanic Self Score must be a number between 0 and 100.");
     }
+    const mechanicSelfScorePatch = canSetMechanicSelfScore
+      ? { mechanic_self_score: parsedMechanicSelfScore }
+      : {};
 
     const l = Number(laborCost);
     const p = Number(partsCost);
@@ -646,7 +652,7 @@ export default function MaintenanceLogPage() {
         .from("maintenance_logs")
         .update({
           request_id: effectiveRequestId || null,
-          mechanic_self_score: parsedMechanicSelfScore,
+          ...mechanicSelfScorePatch,
           mileage: m,
           notes: notesValue,
           status_update: status,
@@ -663,7 +669,7 @@ export default function MaintenanceLogPage() {
         .insert({
           vehicle_id: vehicleId,
           request_id: effectiveRequestId || null,
-          mechanic_self_score: parsedMechanicSelfScore,
+          ...mechanicSelfScorePatch,
           mileage: m,
           notes: notesValue,
           status_update: status,
@@ -904,15 +910,17 @@ export default function MaintenanceLogPage() {
               </select>
             </Field>
 
-            <Field label="Mechanic Self Score (0-100, optional)">
-              <input
-                value={mechanicSelfScore}
-                onChange={(e) => setMechanicSelfScore(e.target.value)}
-                inputMode="numeric"
-                placeholder="e.g. 78"
-                style={inputStyle}
-              />
-            </Field>
+            {userRole === "mechanic" ? (
+              <Field label="Mechanic Self Score (0-100, optional)">
+                <input
+                  value={mechanicSelfScore}
+                  onChange={(e) => setMechanicSelfScore(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="e.g. 78"
+                  style={inputStyle}
+                />
+              </Field>
+            ) : null}
 
             <Field label="Reset Oil Life?">
               <label style={{ display: "flex", gap: 10, alignItems: "center" }}>

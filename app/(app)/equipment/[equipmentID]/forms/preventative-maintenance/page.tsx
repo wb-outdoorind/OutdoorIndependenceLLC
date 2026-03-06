@@ -560,6 +560,40 @@ export default function EquipmentPreventativeMaintenancePage() {
   const failCount = useMemo(() => Object.values(resultState).filter((v) => v === "fail").length, [resultState]);
   const nextPmRecommended = useMemo(() => addMonthsIso(inspectionDate, 4), [inspectionDate]);
 
+  async function syncEquipmentHoursForward(
+    supabase: ReturnType<typeof createSupabaseBrowser>,
+    equipmentRef: string,
+    nextHours: number | null
+  ) {
+    if (!Number.isFinite(Number(nextHours)) || (nextHours ?? 0) < 0) return;
+    try {
+      const { data: equipmentRow, error: equipmentReadError } = await supabase
+        .from("equipment")
+        .select("current_hours")
+        .eq("id", equipmentRef)
+        .maybeSingle();
+      if (equipmentReadError) {
+        console.error("Failed to read equipment hours:", equipmentReadError);
+        return;
+      }
+      const existingHours = Number(equipmentRow?.current_hours ?? 0);
+      const targetHours = Number(nextHours);
+      const syncedHours =
+        Number.isFinite(existingHours) && existingHours > 0
+          ? Math.max(existingHours, targetHours)
+          : targetHours;
+      const { error: equipmentUpdateError } = await supabase
+        .from("equipment")
+        .update({ current_hours: syncedHours })
+        .eq("id", equipmentRef);
+      if (equipmentUpdateError) {
+        console.error("Failed to update equipment hours:", equipmentUpdateError);
+      }
+    } catch (equipmentHoursError) {
+      console.error("Unexpected equipment hours sync error:", equipmentHoursError);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -645,6 +679,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      await syncEquipmentHoursForward(supabase, equipment.id, parsedHours);
       requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
@@ -739,6 +774,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      await syncEquipmentHoursForward(supabase, equipment.id, parsedHours);
       requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
@@ -805,6 +841,7 @@ export default function EquipmentPreventativeMaintenancePage() {
         return;
       }
 
+      await syncEquipmentHoursForward(supabase, equipment.id, parsedHours);
       requestFormDraftClear();
       router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
       return;
@@ -840,6 +877,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       return;
     }
 
+    await syncEquipmentHoursForward(supabase, equipment.id, parsedHours);
     requestFormDraftClear();
     router.replace(`/equipment/${encodeURIComponent(equipment.id)}`);
   }

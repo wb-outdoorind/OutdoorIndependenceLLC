@@ -91,25 +91,7 @@ type MaintenanceRequestStatusRow = {
   urgency: string | null;
   created_at: string;
 };
-
-type LeadOption = {
-  id: string;
-  full_name: string | null;
-  email: string | null;
-  role: string | null;
-};
 type Role = AppRole;
-
-function canBypassLeadSignoff(role: Role | null) {
-  return (
-    role === "team_lead_1" ||
-    role === "team_lead_2" ||
-    role === "mechanic" ||
-    role === "office_admin" ||
-    role === "operations_manager" ||
-    role === "owner"
-  );
-}
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
@@ -364,9 +346,6 @@ export default function InspectionForm({
   const [mileage, setMileage] = useState("");
   const [savedVehicleMileage, setSavedVehicleMileage] = useState<number | null>(null);
   const [employee, setEmployee] = useState("");
-  const [leadApproverId, setLeadApproverId] = useState("");
-  const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
-  const [leadLoading, setLeadLoading] = useState(false);
   const [dashLightsOn, setDashLightsOn] = useState<string[]>([]);
 
   // ✅ sectionState must rebuild when vehicleType/visibleSections changes
@@ -464,7 +443,6 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
-  const bypassLeadSignoff = canBypassLeadSignoff(currentUserRole);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -687,32 +665,6 @@ export default function InspectionForm({
         return;
       }
       setEquipmentOptions((data ?? []) as EquipmentOption[]);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [vehicleId]);
-
-  useEffect(() => {
-    if (!vehicleId) return;
-    let active = true;
-    void (async () => {
-      setLeadLoading(true);
-      const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id,full_name,email,role")
-        .in("role", ["owner", "operations_manager", "office_admin", "team_lead_1", "team_lead_2"])
-        .order("full_name", { ascending: true })
-        .limit(200);
-      if (!active) return;
-      setLeadLoading(false);
-      if (error) {
-        console.error("Failed loading lead options:", error);
-        setLeadOptions([]);
-        return;
-      }
-      setLeadOptions((data ?? []) as LeadOption[]);
     })();
     return () => {
       active = false;
@@ -1082,9 +1034,6 @@ export default function InspectionForm({
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!employee.trim()) return alert("Teammate is required.");
-    if (!bypassLeadSignoff && !leadApproverId.trim()) {
-      return alert("Lead sign-off is required. Select a lead before submitting.");
-    }
     if (!inspectionStatus) return alert("Inspection status is required.");
 
     if (hasInspectionFailures && !notes.trim())
@@ -1114,7 +1063,7 @@ export default function InspectionForm({
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
       }
-      if (st?.applicable && sectionUsesLoadoutBucket(sec.id)) {
+      if (st?.applicable && sectionUsesLoadoutBucket(sec.id) && sec.id !== "truck") {
         const selected = sectionEquipmentIds[sec.id] ?? [];
         if (selected.length === 0) {
           return alert(`Select at least one item for ${sec.title}.`);
@@ -1173,7 +1122,6 @@ export default function InspectionForm({
       inspectionStatus,
       notes: notes.trim(),
       employee: employee.trim(),
-      leadApproverId: bypassLeadSignoff ? "" : leadApproverId.trim(),
       inspectionDate,
       employeeSignature: employeeSignature.trim(),
       managerSignature: managerSignature.trim()
@@ -1230,9 +1178,8 @@ export default function InspectionForm({
     };
 
     const supabase = createSupabaseBrowser();
-    const leadStatus = bypassLeadSignoff ? "approved" : "pending";
-    const leadApprover = bypassLeadSignoff ? null : leadApproverId.trim();
-    const leadApprovedAt = bypassLeadSignoff ? new Date().toISOString() : null;
+    const leadStatus = "approved";
+    const leadApprovedAt = new Date().toISOString();
 
     const { data: authDataForLead } = await supabase.auth.getUser();
     const currentUserId = authDataForLead.user?.id ?? null;
@@ -1245,11 +1192,11 @@ export default function InspectionForm({
         checklist,
         overall_status: inspectionStatus,
         mileage: m,
-        lead_approver_id: leadApprover,
+        lead_approver_id: null,
         lead_approval_status: leadStatus,
-        lead_approval_requested_at: bypassLeadSignoff ? null : new Date().toISOString(),
+        lead_approval_requested_at: null,
         lead_approved_at: leadApprovedAt,
-        lead_approved_by: bypassLeadSignoff ? currentUserId : null,
+        lead_approved_by: currentUserId,
       })
       .select("id")
       .single();
@@ -1287,20 +1234,6 @@ export default function InspectionForm({
     }
 
     if (insertedInspection?.id) {
-      try {
-        if (!bypassLeadSignoff) {
-          await fetch("/api/inspections/lead-approvals", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "request",
-              inspectionId: insertedInspection.id,
-            }),
-          });
-        }
-      } catch (approvalNotifyError) {
-        console.error("Lead approval notification failed:", approvalNotifyError);
-      }
       try {
         await fetch("/api/form-reports/grade", {
           method: "POST",
@@ -1418,38 +1351,6 @@ export default function InspectionForm({
                 style={inputStyle()}
               />
             </div>
-
-            {bypassLeadSignoff ? (
-              <div>
-                <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                  Lead Sign-Off
-                </div>
-                <div style={{ ...inputStyle(), opacity: 0.85 }}>
-                  Not required for Team Lead or higher roles.
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                  Lead Sign-Off Required *
-                </div>
-                <select
-                  value={leadApproverId}
-                  onChange={(e) => setLeadApproverId(e.target.value)}
-                  style={inputStyle()}
-                  disabled={leadLoading}
-                >
-                  <option value="">{leadLoading ? "Loading leads..." : "Select lead..."}</option>
-                  {leadOptions.map((row) => (
-                    <option key={`lead-${row.id}`} value={row.id}>
-                      {(row.full_name?.trim() || row.email?.trim() || row.id) +
-                        (row.role ? ` (${row.role.replaceAll("_", " ")})` : "")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
           </div>
         </div>
 
@@ -2163,7 +2064,7 @@ export default function InspectionForm({
                             background: "rgba(255,255,255,0.02)",
                           }}
                         >
-                          <div style={{ fontWeight: 700 }}>Truck Loadout Equipment *</div>
+                          <div style={{ fontWeight: 700 }}>Truck Loadout Equipment</div>
                           <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
                             Add equipment one-by-one to the selected bucket for this section.
                           </div>

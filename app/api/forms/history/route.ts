@@ -419,7 +419,7 @@ export async function GET(req: Request) {
         assetLabel: row.equipment_id,
         status: row.status,
         summary: title || summary || null,
-        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history`,
+        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history?${encodeFocus("Maintenance Request", row.id)}`,
       });
     }
   }
@@ -447,7 +447,7 @@ export async function GET(req: Request) {
         assetLabel: row.equipment_id,
         status: row.status_update,
         summary: title || null,
-        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history`,
+        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history?${encodeFocus("Maintenance Log", row.id)}`,
       });
     }
   }
@@ -478,7 +478,7 @@ export async function GET(req: Request) {
         assetLabel: row.equipment_id,
         status: null,
         summary: summary || row.notes || null,
-        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history`,
+        href: `/equipment/${encodeURIComponent(row.equipment_id)}/history?${encodeFocus("Preventative Maintenance", row.id)}`,
       });
     }
   }

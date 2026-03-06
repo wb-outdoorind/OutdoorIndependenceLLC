@@ -75,6 +75,8 @@ type AssetHealthSummary = {
 type Role = AppRole;
 
 type HistoryPreviewItem = {
+  id: string;
+  type: "Maintenance Request" | "Maintenance Log" | "Preventative Maintenance";
   createdAt: string;
   title: string;
   status?: string;
@@ -504,14 +506,9 @@ export default function EquipmentDetailPage() {
     (isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate);
   const canEditEquipment =
     canManageEquipmentMaintenance;
-  const canViewMechanicScore = hasRole(userRole, [
-    "owner",
-    "operations_manager",
-    "office_admin",
-    "mechanic",
-  ]);
+  const canViewMechanicScore = hasRole(userRole, ["mechanic"]);
   const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
-  const canViewScoreTrends = hasRole(userRole, ["owner", "mechanic"]);
+  const canViewScoreTrends = canViewMechanicScore;
   const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canViewMechanicScore;
 
@@ -746,6 +743,8 @@ export default function EquipmentDetailPage() {
     return requestPreviewRows.map((r) => {
       const parsed = parseTitleAndDescription(r.description);
       return {
+        id: r.id,
+        type: "Maintenance Request",
         createdAt: r.created_at,
         title:
           parsed.title ||
@@ -755,6 +754,14 @@ export default function EquipmentDetailPage() {
       };
     });
   }, [requestPreviewRows]);
+
+  function historyItemHref(item: HistoryPreviewItem) {
+    const query = new URLSearchParams({
+      focusType: item.type,
+      focusId: item.id,
+    }).toString();
+    return `/equipment/${routeIdForLinks}/history?${query}`;
+  }
 
   return (
     <main style={{ paddingBottom: 40 }}>
@@ -1152,9 +1159,13 @@ export default function EquipmentDetailPage() {
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
               {historyPreview.map((r, idx) => (
-                <div
+                <Link
                   key={`${r.createdAt}:${idx}`}
+                  href={historyItemHref(r)}
                   style={{
+                    display: "block",
+                    textDecoration: "none",
+                    color: "inherit",
                     border: "1px solid rgba(255,255,255,0.12)",
                     borderRadius: 14,
                     padding: 12,
@@ -1171,7 +1182,10 @@ export default function EquipmentDetailPage() {
                   {r.notes?.trim() ? (
                     <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{r.notes}</div>
                   ) : null}
-                </div>
+                  <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
+                    See Form →
+                  </div>
+                </Link>
               ))}
             </div>
           )}

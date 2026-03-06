@@ -450,6 +450,32 @@ export default function EquipmentMaintenanceRequestPage() {
       return;
     }
 
+    try {
+      const { data: equipmentRow, error: equipmentReadError } = await supabase
+        .from("equipment")
+        .select("current_hours")
+        .eq("id", equipmentId)
+        .maybeSingle();
+      if (equipmentReadError) {
+        console.error("Failed to read equipment hours:", equipmentReadError);
+      } else {
+        const existingHours = Number(equipmentRow?.current_hours ?? 0);
+        const nextHours =
+          Number.isFinite(existingHours) && existingHours > 0
+            ? Math.max(existingHours, h)
+            : h;
+        const { error: equipmentUpdateError } = await supabase
+          .from("equipment")
+          .update({ current_hours: nextHours })
+          .eq("id", equipmentId);
+        if (equipmentUpdateError) {
+          console.error("Failed to update equipment hours:", equipmentUpdateError);
+        }
+      }
+    } catch (equipmentHoursError) {
+      console.error("Unexpected equipment hours sync error:", equipmentHoursError);
+    }
+
     if (savedRequestId) {
       try {
         await fetch("/api/form-reports/grade", {

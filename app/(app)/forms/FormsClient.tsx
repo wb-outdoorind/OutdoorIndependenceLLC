@@ -830,7 +830,7 @@ export default function FormsClient({
 
                   <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <Link href={row.href} style={buttonStyle()}>
-                      Open Form History
+                      See Form
                     </Link>
                     <Link
                       href={

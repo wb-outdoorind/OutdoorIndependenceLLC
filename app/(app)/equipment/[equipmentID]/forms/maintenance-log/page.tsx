@@ -455,13 +455,19 @@ export default function EquipmentMaintenanceLogPage() {
       return alert(`Hours cannot be less than the current stored hours (${currentHours}).`);
     }
 
-    const parsedMechanicSelfScore = mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
+    const canSetMechanicSelfScore = userRole === "mechanic";
+    const parsedMechanicSelfScore =
+      canSetMechanicSelfScore && mechanicSelfScore.trim() ? Number(mechanicSelfScore) : null;
     if (
+      canSetMechanicSelfScore &&
       parsedMechanicSelfScore != null &&
       (!Number.isFinite(parsedMechanicSelfScore) || parsedMechanicSelfScore < 0 || parsedMechanicSelfScore > 100)
     ) {
       return alert("Mechanic Self Score must be a number between 0 and 100.");
     }
+    const mechanicSelfScorePatch = canSetMechanicSelfScore
+      ? { mechanic_self_score: parsedMechanicSelfScore }
+      : {};
 
     const l = Number(laborCost);
     const p = Number(partsCost);
@@ -489,7 +495,7 @@ export default function EquipmentMaintenanceLogPage() {
         .from("equipment_maintenance_logs")
         .update({
           request_id: selectedRequestId || null,
-          mechanic_self_score: parsedMechanicSelfScore,
+          ...mechanicSelfScorePatch,
           hours: h,
           notes: notesValue,
           status_update: status,
@@ -506,7 +512,7 @@ export default function EquipmentMaintenanceLogPage() {
         .insert({
           equipment_id: equipmentId,
           request_id: selectedRequestId || null,
-          mechanic_self_score: parsedMechanicSelfScore,
+          ...mechanicSelfScorePatch,
           hours: h,
           notes: notesValue,
           status_update: status,
@@ -534,6 +540,32 @@ export default function EquipmentMaintenanceLogPage() {
       if (requestUpdateError) {
         console.error("Equipment maintenance request status update failed:", requestUpdateError);
       }
+    }
+
+    try {
+      const { data: equipmentRow, error: equipmentReadError } = await supabase
+        .from("equipment")
+        .select("current_hours")
+        .eq("id", equipmentId)
+        .maybeSingle();
+      if (equipmentReadError) {
+        console.error("Failed to read equipment hours:", equipmentReadError);
+      } else {
+        const existingHours = Number(equipmentRow?.current_hours ?? 0);
+        const nextHours =
+          Number.isFinite(existingHours) && existingHours > 0
+            ? Math.max(existingHours, h)
+            : h;
+        const { error: equipmentUpdateError } = await supabase
+          .from("equipment")
+          .update({ current_hours: nextHours })
+          .eq("id", equipmentId);
+        if (equipmentUpdateError) {
+          console.error("Failed to update equipment hours:", equipmentUpdateError);
+        }
+      }
+    } catch (equipmentHoursError) {
+      console.error("Unexpected equipment hours sync error:", equipmentHoursError);
     }
 
     if (partsUsed.length > 0) {
@@ -698,15 +730,17 @@ export default function EquipmentMaintenanceLogPage() {
               </select>
             </Field>
 
-            <Field label="Mechanic Self Score (0-100, optional)">
-              <input
-                value={mechanicSelfScore}
-                onChange={(e) => setMechanicSelfScore(e.target.value)}
-                inputMode="numeric"
-                placeholder="e.g. 78"
-                style={inputStyle}
-              />
-            </Field>
+            {userRole === "mechanic" ? (
+              <Field label="Mechanic Self Score (0-100, optional)">
+                <input
+                  value={mechanicSelfScore}
+                  onChange={(e) => setMechanicSelfScore(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="e.g. 78"
+                  style={inputStyle}
+                />
+              </Field>
+            ) : null}
 
             <Field label="Linked Request (optional)">
               <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.7 }}>

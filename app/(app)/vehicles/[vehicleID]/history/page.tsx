@@ -879,6 +879,24 @@ export default function VehicleHistoryPage() {
 
                   {x.notes ? <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{x.notes}</div> : null}
 
+                  <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <Link
+                      href={backToHistory}
+                      style={{
+                        textDecoration: "none",
+                        color: "inherit",
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.14)",
+                        background: "rgba(255,255,255,0.04)",
+                        fontSize: 13,
+                        fontWeight: 800,
+                      }}
+                    >
+                      See Form
+                    </Link>
+                  </div>
+
                   {canEditDelete ? (
                     <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <Link

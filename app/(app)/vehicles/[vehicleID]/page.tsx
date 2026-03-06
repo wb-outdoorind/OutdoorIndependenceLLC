@@ -790,14 +790,9 @@ export default function VehicleDetailPage() {
   const isTruck = normalizedVehicleType === "truck";
   const canEditVehicle = canManageVehicleMaintenance;
   const canEditVehicleMileage = canManageVehicleMaintenance;
-  const canViewMechanicScore = hasRole(userRole, [
-    "owner",
-    "operations_manager",
-    "office_admin",
-    "mechanic",
-  ]);
+  const canViewMechanicScore = hasRole(userRole, ["mechanic"]);
   const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
-  const canViewScoreTrends = hasRole(userRole, ["owner", "mechanic"]);
+  const canViewScoreTrends = canViewMechanicScore;
   const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canEditVehicle;
 
@@ -1484,6 +1479,10 @@ export default function VehicleDetailPage() {
                   {r.notes?.trim() ? (
                     <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{r.notes}</div>
                   ) : null}
+
+                  <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
+                    See Form →
+                  </div>
                 </Link>
               ))}
             </div>
