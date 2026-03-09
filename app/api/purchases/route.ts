@@ -99,7 +99,7 @@ type PurchaseRequestAttachmentRow = {
 type ProfileRow = {
   id: string;
   first_name: string | null;
-  middle_name: string | null;
+  middle_initial: string | null;
   last_name: string | null;
   nickname: string | null;
   full_name: string | null;
@@ -166,7 +166,7 @@ function parseLinkType(value: unknown): LinkType | null {
 function profileDisplayName(profile: ProfileRow) {
   const nickname = asString(profile.nickname);
   const firstName = asString(profile.first_name);
-  const middle = asString(profile.middle_name);
+  const middle = asString(profile.middle_initial);
   const lastName = asString(profile.last_name);
   const fullName = asString(profile.full_name);
   const email = asString(profile.email);
@@ -403,7 +403,7 @@ export async function GET(req: Request) {
   const teammateRoles = ["owner", "operations_manager", "office_admin", "mechanic", "team_lead_1", "team_lead_2", "team_member_1", "team_member_2", "apprentice", "employee"];
   const { data: teammateRows, error: teammateError } = await admin
     .from("profiles")
-    .select("id,first_name,middle_name,last_name,nickname,full_name,email,role,department,status")
+    .select("id,first_name,middle_initial,last_name,nickname,full_name,email,role,department,status")
     .in("role", teammateRoles)
     .order("full_name", { ascending: true })
     .limit(1200);
@@ -509,7 +509,7 @@ export async function POST(req: Request) {
   if (requestedForId) {
     const { data: requestedForProfile } = await admin
       .from("profiles")
-      .select("id,first_name,middle_name,last_name,nickname,full_name,email,role,department,status")
+      .select("id,first_name,middle_initial,last_name,nickname,full_name,email,role,department,status")
       .eq("id", requestedForId)
       .maybeSingle();
     if (requestedForProfile) {
