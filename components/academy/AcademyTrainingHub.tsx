@@ -132,6 +132,7 @@ const MANAGEMENT_ROLES = new Set<AppRole>(["owner", "operations_manager", "offic
 const MANAGEMENT_PLUS_MECHANIC_ROLES = new Set<AppRole>(["owner", "operations_manager", "office_admin", "mechanic"]);
 const LEAD_ROLES = new Set<AppRole>(["team_lead_1", "team_lead_2"]);
 const TEAMMATE_ROLES = new Set<AppRole>(["team_member_1", "team_member_2", "employee"]);
+const DAILY_FORM_ENABLED_DEPARTMENTS = new Set(["mowing"]);
 
 function formatPerson(profile: ProfileRow | null | undefined, fallback = "Unassigned") {
   if (!profile) return fallback;
@@ -164,6 +165,10 @@ function getWeekFromStart(startDate: string, targetDateIso: string, maxWeeks: nu
   const diffDays = Number.isFinite(diffMs) ? Math.floor(diffMs / 86_400_000) : 0;
   const week = Math.floor(Math.max(diffDays, 0) / 7) + 1;
   return clampWeek(week, maxWeeks);
+}
+
+function hasDailyFormEnabled(department: string | null | undefined) {
+  return DAILY_FORM_ENABLED_DEPARTMENTS.has((department || "").trim().toLowerCase());
 }
 
 export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
@@ -317,6 +322,8 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
   const activeEnrollment = useMemo(() => {
     return apprenticeRows.find((row) => row.id === activeEnrollmentId) ?? null;
   }, [apprenticeRows, activeEnrollmentId]);
+  const activeEnrollmentDepartment = activeEnrollment?.trainee?.department || activeEnrollment?.department || null;
+  const activeEnrollmentSupportsDailyForm = hasDailyFormEnabled(activeEnrollmentDepartment);
 
   const canEditAnyProgress = useMemo(() => {
     if (!viewerId || !viewerRole) return false;
@@ -516,6 +523,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
       return;
     }
 
+    if (!activeEnrollmentSupportsDailyForm) {
+      setDraftProgressId(null);
+      setDraftStatusBySkillId({});
+      setDraftNoteBySkillId({});
+      setDraftMessage("Daily checklist is not configured for this department yet.");
+      return;
+    }
+
     const baseStatus: Record<string, number> = {};
     for (const skill of skills) {
       baseStatus[skill.id] = 1;
@@ -557,7 +572,16 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
     } else {
       setDraftMessage("No previous checklist found. Starting with all skills at Not Yet Introduced.");
     }
-  }, [activeEnrollment, activeDate, canViewTrainerNotes, dailyProgress, dailySkillNotes, dailySkillProgress, skills]);
+  }, [
+    activeEnrollment,
+    activeEnrollmentSupportsDailyForm,
+    activeDate,
+    canViewTrainerNotes,
+    dailyProgress,
+    dailySkillNotes,
+    dailySkillProgress,
+    skills,
+  ]);
 
   useEffect(() => {
     if (!activeEnrollment) {
@@ -622,6 +646,10 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
 
   async function saveDailyProgress() {
     if (!viewerId || !program || !activeEnrollment || !canEditAnyProgress) return;
+    if (!activeEnrollmentSupportsDailyForm) {
+      setError("Daily checklist is not configured for this department yet.");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -883,7 +911,11 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
       {info ? <div style={{ ...inlineMessageStyle, color: "#a6ffbe" }}>{info}</div> : null}
 
       {viewerRole === "apprentice" ? (
-        <TraineeDashboard rows={selfApprenticeRows} skillsByWeek={skillsByWeek} dailySkillProgress={dailySkillProgress} />
+        <TraineeDashboard
+          rows={selfApprenticeRows}
+          skillsByWeek={skillsByWeek}
+          dailySkillProgress={dailySkillProgress}
+        />
       ) : null}
 
       {(isTeammateRole || isLead || isManagementOrMechanic) && viewerRole !== "apprentice" ? (
@@ -972,7 +1004,7 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                             setActiveDate(todayIso);
                           }}
                         >
-                          Open Checklist
+                          {hasDailyFormEnabled(row.trainee?.department || row.department) ? "Open Checklist" : "Open Progress"}
                         </button>
                         {canManageAssignments ? (
                           <select
@@ -1002,103 +1034,110 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
               <div style={{ opacity: 0.78, marginBottom: 10 }}>
                 Apprentice: <strong>{formatPerson(activeEnrollment.trainee)}</strong> · Trainer: {formatPerson(activeEnrollment.trainer)}
               </div>
+              {activeEnrollmentSupportsDailyForm ? (
+                <>
+                  <div style={twoColGridStyle}>
+                    <Field label="Checklist Date">
+                      <input
+                        type="date"
+                        value={activeDate}
+                        onChange={(e) => setActiveDate(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </Field>
+                    <Field label="Live Draft Score">
+                      <div style={scoreBadgeStyle}>{draftScore.toFixed(1)}%</div>
+                    </Field>
+                  </div>
 
-              <div style={twoColGridStyle}>
-                <Field label="Checklist Date">
-                  <input
-                    type="date"
-                    value={activeDate}
-                    onChange={(e) => setActiveDate(e.target.value)}
-                    style={inputStyle}
-                  />
-                </Field>
-                <Field label="Live Draft Score">
-                  <div style={scoreBadgeStyle}>{draftScore.toFixed(1)}%</div>
-                </Field>
-              </div>
+                  {draftMessage ? <div style={{ opacity: 0.74, marginBottom: 10 }}>{draftMessage}</div> : null}
 
-              {draftMessage ? <div style={{ opacity: 0.74, marginBottom: 10 }}>{draftMessage}</div> : null}
-
-              <div style={{ display: "grid", gap: 14, marginBottom: 12 }}>
-                {weeks.map((week) => {
-                  const list = skillsByWeek.get(week.week_number) ?? [];
-                  return (
-                    <section key={week.id} style={weekSectionStyle}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                        <div style={{ fontWeight: 800 }}>
-                          Week {week.week_number}: {week.title}
-                        </div>
-                        <div style={goalBadgeStyle}>{week.goal_percent}% Goal</div>
-                      </div>
-                      <div style={{ opacity: 0.72, marginTop: 4, marginBottom: 8 }}>{week.goal_description}</div>
-
-                      <div style={{ display: "grid", gap: 8 }}>
-                        {list.map((skill) => {
-                          const currentStatus = draftStatusBySkillId[skill.id] ?? 1;
-                          const currentNote = draftNoteBySkillId[skill.id] ?? "";
-                          const statusLabel = STATUS_OPTIONS.find((option) => option.value === currentStatus)?.label ?? "Not Yet Introduced";
-                          const statusColor = STATUS_OPTIONS.find((option) => option.value === currentStatus)?.badge ?? "#3e4047";
-                          return (
-                            <div key={skill.id} style={skillRowStyle}>
-                              <div style={{ fontWeight: 700 }}>{skill.skill_label}</div>
-                              <div style={skillControlRowStyle}>
-                                <select
-                                  value={String(currentStatus)}
-                                  onChange={(e) =>
-                                    setDraftStatusBySkillId((prev) => ({
-                                      ...prev,
-                                      [skill.id]: Number(e.target.value),
-                                    }))
-                                  }
-                                  style={{ ...inputStyle, minWidth: 230 }}
-                                >
-                                  {STATUS_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.value}. {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                                <div style={{ ...statusBadgeStyle, borderColor: statusColor }}>
-                                  {statusLabel}
-                                </div>
-                              </div>
-                              {canViewTrainerNotes ? (
-                                <textarea
-                                  value={currentNote}
-                                  onChange={(e) =>
-                                    setDraftNoteBySkillId((prev) => ({
-                                      ...prev,
-                                      [skill.id]: e.target.value,
-                                    }))
-                                  }
-                                  style={{ ...inputStyle, minHeight: 70 }}
-                                  placeholder="Trainer note for today (not visible to apprentice)"
-                                />
-                              ) : null}
+                  <div style={{ display: "grid", gap: 14, marginBottom: 12 }}>
+                    {weeks.map((week) => {
+                      const list = skillsByWeek.get(week.week_number) ?? [];
+                      return (
+                        <section key={week.id} style={weekSectionStyle}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: 800 }}>
+                              Week {week.week_number}: {week.title}
                             </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
+                            <div style={goalBadgeStyle}>{week.goal_percent}% Goal</div>
+                          </div>
+                          <div style={{ opacity: 0.72, marginTop: 4, marginBottom: 8 }}>{week.goal_description}</div>
 
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                <button type="button" style={actionButtonStyle} onClick={() => void saveDailyProgress()} disabled={saving}>
-                  {saving ? "Saving..." : "Save Daily Progress"}
-                </button>
-                <button
-                  type="button"
-                  style={secondaryButtonStyle}
-                  onClick={() => {
-                    setActiveDate(todayIso);
-                    setDraftMessage(null);
-                  }}
-                >
-                  Reset to Today
-                </button>
-              </div>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {list.map((skill) => {
+                              const currentStatus = draftStatusBySkillId[skill.id] ?? 1;
+                              const currentNote = draftNoteBySkillId[skill.id] ?? "";
+                              const statusLabel = STATUS_OPTIONS.find((option) => option.value === currentStatus)?.label ?? "Not Yet Introduced";
+                              const statusColor = STATUS_OPTIONS.find((option) => option.value === currentStatus)?.badge ?? "#3e4047";
+                              return (
+                                <div key={skill.id} style={skillRowStyle}>
+                                  <div style={{ fontWeight: 700 }}>{skill.skill_label}</div>
+                                  <div style={skillControlRowStyle}>
+                                    <select
+                                      value={String(currentStatus)}
+                                      onChange={(e) =>
+                                        setDraftStatusBySkillId((prev) => ({
+                                          ...prev,
+                                          [skill.id]: Number(e.target.value),
+                                        }))
+                                      }
+                                      style={{ ...inputStyle, minWidth: 230 }}
+                                    >
+                                      {STATUS_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.value}. {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <div style={{ ...statusBadgeStyle, borderColor: statusColor }}>
+                                      {statusLabel}
+                                    </div>
+                                  </div>
+                                  {canViewTrainerNotes ? (
+                                    <textarea
+                                      value={currentNote}
+                                      onChange={(e) =>
+                                        setDraftNoteBySkillId((prev) => ({
+                                          ...prev,
+                                          [skill.id]: e.target.value,
+                                        }))
+                                      }
+                                      style={{ ...inputStyle, minHeight: 70 }}
+                                      placeholder="Trainer note for today (not visible to apprentice)"
+                                    />
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                    <button type="button" style={actionButtonStyle} onClick={() => void saveDailyProgress()} disabled={saving}>
+                      {saving ? "Saving..." : "Save Daily Progress"}
+                    </button>
+                    <button
+                      type="button"
+                      style={secondaryButtonStyle}
+                      onClick={() => {
+                        setActiveDate(todayIso);
+                        setDraftMessage(null);
+                      }}
+                    >
+                      Reset to Today
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={departmentNotReadyStyle}>
+                  Daily progression checklist is not configured for this department yet. Dashboard scoring and assignment tracking remain available.
+                </div>
+              )}
 
               <section style={weekSectionStyle}>
                 <h5 style={{ marginTop: 0, marginBottom: 8 }}>Final Certification</h5>
@@ -1218,6 +1257,7 @@ function TraineeDashboard({
   }
 
   const row = rows[0];
+  const dailyFormEnabled = hasDailyFormEnabled(row.trainee?.department || row.department);
   const latestRow = row.latestProgress;
   const statusBySkill = new Map<string, number>();
   if (latestRow) {
@@ -1232,11 +1272,16 @@ function TraineeDashboard({
       <div style={{ opacity: 0.78, marginBottom: 10 }}>
         Current score: <strong>{row.score.toFixed(1)}%</strong> · Current week: {row.currentWeek} · Target: {row.targetWeekGoal}%
       </div>
+      {!dailyFormEnabled ? (
+        <div style={departmentNotReadyStyle}>
+          Daily progression checklist is not configured for your department yet. Your progress dashboard will update when that checklist is enabled.
+        </div>
+      ) : null}
       <div style={{ opacity: 0.72, marginBottom: 10 }}>
         Daily progression checklist {latestRow ? `(latest update: ${latestRow.progress_date})` : "(no checklist submitted yet)"}
       </div>
 
-      {latestRow ? (
+      {dailyFormEnabled && latestRow ? (
         <div style={{ display: "grid", gap: 10 }}>
           {[...skillsByWeek.entries()]
             .sort((a, b) => a[0] - b[0])
@@ -1258,9 +1303,9 @@ function TraineeDashboard({
               </section>
             ))}
         </div>
-      ) : (
+      ) : dailyFormEnabled ? (
         <div style={{ opacity: 0.74 }}>Your trainer has not submitted a checklist yet.</div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -1493,4 +1538,13 @@ const statusBadgeStyle: React.CSSProperties = {
 const inlineMessageStyle: React.CSSProperties = {
   marginBottom: 8,
   fontSize: 13,
+};
+
+const departmentNotReadyStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.16)",
+  borderRadius: 10,
+  background: "rgba(255,255,255,0.03)",
+  padding: "10px 12px",
+  opacity: 0.86,
+  marginBottom: 10,
 };
