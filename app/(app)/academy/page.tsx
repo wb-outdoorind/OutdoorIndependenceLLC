@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import AcademyTrainingHub from "@/components/academy/AcademyTrainingHub";
 
 type Role = AppRole;
 
@@ -72,6 +73,9 @@ function AcademyPageContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeItem, setActiveItem] = useState<ActiveItem | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [viewerDepartment, setViewerDepartment] = useState<string | null>(null);
+  const [viewerName, setViewerName] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const [assetTypesByContentId, setAssetTypesByContentId] = useState<Record<string, string[]>>({});
@@ -122,9 +126,10 @@ function AcademyPageContent() {
       const supabase = createSupabaseBrowser();
       const { data: authData } = await supabase.auth.getUser();
       if (authData.user) {
+        setViewerId(authData.user.id);
         const { data: profile } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role,department,nickname,first_name,full_name")
           .eq("id", authData.user.id)
           .maybeSingle();
         setRole(
@@ -133,7 +138,18 @@ function AcademyPageContent() {
             readRoleViewOverride()
           ) as Role
         );
+        setViewerDepartment(typeof profile?.department === "string" ? profile.department : null);
+        const nextViewerName =
+          (typeof profile?.nickname === "string" && profile.nickname.trim()) ||
+          (typeof profile?.first_name === "string" && profile.first_name.trim()) ||
+          (typeof profile?.full_name === "string" && profile.full_name.trim()) ||
+          authData.user.email ||
+          null;
+        setViewerName(nextViewerName);
       } else {
+        setViewerId(null);
+        setViewerDepartment(null);
+        setViewerName(null);
         setRole(null);
       }
 
@@ -449,14 +465,21 @@ function AcademyPageContent() {
   }, [section]);
 
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
+    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
       <h1 style={{ marginBottom: 6 }}>OI Academy</h1>
       <div style={{ opacity: 0.74, marginBottom: 16 }}>
         SOPs and training content for field and shop teams.
       </div>
 
+      <AcademyTrainingHub
+        viewerId={viewerId}
+        viewerRole={role}
+        viewerDepartment={viewerDepartment}
+        viewerName={viewerName}
+      />
+
       {canUpload ? (
-        <section style={{ ...cardStyle, marginBottom: 18 }}>
+        <section style={{ ...cardStyle, marginBottom: 18, order: 30 }}>
           <h2 style={{ marginTop: 0, marginBottom: 8 }}>Upload Academy Content</h2>
           <div style={{ opacity: 0.74, marginBottom: 12 }}>
             Allowed roles: owner, operations manager, office admin, and mechanic.
