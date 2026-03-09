@@ -93,6 +93,14 @@ type PurchaseAttachmentRow = {
   created_at: string;
 };
 
+type PurchaseVendorRow = {
+  id: string;
+  purchase_request_id: string;
+  vendor_name: string;
+  sort_order: number;
+  created_at: string;
+};
+
 type TeammateOption = {
   id: string;
   name: string;
@@ -106,7 +114,16 @@ type PurchasesResponse = {
   requests?: PurchaseRequestRow[];
   itemsByRequestId?: Record<string, PurchaseItemRow[]>;
   attachmentsByRequestId?: Record<string, PurchaseAttachmentRow[]>;
+  vendorsByRequestId?: Record<string, PurchaseVendorRow[]>;
   teammates?: TeammateOption[];
+  prefill?: {
+    requestedForId?: string | null;
+    department?: string | null;
+    timeline?: PurchaseTimeline | null;
+    reason?: string | null;
+    itemName?: string | null;
+    itemDescription?: string | null;
+  } | null;
   error?: string;
 };
 
@@ -117,6 +134,11 @@ type ItemDraft = {
   quantity: string;
   estimatedUnitCost: string;
   estimatedTotal: string;
+};
+
+type VendorDraft = {
+  localId: string;
+  name: string;
 };
 
 type ManagerDecisionDraft = {
@@ -161,6 +183,12 @@ function fmtDateOnly(value: string | null | undefined) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function summarizeVendors(vendors: string[]) {
+  if (!vendors.length) return "No vendor";
+  if (vendors.length === 1) return vendors[0];
+  return `${vendors[0]} +${vendors.length - 1} more`;
 }
 
 function statusBadgeStyle(status: string): React.CSSProperties {
@@ -244,14 +272,18 @@ export default function PurchasesClient({
   const [requests, setRequests] = useState<PurchaseRequestRow[]>([]);
   const [itemsByRequestId, setItemsByRequestId] = useState<Record<string, PurchaseItemRow[]>>({});
   const [attachmentsByRequestId, setAttachmentsByRequestId] = useState<Record<string, PurchaseAttachmentRow[]>>({});
+  const [vendorsByRequestId, setVendorsByRequestId] = useState<Record<string, PurchaseVendorRow[]>>({});
   const [teammates, setTeammates] = useState<TeammateOption[]>([]);
   const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]["value"]>("all");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
+  const prefillAppliedKeyRef = useRef("__unset__");
 
   const [requestedForId, setRequestedForId] = useState("");
   const [department, setDepartment] = useState<(typeof PURCHASE_DEPARTMENTS)[number]>("Maintenance");
-  const [vendorName, setVendorName] = useState("");
+  const [vendors, setVendors] = useState<VendorDraft[]>([
+    { localId: crypto.randomUUID(), name: "" },
+  ]);
   const [estimatedTotal, setEstimatedTotal] = useState("");
   const [timeline, setTimeline] = useState<PurchaseTimeline | "">("");
   const [reason, setReason] = useState("");
@@ -317,7 +349,23 @@ export default function PurchasesClient({
   async function loadData(preferSelectedId?: string) {
     setLoading(true);
     setLoadingError(null);
-    const res = await fetch("/api/purchases", { method: "GET" });
+    const params = new URLSearchParams();
+    if (maintenanceRequestType) params.set("maintenanceRequestType", maintenanceRequestType);
+    if (maintenanceRequestId.trim()) params.set("maintenanceRequestId", maintenanceRequestId.trim());
+    if (maintenanceLogType) params.set("maintenanceLogType", maintenanceLogType);
+    if (maintenanceLogId.trim()) params.set("maintenanceLogId", maintenanceLogId.trim());
+    if (assetType) params.set("assetType", assetType);
+    if (assetId.trim()) params.set("assetId", assetId.trim());
+    params.set("prefill", "1");
+    const contextKey = [
+      maintenanceRequestType || "",
+      maintenanceRequestId.trim(),
+      maintenanceLogType || "",
+      maintenanceLogId.trim(),
+      assetType || "",
+      assetId.trim(),
+    ].join("|");
+    const res = await fetch(`/api/purchases?${params.toString()}`, { method: "GET" });
     const json = (await res.json().catch(() => ({}))) as PurchasesResponse;
     if (!res.ok) {
       setLoadingError(json.error || "Failed to load purchases.");
@@ -328,7 +376,45 @@ export default function PurchasesClient({
     setRequests(nextRequests);
     setItemsByRequestId(json.itemsByRequestId ?? {});
     setAttachmentsByRequestId(json.attachmentsByRequestId ?? {});
+    setVendorsByRequestId(json.vendorsByRequestId ?? {});
     setTeammates(Array.isArray(json.teammates) ? json.teammates : []);
+
+    if (prefillAppliedKeyRef.current !== contextKey && json.prefill) {
+      const prefill = json.prefill;
+      if (typeof prefill.requestedForId === "string" && prefill.requestedForId) {
+        setRequestedForId((prev) => (prev.trim() ? prev : prefill.requestedForId ?? ""));
+      }
+      if (typeof prefill.department === "string" && PURCHASE_DEPARTMENTS.includes(prefill.department as (typeof PURCHASE_DEPARTMENTS)[number])) {
+        setDepartment((prev) =>
+          prev === "Maintenance"
+            ? (prefill.department as (typeof PURCHASE_DEPARTMENTS)[number])
+            : prev
+        );
+      }
+      if (typeof prefill.timeline === "string" && prefill.timeline) {
+        setTimeline((prev) => (prev ? prev : (prefill.timeline as PurchaseTimeline)));
+      }
+      if (typeof prefill.reason === "string" && prefill.reason) {
+        setReason((prev) => (prev.trim() ? prev : prefill.reason ?? ""));
+      }
+      if (typeof prefill.itemName === "string" && prefill.itemName) {
+        setItems((prev) => {
+          if (!prev.length) return prev;
+          const first = prev[0];
+          if (first.name.trim()) return prev;
+          return [{ ...first, name: prefill.itemName ?? "" }, ...prev.slice(1)];
+        });
+      }
+      if (typeof prefill.itemDescription === "string" && prefill.itemDescription) {
+        setItems((prev) => {
+          if (!prev.length) return prev;
+          const first = prev[0];
+          if (first.description.trim()) return prev;
+          return [{ ...first, description: prefill.itemDescription ?? "" }, ...prev.slice(1)];
+        });
+      }
+      prefillAppliedKeyRef.current = contextKey;
+    }
 
     const selected = preferSelectedId || selectedRequestId;
     if (selected && nextRequests.some((row) => row.id === selected)) {
@@ -342,7 +428,7 @@ export default function PurchasesClient({
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [assetId, assetType, maintenanceLogId, maintenanceLogType, maintenanceRequestId, maintenanceRequestType]);
 
   const filteredRequests = useMemo(() => {
     if (statusFilter === "all") return requests;
@@ -372,6 +458,14 @@ export default function PurchasesClient({
     () => selectedAttachments.filter((row) => row.attachment_type === "receipt"),
     [selectedAttachments]
   );
+  const selectedVendors = useMemo(() => {
+    if (!selectedRequest) return [];
+    const rows = vendorsByRequestId[selectedRequest.id] ?? [];
+    const names = rows.map((row) => row.vendor_name).filter(Boolean);
+    if (names.length) return names;
+    if (selectedRequest.vendor_name) return [selectedRequest.vendor_name];
+    return [];
+  }, [selectedRequest, vendorsByRequestId]);
 
   useEffect(() => {
     if (!selectedRequest) return;
@@ -424,6 +518,18 @@ export default function PurchasesClient({
     setItems((prev) => prev.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
   }
 
+  function updateVendor(localId: string, patch: Partial<VendorDraft>) {
+    setVendors((prev) => prev.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
+  }
+
+  function addVendorRow() {
+    setVendors((prev) => [...prev, { localId: crypto.randomUUID(), name: "" }]);
+  }
+
+  function removeVendorRow(localId: string) {
+    setVendors((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.localId !== localId)));
+  }
+
   function addItemRow() {
     setItems((prev) => [
       ...prev,
@@ -443,7 +549,7 @@ export default function PurchasesClient({
   }
 
   function resetCreateForm() {
-    setVendorName("");
+    setVendors([{ localId: crypto.randomUUID(), name: "" }]);
     setEstimatedTotal("");
     setTimeline("");
     setReason("");
@@ -496,7 +602,10 @@ export default function PurchasesClient({
       setInlineMessage("Teammate Name is required.");
       return;
     }
-    if (!vendorName.trim()) {
+    const preparedVendors = vendors
+      .map((row) => row.name.trim())
+      .filter((name, idx, arr) => name && arr.findIndex((v) => v.toLowerCase() === name.toLowerCase()) === idx);
+    if (!preparedVendors.length) {
       setInlineMessage("Vendor/store name is required.");
       return;
     }
@@ -527,7 +636,7 @@ export default function PurchasesClient({
     const payload = {
       requestedForId,
       department,
-      vendorName,
+      vendors: preparedVendors,
       estimatedTotal,
       timeline: timeline || undefined,
       reason,
@@ -729,8 +838,8 @@ export default function PurchasesClient({
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ffb0b0" }}>{loadingError}</div>
       ) : (
         <>
-          <section style={{ marginTop: 14, display: "grid", gap: 14, gridTemplateColumns: "minmax(420px, 1.2fr) minmax(360px, 1fr)" }}>
-            <form onSubmit={onCreateRequest} style={cardStyle()}>
+          <section style={{ marginTop: 14, display: "grid", gap: 14 }}>
+            <form onSubmit={onCreateRequest} style={{ ...cardStyle(), order: 2 }}>
               <div style={{ fontWeight: 900, marginBottom: 10 }}>Create Purchase Request</div>
               <div style={{ opacity: 0.75, marginBottom: 10 }}>Date of Request: {new Date().toLocaleDateString()}</div>
               <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
@@ -755,11 +864,6 @@ export default function PurchasesClient({
                       </option>
                     ))}
                   </select>
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Vendor / Store Name *</span>
-                  <input value={vendorName} onChange={(e) => setVendorName(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>
@@ -801,6 +905,50 @@ export default function PurchasesClient({
                     />
                   </label>
                 ) : null}
+              </div>
+
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 800 }}>Vendor(s) / Store(s) *</div>
+                  <button type="button" onClick={addVendorRow} style={buttonStyle()} disabled={!canCreate || saving}>
+                    Add Vendor
+                  </button>
+                </div>
+                <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                  {vendors.map((row, idx) => (
+                    <div
+                      key={row.localId}
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 12,
+                        padding: 10,
+                        display: "grid",
+                        gap: 8,
+                        gridTemplateColumns: "minmax(0,1fr) auto",
+                        alignItems: "end",
+                      }}
+                    >
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>Vendor {idx + 1}</span>
+                        <input
+                          value={row.name}
+                          onChange={(e) => updateVendor(row.localId, { name: e.target.value })}
+                          style={inputStyle()}
+                          placeholder="Type vendor/store name"
+                          disabled={!canCreate || saving}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeVendorRow(row.localId)}
+                        style={buttonStyle()}
+                        disabled={!canCreate || saving || vendors.length <= 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
@@ -867,8 +1015,14 @@ export default function PurchasesClient({
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontWeight: 800, marginBottom: 8 }}>Item(s) Requested</div>
                 <div style={{ display: "grid", gap: 10 }}>
-                  {items.map((row) => (
+                  {items.map((row, idx) => (
                     <div key={row.localId} style={{ ...cardStyle(), padding: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 800 }}>Item {idx + 1}</div>
+                        <button type="button" onClick={() => removeItemRow(row.localId)} style={buttonStyle()} disabled={!canCreate || saving || items.length <= 1}>
+                          Remove Item
+                        </button>
+                      </div>
                       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
                         <label style={{ display: "grid", gap: 6 }}>
                           <span>Item *</span>
@@ -891,11 +1045,6 @@ export default function PurchasesClient({
                         <span>Description (optional)</span>
                         <textarea value={row.description} onChange={(e) => updateItem(row.localId, { description: e.target.value })} rows={2} style={{ ...inputStyle(), resize: "vertical" }} disabled={!canCreate || saving} />
                       </label>
-                      <div style={{ marginTop: 8 }}>
-                        <button type="button" onClick={() => removeItemRow(row.localId)} style={buttonStyle()} disabled={!canCreate || saving || items.length <= 1}>
-                          Remove Item
-                        </button>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -966,7 +1115,7 @@ export default function PurchasesClient({
               </div>
             </form>
 
-            <section style={cardStyle()}>
+            <section style={{ ...cardStyle(), order: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 900 }}>Purchase Queue</div>
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof FILTER_OPTIONS)[number]["value"])} style={{ ...inputStyle(), width: 220 }}>
@@ -983,6 +1132,12 @@ export default function PurchasesClient({
                 ) : (
                   filteredRequests.map((row) => {
                     const itemCount = (itemsByRequestId[row.id] ?? []).length;
+                    const vendorNames = (vendorsByRequestId[row.id] ?? [])
+                      .map((vendor) => vendor.vendor_name)
+                      .filter(Boolean);
+                    const vendorLabel = summarizeVendors(
+                      vendorNames.length ? vendorNames : [row.vendor_name]
+                    );
                     const selected = row.id === selectedRequestId;
                     return (
                       <button
@@ -1002,7 +1157,7 @@ export default function PurchasesClient({
                         }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                          <div style={{ fontWeight: 800 }}>{row.vendor_name}</div>
+                          <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
                           <span style={statusBadgeStyle(row.overall_status)}>{purchaseOverallStatusLabel(row.overall_status)}</span>
                         </div>
                         <div style={{ fontSize: 13, opacity: 0.86 }}>
@@ -1041,7 +1196,10 @@ export default function PurchasesClient({
                 <div><strong>Teammate:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
                 <div><strong>Date:</strong> {fmtDateOnly(selectedRequest.request_date)}</div>
                 <div><strong>Department:</strong> {selectedRequest.department}</div>
-                <div><strong>Vendor:</strong> {selectedRequest.vendor_name}</div>
+                <div>
+                  <strong>Vendor(s):</strong>{" "}
+                  {selectedVendors.length ? selectedVendors.join(", ") : "-"}
+                </div>
                 <div><strong>Estimated Total:</strong> {asCurrency(selectedRequest.estimated_total)}</div>
                 <div><strong>Timeline:</strong> {selectedRequest.timeline}</div>
                 <div><strong>Reimbursable:</strong> {selectedRequest.reimbursable ? "Yes" : "No"}</div>

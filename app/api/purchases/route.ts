@@ -96,6 +96,14 @@ type PurchaseRequestAttachmentRow = {
   created_at: string;
 };
 
+type PurchaseRequestVendorRow = {
+  id: string;
+  purchase_request_id: string;
+  vendor_name: string;
+  sort_order: number;
+  created_at: string;
+};
+
 type ProfileRow = {
   id: string;
   first_name: string | null;
@@ -129,6 +137,15 @@ type ApDecisionInput = DecisionInput & {
   approvedPaymentMethodOther?: string;
   approvedPoNumber?: string;
   fundsAvailableDate?: string;
+};
+
+type PurchasePrefill = {
+  requestedForId: string | null;
+  department: string | null;
+  timeline: PurchaseTimeline | null;
+  reason: string | null;
+  itemName: string | null;
+  itemDescription: string | null;
 };
 
 function asString(value: unknown) {
@@ -203,6 +220,26 @@ function parseApDecisionRows(raw: unknown): ApDecisionInput[] {
   return raw.map((row) => (row && typeof row === "object" ? (row as ApDecisionInput) : {}));
 }
 
+function parseVendors(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  const dedupe = new Set<string>();
+  const out: string[] = [];
+  for (const row of raw) {
+    let next = "";
+    if (typeof row === "string") {
+      next = row.trim();
+    } else if (row && typeof row === "object") {
+      next = asString((row as { name?: string }).name);
+    }
+    if (!next) continue;
+    const dedupeKey = next.toLowerCase();
+    if (dedupe.has(dedupeKey)) continue;
+    dedupe.add(dedupeKey);
+    out.push(next);
+  }
+  return out;
+}
+
 function normalizeItemInput(item: ItemInput, idx: number) {
   const name = asString(item.name);
   if (!name) throw new Error(`Item ${idx + 1} name is required.`);
@@ -245,6 +282,169 @@ async function lookupLinkedUrgency(
     .eq("id", maintenanceRequestId)
     .maybeSingle();
   return asNullableString((data as { urgency?: string } | null)?.urgency);
+}
+
+function parseTitleAndBody(raw: string | null) {
+  if (!raw) return { title: null as string | null, body: null as string | null };
+  const trimmed = raw.trim();
+  if (!trimmed) return { title: null as string | null, body: null as string | null };
+  const lines = trimmed.split("\n");
+  const first = lines[0]?.trim() ?? "";
+
+  let title: string | null = null;
+  if (first.toLowerCase().startsWith("title:")) {
+    title = asNullableString(first.slice("title:".length));
+  }
+
+  let body = trimmed;
+  if (title) {
+    body = lines.slice(2).join("\n").trim();
+    if (!body) {
+      body = lines.slice(1).join("\n").trim();
+    }
+  }
+
+  return {
+    title,
+    body: asNullableString(body),
+  };
+}
+
+function asSummarySnippet(value: string | null, max = 220) {
+  const flat = asString(value).replace(/\s+/g, " ");
+  if (!flat) return null;
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, max - 3)}...`;
+}
+
+async function buildLinkedPrefill(
+  admin: ReturnType<typeof createSupabaseAdmin>,
+  context: {
+    maintenanceRequestType: LinkType | null;
+    maintenanceRequestId: string | null;
+    maintenanceLogType: LinkType | null;
+    maintenanceLogId: string | null;
+  },
+  fallbackTimeline: PurchaseTimeline
+): Promise<Pick<PurchasePrefill, "timeline" | "reason" | "itemName" | "itemDescription">> {
+  let linkedUrgency: string | null = null;
+  let linkedReason: string | null = null;
+  let linkedItemName: string | null = null;
+  let linkedItemDescription: string | null = null;
+
+  const maintenanceRequestType = context.maintenanceRequestType;
+  const maintenanceRequestId = context.maintenanceRequestId;
+
+  if (maintenanceRequestType && maintenanceRequestId) {
+    if (maintenanceRequestType === "vehicle") {
+      const { data } = await admin
+        .from("maintenance_requests")
+        .select("id,urgency,system_affected,description")
+        .eq("id", maintenanceRequestId)
+        .maybeSingle();
+      const row = data as
+        | {
+            id?: string;
+            urgency?: string;
+            system_affected?: string;
+            description?: string | null;
+          }
+        | null;
+      linkedUrgency = asNullableString(row?.urgency);
+      const system = asNullableString(row?.system_affected);
+      const parsed = parseTitleAndBody(row?.description ?? null);
+      const summary = asSummarySnippet(parsed.body);
+      linkedReason = [
+        `Linked vehicle maintenance request ${maintenanceRequestId}.`,
+        system ? `System: ${system}.` : null,
+        summary ? `Issue: ${summary}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      linkedItemName = system ? `${system} parts / repair` : "Replacement parts / repair";
+      linkedItemDescription = parsed.title ?? summary;
+    } else {
+      const { data } = await admin
+        .from("equipment_maintenance_requests")
+        .select("id,urgency,system_affected,description")
+        .eq("id", maintenanceRequestId)
+        .maybeSingle();
+      const row = data as
+        | {
+            id?: string;
+            urgency?: string;
+            system_affected?: string;
+            description?: string | null;
+          }
+        | null;
+      linkedUrgency = asNullableString(row?.urgency);
+      const system = asNullableString(row?.system_affected);
+      const parsed = parseTitleAndBody(row?.description ?? null);
+      const summary = asSummarySnippet(parsed.body);
+      linkedReason = [
+        `Linked equipment maintenance request ${maintenanceRequestId}.`,
+        system ? `System: ${system}.` : null,
+        summary ? `Issue: ${summary}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      linkedItemName = system ? `${system} parts / repair` : "Replacement parts / repair";
+      linkedItemDescription = parsed.title ?? summary;
+    }
+  }
+
+  if (!linkedReason && context.maintenanceLogType && context.maintenanceLogId) {
+    if (context.maintenanceLogType === "vehicle") {
+      const { data } = await admin
+        .from("maintenance_logs")
+        .select("id,request_id,notes")
+        .eq("id", context.maintenanceLogId)
+        .maybeSingle();
+      const row = data as { id?: string; request_id?: string | null; notes?: string | null } | null;
+      const parsed = parseTitleAndBody(row?.notes ?? null);
+      const summary = asSummarySnippet(parsed.body);
+      linkedReason = [
+        `Linked vehicle maintenance log ${context.maintenanceLogId}.`,
+        parsed.title ? `Title: ${parsed.title}.` : null,
+        summary ? `Details: ${summary}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      linkedItemName = parsed.title ? `Parts for ${parsed.title}` : "Replacement parts / repair";
+      linkedItemDescription = summary ?? parsed.title ?? null;
+      if (row?.request_id) {
+        linkedUrgency = await lookupLinkedUrgency(admin, "vehicle", row.request_id);
+      }
+    } else {
+      const { data } = await admin
+        .from("equipment_maintenance_logs")
+        .select("id,request_id,notes")
+        .eq("id", context.maintenanceLogId)
+        .maybeSingle();
+      const row = data as { id?: string; request_id?: string | null; notes?: string | null } | null;
+      const parsed = parseTitleAndBody(row?.notes ?? null);
+      const summary = asSummarySnippet(parsed.body);
+      linkedReason = [
+        `Linked equipment maintenance log ${context.maintenanceLogId}.`,
+        parsed.title ? `Title: ${parsed.title}.` : null,
+        summary ? `Details: ${summary}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      linkedItemName = parsed.title ? `Parts for ${parsed.title}` : "Replacement parts / repair";
+      linkedItemDescription = summary ?? parsed.title ?? null;
+      if (row?.request_id) {
+        linkedUrgency = await lookupLinkedUrgency(admin, "equipment", row.request_id);
+      }
+    }
+  }
+
+  return {
+    timeline: timelineFromUrgency(linkedUrgency) ?? fallbackTimeline,
+    reason: linkedReason,
+    itemName: linkedItemName,
+    itemDescription: linkedItemDescription,
+  };
 }
 
 async function syncLinkedMaintenanceLogStatus(
@@ -343,6 +543,7 @@ export async function GET(req: Request) {
   const assetId = asNullableString(url.searchParams.get("assetId"));
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.trunc(limitRaw))) : 250;
+  const includePrefill = asString(url.searchParams.get("prefill")) === "1";
 
   const admin = createSupabaseAdmin();
   let query = admin
@@ -377,8 +578,9 @@ export async function GET(req: Request) {
 
   let items: PurchaseRequestItemRow[] = [];
   let attachments: PurchaseRequestAttachmentRow[] = [];
+  let vendors: PurchaseRequestVendorRow[] = [];
   if (requestIds.length > 0) {
-    const [itemsRes, attachmentsRes] = await Promise.all([
+    const [itemsRes, attachmentsRes, vendorsRes] = await Promise.all([
       admin
         .from("purchase_request_items")
         .select(
@@ -391,13 +593,21 @@ export async function GET(req: Request) {
         .select("id,purchase_request_id,item_id,attachment_type,file_name,storage_bucket,storage_path,uploaded_by,created_at")
         .in("purchase_request_id", requestIds)
         .order("created_at", { ascending: false }),
+      admin
+        .from("purchase_request_vendors")
+        .select("id,purchase_request_id,vendor_name,sort_order,created_at")
+        .in("purchase_request_id", requestIds)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
     ]);
 
     if (itemsRes.error) return NextResponse.json({ error: itemsRes.error.message }, { status: 500 });
     if (attachmentsRes.error) return NextResponse.json({ error: attachmentsRes.error.message }, { status: 500 });
+    if (vendorsRes.error) return NextResponse.json({ error: vendorsRes.error.message }, { status: 500 });
 
     items = (itemsRes.data ?? []) as PurchaseRequestItemRow[];
     attachments = (attachmentsRes.data ?? []) as PurchaseRequestAttachmentRow[];
+    vendors = (vendorsRes.data ?? []) as PurchaseRequestVendorRow[];
   }
 
   const teammateRoles = ["owner", "operations_manager", "office_admin", "mechanic", "team_lead_1", "team_lead_2", "team_member_1", "team_member_2", "apprentice", "employee"];
@@ -418,11 +628,37 @@ export async function GET(req: Request) {
     status: row.status,
   }));
 
+  let prefill: PurchasePrefill | null = null;
+  if (includePrefill) {
+    const linkedPrefill = await buildLinkedPrefill(
+      admin,
+      {
+        maintenanceRequestType,
+        maintenanceRequestId,
+        maintenanceLogType,
+        maintenanceLogId,
+      },
+      "Standard (Within a week)"
+    );
+    prefill = {
+      requestedForId: teammates.some((row) => row.id === userId) ? userId : null,
+      department: isPurchaseDepartment(session?.profile?.department)
+        ? session.profile.department
+        : "Maintenance",
+      timeline: linkedPrefill.timeline,
+      reason: linkedPrefill.reason,
+      itemName: linkedPrefill.itemName,
+      itemDescription: linkedPrefill.itemDescription,
+    };
+  }
+
   return NextResponse.json({
     requests,
     itemsByRequestId: mapRowsByRequestId(items),
     attachmentsByRequestId: mapRowsByRequestId(attachments),
+    vendorsByRequestId: mapRowsByRequestId(vendors),
     teammates,
+    prefill,
   });
 }
 
@@ -464,6 +700,7 @@ export async function POST(req: Request) {
     maintenanceLogId?: string;
     assetType?: LinkType;
     assetId?: string;
+    vendors?: Array<{ name?: string } | string>;
     items?: ItemInput[];
   };
 
@@ -474,10 +711,15 @@ export async function POST(req: Request) {
   if (!isPurchaseDepartment(body.department)) {
     return NextResponse.json({ error: "Department is required." }, { status: 400 });
   }
-  const vendorName = asString(body.vendorName);
-  if (!vendorName) {
+  const normalizedVendors = parseVendors(body.vendors);
+  const legacyVendorName = asNullableString(body.vendorName);
+  if (legacyVendorName && !normalizedVendors.length) {
+    normalizedVendors.push(legacyVendorName);
+  }
+  if (!normalizedVendors.length) {
     return NextResponse.json({ error: "Vendor/store name is required." }, { status: 400 });
   }
+  const vendorName = normalizedVendors[0];
   const reason = asString(body.reason);
   if (!reason) {
     return NextResponse.json({ error: "Reason for purchase is required." }, { status: 400 });
@@ -559,6 +801,18 @@ export async function POST(req: Request) {
   }
 
   const requestRow = createdRequest as PurchaseRequestRow;
+  const { error: vendorsInsertError } = await admin.from("purchase_request_vendors").insert(
+    normalizedVendors.map((name, idx) => ({
+      purchase_request_id: requestRow.id,
+      vendor_name: name,
+      sort_order: idx + 1,
+    }))
+  );
+  if (vendorsInsertError) {
+    await admin.from("purchase_requests").delete().eq("id", requestRow.id);
+    return NextResponse.json({ error: vendorsInsertError.message }, { status: 500 });
+  }
+
   const { error: itemsInsertError } = await admin.from("purchase_request_items").insert(
     normalizedItems.map((row) => ({
       purchase_request_id: requestRow.id,
@@ -578,9 +832,11 @@ export async function POST(req: Request) {
     asString(session?.profile?.full_name) ||
     asString(session?.profile?.email) ||
     userId;
+  const vendorSummary =
+    normalizedVendors.length > 1 ? `${vendorName} (+${normalizedVendors.length - 1} more)` : vendorName;
   await notifyRoles(admin, ["owner", "operations_manager", "office_admin"], {
     title: "Purchase Request Pending Manager Approval",
-    body: `${actorLabel} submitted a purchase request for ${vendorName}.`,
+    body: `${actorLabel} submitted a purchase request for ${vendorSummary}.`,
     severity: "warning",
     kind: "purchase_request_pending_manager",
     entityType: "purchase_request",
