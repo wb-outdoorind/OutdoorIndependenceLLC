@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 
 const EQUIPMENT_DOC_BUCKET = "equipment_docs";
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+type EquipmentDocType = "registration" | "insurance";
 
 function canManageEquipmentDocuments(role: string | null | undefined) {
   const normalized = (role ?? "").trim().toLowerCase();
@@ -23,7 +24,7 @@ function sanitizeFilename(name: string) {
     .trim()
     .replace(/\s+/g, "-")
     .replace(/[^a-zA-Z0-9._-]/g, "");
-  if (!cleaned) return "registration.pdf";
+  if (!cleaned) return "document.pdf";
   return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned}.pdf`;
 }
 
@@ -99,14 +100,14 @@ export async function POST(req: Request) {
 
   const form = await req.formData();
   const equipmentId = String(form.get("equipmentId") || "").trim();
-  const docType = String(form.get("docType") || "").trim().toLowerCase();
+  const docTypeRaw = String(form.get("docType") || "").trim().toLowerCase();
   const file = form.get("file");
 
   if (!equipmentId) {
     return NextResponse.json({ error: "equipmentId is required" }, { status: 400 });
   }
-  if (docType !== "registration") {
-    return NextResponse.json({ error: "docType must be registration" }, { status: 400 });
+  if (docTypeRaw !== "registration" && docTypeRaw !== "insurance") {
+    return NextResponse.json({ error: "docType must be registration or insurance" }, { status: 400 });
   }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "File exceeds 10MB limit" }, { status: 400 });
   }
 
+  const docType = docTypeRaw as EquipmentDocType;
   const admin = createSupabaseAdmin();
 
   const { data: equipmentRow, error: equipmentError } = await admin
@@ -132,12 +134,12 @@ export async function POST(req: Request) {
     .from("equipment_documents")
     .select("id,storage_bucket,storage_path")
     .eq("equipment_id", equipmentId)
-    .eq("doc_type", "registration")
+    .eq("doc_type", docType)
     .maybeSingle();
   if (existingDocError) return NextResponse.json({ error: existingDocError.message }, { status: 500 });
 
   const safeName = sanitizeFilename(file.name);
-  const storagePath = `${equipmentId}/registration/${Date.now()}-${safeName}`;
+  const storagePath = `${equipmentId}/${docType}/${Date.now()}-${safeName}`;
 
   const uploadRes = await admin.storage
     .from(EQUIPMENT_DOC_BUCKET)
@@ -152,7 +154,7 @@ export async function POST(req: Request) {
 
   const nextDoc = {
     equipment_id: equipmentId,
-    doc_type: "registration",
+    doc_type: docType,
     file_name: safeName,
     storage_bucket: EQUIPMENT_DOC_BUCKET,
     storage_path: uploadRes.data.path,

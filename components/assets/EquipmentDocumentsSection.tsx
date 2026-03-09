@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type EquipmentDocumentType = "registration";
+type EquipmentDocumentType = "registration" | "insurance";
 
 type EquipmentDocumentRow = {
   id: string;
@@ -15,6 +15,7 @@ type EquipmentDocumentRow = {
 
 const DOC_LABELS: Record<EquipmentDocumentType, string> = {
   registration: "Equipment Registration",
+  insurance: "Insurance Card",
 };
 
 function fileButtonStyle(): React.CSSProperties {
@@ -52,9 +53,10 @@ export default function EquipmentDocumentsSection({
   const [docs, setDocs] = useState<EquipmentDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingType, setUploadingType] = useState<EquipmentDocumentType | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const registrationInputRef = useRef<HTMLInputElement | null>(null);
+  const insuranceInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDocs = useCallback(async () => {
     if (!equipmentId) return;
@@ -85,23 +87,26 @@ export default function EquipmentDocumentsSection({
     return () => window.clearTimeout(timer);
   }, [loadDocs]);
 
-  const registrationDoc = useMemo(
-    () => docs.find((row) => row.doc_type === "registration") ?? null,
-    [docs],
-  );
+  const docsByType = useMemo(() => {
+    const index: Partial<Record<EquipmentDocumentType, EquipmentDocumentRow>> = {};
+    for (const row of docs) {
+      if (!index[row.doc_type]) index[row.doc_type] = row;
+    }
+    return index;
+  }, [docs]);
 
-  async function onUpload(file: File | null) {
+  async function onUpload(docType: EquipmentDocumentType, file: File | null) {
     setMessage(null);
     if (!file) return;
     if (!ensurePdf(file)) {
-      setMessage("Only PDF files are allowed for equipment registration.");
+      setMessage("Only PDF files are allowed for registration and insurance documents.");
       return;
     }
 
-    setIsUploading(true);
+    setUploadingType(docType);
     const form = new FormData();
     form.append("equipmentId", equipmentId);
-    form.append("docType", "registration");
+    form.append("docType", docType);
     form.append("file", file);
 
     const res = await fetch("/api/equipment-documents", {
@@ -109,82 +114,92 @@ export default function EquipmentDocumentsSection({
       body: form,
     });
     const json = (await res.json().catch(() => ({}))) as { error?: string };
-    setIsUploading(false);
+    setUploadingType(null);
 
     if (!res.ok) {
       setMessage(json.error || "Upload failed.");
       return;
     }
-    setMessage("Equipment registration PDF saved.");
+    setMessage(`${DOC_LABELS[docType]} PDF saved.`);
     await loadDocs();
   }
 
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ opacity: 0.74, marginBottom: 12, fontSize: 13 }}>
-        Upload and view equipment registration PDF.
+        Upload and view required asset PDFs only: registration and insurance card.
       </div>
 
       {loading ? <div style={{ opacity: 0.75, marginBottom: 10 }}>Loading document...</div> : null}
       {error ? <div style={{ color: "#ff9d9d", marginBottom: 10 }}>{error}</div> : null}
       {message ? <div style={{ opacity: 0.86, marginBottom: 10 }}>{message}</div> : null}
 
-      <div
-        style={{
-          border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: 12,
-          padding: 10,
-          background: "rgba(255,255,255,0.02)",
-          display: "grid",
-          gap: 8,
-          maxWidth: 480,
-        }}
-      >
-        <div style={{ fontWeight: 800 }}>{DOC_LABELS.registration}</div>
-        {registrationDoc ? (
-          <div style={{ fontSize: 12, opacity: 0.78 }}>
-            {registrationDoc.file_name} • Updated {new Date(registrationDoc.updated_at).toLocaleString()}
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, opacity: 0.74 }}>No file uploaded.</div>
-        )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+        {(["registration", "insurance"] as EquipmentDocumentType[]).map((docType) => {
+          const row = docsByType[docType] ?? null;
+          const isBusy = uploadingType === docType;
+          const fileInputRef = docType === "registration" ? registrationInputRef : insuranceInputRef;
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {registrationDoc ? (
-            <a
-              href={`/api/equipment-documents/view?id=${encodeURIComponent(registrationDoc.id)}`}
-              target="_blank"
-              rel="noreferrer"
-              style={fileButtonStyle()}
+          return (
+            <div
+              key={docType}
+              style={{
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 12,
+                padding: 10,
+                background: "rgba(255,255,255,0.02)",
+                display: "grid",
+                gap: 8,
+              }}
             >
-              View PDF
-            </a>
-          ) : null}
+              <div style={{ fontWeight: 800 }}>{DOC_LABELS[docType]}</div>
+              {row ? (
+                <div style={{ fontSize: 12, opacity: 0.78 }}>
+                  {row.file_name} • Updated {new Date(row.updated_at).toLocaleString()}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, opacity: 0.74 }}>No file uploaded.</div>
+              )}
 
-          {canManage ? (
-            <>
-              <input
-                ref={registrationInputRef}
-                type="file"
-                accept=".pdf,application/pdf"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const selected = e.target.files?.[0] ?? null;
-                  void onUpload(selected);
-                  e.currentTarget.value = "";
-                }}
-              />
-              <button
-                type="button"
-                style={fileButtonStyle()}
-                onClick={() => registrationInputRef.current?.click()}
-                disabled={isUploading}
-              >
-                {isUploading ? "Uploading..." : registrationDoc ? "Replace PDF" : "Upload PDF"}
-              </button>
-            </>
-          ) : null}
-        </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {row ? (
+                  <a
+                    href={`/api/equipment-documents/view?id=${encodeURIComponent(row.id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={fileButtonStyle()}
+                  >
+                    View PDF
+                  </a>
+                ) : null}
+
+                {canManage ? (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const selected = e.target.files?.[0] ?? null;
+                        void onUpload(docType, selected);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      style={fileButtonStyle()}
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isBusy}
+                    >
+                      {isBusy ? "Uploading..." : row ? "Replace PDF" : "Upload PDF"}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

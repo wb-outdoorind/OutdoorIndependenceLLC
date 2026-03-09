@@ -1147,36 +1147,6 @@ export default function EquipmentDetailPage() {
       <div style={{ marginTop: 18, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 8 }}>Asset Documents</div>
         <EquipmentDocumentsSection equipmentId={stableEquipmentId} canManage={canEditEquipment} />
-        <div style={{ opacity: 0.74, marginBottom: 12, fontSize: 13 }}>
-          Open saved forms and records for this asset.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-          <Link
-            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Request")}`}
-            style={actionBtnStyle()}
-          >
-            <span>Maintenance Requests</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-          <Link
-            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Log")}`}
-            style={actionBtnStyle()}
-          >
-            <span>Maintenance Logs</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-          <Link
-            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Preventative Maintenance")}`}
-            style={actionBtnStyle()}
-          >
-            <span>Preventative Maintenance</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-          <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
-            <span>All Asset Documents</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-        </div>
       </div>
 
       <AcademyAssetSection vehicleId={stableEquipmentId} assetType={equipment?.equipment_type ?? ""} />
