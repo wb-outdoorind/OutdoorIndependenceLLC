@@ -66,7 +66,6 @@ function AcademyPageContent() {
   const searchParams = useSearchParams();
   const vehicleId = (searchParams.get("vehicleId") || "").trim();
   const assetTypeParam = (searchParams.get("assetType") || "").trim().toLowerCase();
-  const section = (searchParams.get("section") || "").trim().toLowerCase();
 
   const [items, setItems] = useState<AcademyContentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,7 +86,6 @@ function AcademyPageContent() {
   const [assetFilter, setAssetFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"recommended" | "newest" | "oldest" | "title_az" | "title_za">("recommended");
-  const [showFilters, setShowFilters] = useState(false);
 
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadDescription, setUploadDescription] = useState("");
@@ -457,12 +455,19 @@ function AcademyPageContent() {
     return next;
   }, [filteredItems, sortBy]);
 
-  const sopPdfs = useMemo(() => sortedItems.filter((item) => item.content_type === "pdf"), [sortedItems]);
-  const trainingVideos = useMemo(() => sortedItems.filter((item) => item.content_type === "video"), [sortedItems]);
-  const sectionOrder = useMemo(() => {
-    if (section === "training_videos") return ["training_videos", "sop_pdfs"] as const;
-    return ["sop_pdfs", "training_videos"] as const;
-  }, [section]);
+  const sortLabel = useMemo(
+    () =>
+      sortBy === "recommended"
+        ? "Recommended"
+        : sortBy === "newest"
+          ? "Newest"
+          : sortBy === "oldest"
+            ? "Oldest"
+            : sortBy === "title_az"
+              ? "Title A-Z"
+              : "Title Z-A",
+    [sortBy]
+  );
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -478,8 +483,84 @@ function AcademyPageContent() {
         viewerName={viewerName}
       />
 
+      <section style={{ ...sectionWrapStyle, marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <h2 style={{ margin: 0 }}>Training Files</h2>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={sectionMetaChipStyle}>{sortedItems.length} item{sortedItems.length === 1 ? "" : "s"}</span>
+            <span style={sectionMetaChipStyle}>Sort: {sortLabel}</span>
+          </div>
+        </div>
+        <div style={{ opacity: 0.72, marginBottom: 10, fontSize: 13 }}>
+          SOP PDFs and training videos in one list with built-in filters.
+        </div>
+        <div style={{ ...filterGridStyle, marginBottom: 12 }}>
+          <Field label="Search">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={inputStyle}
+              placeholder="Search title, description, asset, topic"
+            />
+          </Field>
+
+          <Field label="Asset">
+            <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} style={inputStyle}>
+              <option value="all">All assets</option>
+              {allAssetTypes.map((asset) => (
+                <option key={asset} value={asset}>
+                  {asset}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Topic">
+            <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} style={inputStyle}>
+              <option value="all">All topics</option>
+              {allTopics.map((topic) => (
+                <option key={topic} value={topic}>
+                  {topic}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Sort">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as "recommended" | "newest" | "oldest" | "title_az" | "title_za")}
+              style={inputStyle}
+            >
+              <option value="recommended">Recommended</option>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="title_az">Title A-Z</option>
+              <option value="title_za">Title Z-A</option>
+            </select>
+          </Field>
+        </div>
+
+        {loading ? <div style={{ opacity: 0.75 }}>Loading academy content...</div> : null}
+        {errorMessage ? <div style={{ color: "#ffb0b0" }}>{errorMessage}</div> : null}
+
+        {!loading && !errorMessage ? (
+          <Section
+            title="Training Files"
+            emptyText="No training files match these filters."
+            items={sortedItems}
+            sortBy={sortBy}
+            assetTypesByContentId={assetTypesByContentId}
+            topicsByContentId={topicsByContentId}
+            onOpen={(item) => setActiveItem({ type: item.content_type, title: item.title, url: item.content_url })}
+            embedded
+            hideHeader
+          />
+        ) : null}
+      </section>
+
       {canUpload ? (
-        <section style={{ ...cardStyle, marginBottom: 18, order: 30 }}>
+        <section style={{ ...cardStyle, marginBottom: 18 }}>
           <h2 style={{ marginTop: 0, marginBottom: 8 }}>Upload Academy Content</h2>
           <div style={{ opacity: 0.74, marginBottom: 12 }}>
             Allowed roles: owner, operations manager, office admin, and mechanic.
@@ -602,101 +683,6 @@ function AcademyPageContent() {
         </section>
       ) : null}
 
-      <section style={{ ...cardStyle, marginBottom: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0 }}>Filter</h2>
-          <button type="button" style={compactFilterButtonStyle} onClick={() => setShowFilters((prev) => !prev)}>
-            {showFilters ? "Hide Filter" : "Show Filter"}
-          </button>
-        </div>
-        {showFilters ? (
-          <div>
-            <div style={{ opacity: 0.72, marginTop: 8, marginBottom: 10, fontSize: 13 }}>
-              Narrow results by search, asset, topic, and sort.
-            </div>
-            <div style={filterGridStyle}>
-              <Field label="Search">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  style={inputStyle}
-                  placeholder="Search title, description, asset, topic"
-                />
-              </Field>
-
-              <Field label="Asset">
-                <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} style={inputStyle}>
-                  <option value="all">All assets</option>
-                  {allAssetTypes.map((asset) => (
-                    <option key={asset} value={asset}>
-                      {asset}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Topic">
-                <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} style={inputStyle}>
-                  <option value="all">All topics</option>
-                  {allTopics.map((topic) => (
-                    <option key={topic} value={topic}>
-                      {topic}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Sort">
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as "recommended" | "newest" | "oldest" | "title_az" | "title_za")}
-                  style={inputStyle}
-                >
-                  <option value="recommended">Recommended</option>
-                  <option value="newest">Newest</option>
-                  <option value="oldest">Oldest</option>
-                  <option value="title_az">Title A-Z</option>
-                  <option value="title_za">Title Z-A</option>
-                </select>
-              </Field>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      {loading ? <div style={{ opacity: 0.75 }}>Loading academy content...</div> : null}
-      {errorMessage ? <div style={{ ...cardStyle, color: "#ffb0b0" }}>{errorMessage}</div> : null}
-
-      {!loading && !errorMessage ? (
-        <div style={{ display: "grid", gap: 18 }}>
-          {sectionOrder.map((sectionKey) =>
-            sectionKey === "sop_pdfs" ? (
-              <Section
-                key="sop_pdfs"
-                title="SOP PDFs"
-                emptyText="No SOP PDFs match these filters."
-                items={sopPdfs}
-                sortBy={sortBy}
-                assetTypesByContentId={assetTypesByContentId}
-                topicsByContentId={topicsByContentId}
-                onOpen={(item) => setActiveItem({ type: "pdf", title: item.title, url: item.content_url })}
-              />
-            ) : (
-              <Section
-                key="training_videos"
-                title="Training Videos"
-                emptyText="No training videos match these filters."
-                items={trainingVideos}
-                sortBy={sortBy}
-                assetTypesByContentId={assetTypesByContentId}
-                topicsByContentId={topicsByContentId}
-                onOpen={(item) => setActiveItem({ type: "video", title: item.title, url: item.content_url })}
-              />
-            )
-          )}
-        </div>
-      ) : null}
-
       {activeItem ? (
         <div role="dialog" aria-modal="true" style={overlayStyle} onClick={() => setActiveItem(null)}>
           <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
@@ -754,6 +740,8 @@ function Section({
   onOpen,
   assetTypesByContentId,
   topicsByContentId,
+  embedded = false,
+  hideHeader = false,
 }: {
   title: string;
   emptyText: string;
@@ -762,6 +750,8 @@ function Section({
   onOpen: (item: AcademyContentRow) => void;
   assetTypesByContentId: Record<string, string[]>;
   topicsByContentId: Record<string, string[]>;
+  embedded?: boolean;
+  hideHeader?: boolean;
 }) {
   const sortLabel =
     sortBy === "recommended"
@@ -774,74 +764,95 @@ function Section({
             ? "Title A-Z"
             : "Title Z-A";
 
+  const sectionHeader = (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+      <h2 style={{ margin: 0 }}>{title}</h2>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={sectionMetaChipStyle}>{items.length} item{items.length === 1 ? "" : "s"}</span>
+        <span style={sectionMetaChipStyle}>Sort: {sortLabel}</span>
+      </div>
+    </div>
+  );
+
+  const sectionBody =
+    items.length === 0 ? (
+      <div style={{ opacity: 0.7 }}>{emptyText}</div>
+    ) : (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {items.map((item) => {
+          const assets = assetTypesByContentId[item.id] ?? [];
+          const topics = topicsByContentId[item.id] ?? [];
+
+          return (
+            <button key={item.id} type="button" onClick={() => onOpen(item)} style={cardButtonStyle}>
+              {item.thumbnail_url ? (
+                <div
+                  style={{
+                    width: "100%",
+                    height: 130,
+                    borderRadius: 10,
+                    marginBottom: 10,
+                    backgroundImage: `url(${item.thumbnail_url})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                  }}
+                />
+              ) : null}
+              <div style={{ marginBottom: 6 }}>
+                <span style={item.content_type === "pdf" ? docTypeChipStyle : videoTypeChipStyle}>
+                  {item.content_type === "pdf" ? "SOP PDF" : "Training Video"}
+                </span>
+              </div>
+              <div style={{ fontWeight: 800, textAlign: "left" }}>{item.title}</div>
+              <div style={{ opacity: 0.75, marginTop: 6, textAlign: "left", lineHeight: 1.35 }}>
+                {item.description || "No description"}
+              </div>
+
+              {topics.length > 0 ? (
+                <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {topics.map((topic) => (
+                    <span key={`${item.id}-topic-${topic}`} style={topicChipStyle}>
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {assets.length > 0 ? (
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {assets.map((asset) => (
+                    <span key={`${item.id}-asset-${asset}`} style={assetChipStyle}>
+                      {asset}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+  if (embedded) {
+    return (
+      <div>
+        {!hideHeader ? sectionHeader : null}
+        {sectionBody}
+      </div>
+    );
+  }
+
   return (
     <section style={sectionWrapStyle}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-        <h2 style={{ margin: 0 }}>{title}</h2>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={sectionMetaChipStyle}>{items.length} item{items.length === 1 ? "" : "s"}</span>
-          <span style={sectionMetaChipStyle}>Sort: {sortLabel}</span>
-        </div>
-      </div>
-      {items.length === 0 ? (
-        <div style={{ opacity: 0.7 }}>{emptyText}</div>
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {items.map((item) => {
-            const assets = assetTypesByContentId[item.id] ?? [];
-            const topics = topicsByContentId[item.id] ?? [];
-
-            return (
-              <button key={item.id} type="button" onClick={() => onOpen(item)} style={cardButtonStyle}>
-                {item.thumbnail_url ? (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: 130,
-                      borderRadius: 10,
-                      marginBottom: 10,
-                      backgroundImage: `url(${item.thumbnail_url})`,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                      border: "1px solid rgba(255,255,255,0.14)",
-                    }}
-                  />
-                ) : null}
-                <div style={{ fontWeight: 800, textAlign: "left" }}>{item.title}</div>
-                <div style={{ opacity: 0.75, marginTop: 6, textAlign: "left", lineHeight: 1.35 }}>
-                  {item.description || "No description"}
-                </div>
-
-                {topics.length > 0 ? (
-                  <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {topics.map((topic) => (
-                      <span key={`${item.id}-topic-${topic}`} style={topicChipStyle}>
-                        {topic}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                {assets.length > 0 ? (
-                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {assets.map((asset) => (
-                      <span key={`${item.id}-asset-${asset}`} style={assetChipStyle}>
-                        {asset}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {!hideHeader ? sectionHeader : null}
+      {sectionBody}
     </section>
   );
 }
@@ -1040,16 +1051,6 @@ const miniActionButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const compactFilterButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.2)",
-  borderRadius: 10,
-  padding: "8px 12px",
-  background: "rgba(255,255,255,0.06)",
-  color: "inherit",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
 const selectedTagChipStyle: React.CSSProperties = {
   borderRadius: 999,
   border: "1px solid rgba(126,255,167,0.35)",
@@ -1094,6 +1095,24 @@ const assetChipStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.05)",
   padding: "2px 8px",
   fontSize: 12,
+};
+
+const docTypeChipStyle: React.CSSProperties = {
+  borderRadius: 999,
+  border: "1px solid rgba(126,255,167,0.35)",
+  background: "rgba(126,255,167,0.14)",
+  padding: "2px 8px",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const videoTypeChipStyle: React.CSSProperties = {
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.24)",
+  background: "rgba(255,255,255,0.08)",
+  padding: "2px 8px",
+  fontSize: 11,
+  fontWeight: 700,
 };
 
 const overlayStyle: React.CSSProperties = {
