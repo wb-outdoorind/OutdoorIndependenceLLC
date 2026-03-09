@@ -8,6 +8,7 @@ import { writeAudit } from "@/lib/audit";
 import { MAINTENANCE_ACTIVE_STATUSES, isMaintenanceClosedStatus } from "@/lib/maintenanceStatus";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
+import EquipmentDocumentsSection from "@/components/assets/EquipmentDocumentsSection";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type EquipmentRow = {
@@ -1138,6 +1139,41 @@ export default function EquipmentDetailPage() {
 
           <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
             <span>Full History</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 8 }}>Asset Documents</div>
+        <EquipmentDocumentsSection equipmentId={stableEquipmentId} canManage={canEditEquipment} />
+        <div style={{ opacity: 0.74, marginBottom: 12, fontSize: 13 }}>
+          Open saved forms and records for this asset.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          <Link
+            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Request")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Maintenance Requests</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Log")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Maintenance Logs</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/equipment/${routeIdForLinks}/history?focusType=${encodeURIComponent("Preventative Maintenance")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Preventative Maintenance</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
+            <span>All Asset Documents</span>
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
         </div>
