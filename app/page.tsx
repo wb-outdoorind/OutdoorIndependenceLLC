@@ -67,6 +67,30 @@ type InspectionRow = {
   checklist: unknown;
 };
 
+type ActiveUsageInspectionRow = {
+  vehicle_id: string;
+  inspection_type: string | null;
+  created_at: string;
+  checklist: unknown;
+};
+
+type PostTripDraftRow = {
+  vehicle_id: string;
+  inspection_type: string | null;
+  updated_at: string;
+  draft: unknown;
+};
+
+type ActiveFieldAssignment = {
+  key: string;
+  employeeNames: string;
+  vehicleId: string;
+  truckLabel: string;
+  trailerLabel: string;
+  equipmentLabel: string;
+  preTripAt: string;
+};
+
 type DashboardData = {
   title: string;
   subtitle: string;
@@ -130,11 +154,91 @@ type SlaDailySummary = {
   unresolvedTotal: number;
 };
 
+function asObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
 function parseChecklistEmployee(checklist: unknown) {
   if (!checklist || typeof checklist !== "object") return "";
   const employee = (checklist as Record<string, unknown>).employee;
   if (typeof employee !== "string") return "";
   return employee.trim();
+}
+
+function dateKeyInTimeZone(date: Date, timeZone = "America/Chicago") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  let year = "";
+  let month = "";
+  let day = "";
+  for (const part of parts) {
+    if (part.type === "year") year = part.value;
+    if (part.type === "month") month = part.value;
+    if (part.type === "day") day = part.value;
+  }
+  if (!year || !month || !day) return date.toISOString().slice(0, 10);
+  return `${year}-${month}-${day}`;
+}
+
+function deriveInspectionDateKey(checklist: unknown, fallbackIso: string) {
+  const obj = asObject(checklist);
+  const inspectionDate = typeof obj.inspectionDate === "string" ? obj.inspectionDate.trim() : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate)) return inspectionDate;
+  return dateKeyInTimeZone(new Date(fallbackIso));
+}
+
+function hasDraftContent(draft: unknown) {
+  const obj = asObject(draft);
+  return Object.keys(obj).length > 0;
+}
+
+function parseActiveFieldDetails(checklist: unknown) {
+  const obj = asObject(checklist);
+  const employeeRaw = typeof obj.employee === "string" ? obj.employee.trim() : "";
+  const employeeNames = employeeRaw || "Unknown teammate";
+
+  const trailerSelection = asObject(obj.trailerSelection);
+  let trailerLabel = "No Trailer";
+  if (typeof trailerSelection.name === "string" && trailerSelection.name.trim()) {
+    trailerLabel = trailerSelection.name.trim();
+  } else if (typeof trailerSelection.id === "string" && trailerSelection.id.trim()) {
+    trailerLabel = trailerSelection.id.trim();
+  } else {
+    const sections = asObject(obj.sections);
+    const trailerSection = asObject(sections.trailer);
+    if (typeof trailerSection.name === "string" && trailerSection.name.trim()) {
+      trailerLabel = trailerSection.name.trim();
+    }
+  }
+
+  const equipmentNames = new Set<string>();
+  const sectionEquipment = asObject(obj.sectionEquipment);
+  for (const rawList of Object.values(sectionEquipment)) {
+    if (!Array.isArray(rawList)) continue;
+    for (const row of rawList) {
+      const item = asObject(row);
+      const name =
+        typeof item.name === "string" && item.name.trim()
+          ? item.name.trim()
+          : typeof item.id === "string" && item.id.trim()
+            ? item.id.trim()
+            : "";
+      if (name) equipmentNames.add(name);
+    }
+  }
+  const equipmentList = Array.from(equipmentNames);
+  const equipmentLabel = equipmentList.length
+    ? equipmentList.length <= 4
+      ? equipmentList.join(", ")
+      : `${equipmentList.slice(0, 4).join(", ")} +${equipmentList.length - 4} more`
+    : "No Equipment";
+
+  return { employeeNames, trailerLabel, equipmentLabel };
 }
 
 function todayDateKey(date = new Date()) {
@@ -209,12 +313,14 @@ export default async function Home() {
   let teammateOpsStats: TeammateOpsStats | null = null;
   let slaObservability: SlaObservabilityStats | null = null;
   let slaDailySummary: SlaDailySummary | null = null;
+  let activeFieldAssignments: ActiveFieldAssignment[] = [];
   let canExpandDashboard = false;
 
   try {
     const cookieStore = await cookies();
     const requestedRole = cookieStore.get(ROLE_VIEW_COOKIE)?.value ?? null;
     const supabase = await createServerSupabase();
+    const supabaseAdmin = createSupabaseAdmin();
     const { data: authData } = await supabase.auth.getUser();
 
     let profile: ProfileRow | null = null;
@@ -240,6 +346,110 @@ export default async function Home() {
       lowStockCount = ((inventoryRows ?? []) as InventoryLowStockRow[]).filter(
         (item) => Number(item.quantity) <= Number(item.minimum_quantity)
       ).length;
+    }
+
+    if (authData.user?.id) {
+      const lookbackIso = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+      const todayKey = dateKeyInTimeZone(new Date());
+
+      const [inspectionsLiteRes, postTripDraftRes] = await Promise.all([
+        supabase
+          .from("inspections")
+          .select("vehicle_id,inspection_type,created_at,checklist")
+          .in("inspection_type", ["Pre-Trip", "Post-Trip"])
+          .gte("created_at", lookbackIso)
+          .order("created_at", { ascending: false })
+          .limit(4000),
+        supabaseAdmin
+          .from("vehicle_inspection_drafts")
+          .select("vehicle_id,inspection_type,updated_at,draft")
+          .eq("inspection_type", "post-trip")
+          .gte("updated_at", lookbackIso)
+          .order("updated_at", { ascending: false })
+          .limit(4000),
+      ]);
+
+      if (inspectionsLiteRes.error) {
+        console.error("[dashboard] failed loading active usage inspections:", inspectionsLiteRes.error);
+      }
+      if (postTripDraftRes.error) {
+        console.error("[dashboard] failed loading active usage drafts:", postTripDraftRes.error);
+      }
+
+      const latestInspectionByVehicleDate = new Map<string, ActiveUsageInspectionRow>();
+      for (const row of (inspectionsLiteRes.data ?? []) as ActiveUsageInspectionRow[]) {
+        const vehicleId = (row.vehicle_id ?? "").trim();
+        if (!vehicleId) continue;
+        const inspectionDateKey = deriveInspectionDateKey(row.checklist, row.created_at);
+        if (inspectionDateKey !== todayKey) continue;
+        const key = `${vehicleId}::${inspectionDateKey}`;
+        const prev = latestInspectionByVehicleDate.get(key);
+        if (!prev || new Date(row.created_at).getTime() > new Date(prev.created_at).getTime()) {
+          latestInspectionByVehicleDate.set(key, row);
+        }
+      }
+
+      const startedPostTripByVehicleDate = new Map<string, string>();
+      for (const draftRow of (postTripDraftRes.data ?? []) as PostTripDraftRow[]) {
+        const vehicleId = (draftRow.vehicle_id ?? "").trim();
+        if (!vehicleId) continue;
+        if (!hasDraftContent(draftRow.draft)) continue;
+        const draftDateKey = deriveInspectionDateKey(draftRow.draft, draftRow.updated_at);
+        if (draftDateKey !== todayKey) continue;
+        const key = `${vehicleId}::${draftDateKey}`;
+        const prevUpdatedAt = startedPostTripByVehicleDate.get(key);
+        if (!prevUpdatedAt || new Date(draftRow.updated_at).getTime() > new Date(prevUpdatedAt).getTime()) {
+          startedPostTripByVehicleDate.set(key, draftRow.updated_at);
+        }
+      }
+
+      const preTripCandidates = Array.from(latestInspectionByVehicleDate.entries())
+        .filter(([, row]) => (row.inspection_type ?? "").trim() === "Pre-Trip")
+        .filter(([key, row]) => {
+          const draftStartedAt = startedPostTripByVehicleDate.get(key);
+          if (!draftStartedAt) return true;
+          return new Date(draftStartedAt).getTime() < new Date(row.created_at).getTime();
+        });
+
+      const vehicleIds = Array.from(
+        new Set(
+          preTripCandidates
+            .map(([, row]) => (row.vehicle_id ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+      const vehicleLabelById = new Map<string, string>();
+      if (vehicleIds.length > 0) {
+        const { data: vehicleRows, error: vehicleRowsError } = await supabase
+          .from("vehicles")
+          .select("id,name")
+          .in("id", vehicleIds);
+        if (vehicleRowsError) {
+          console.error("[dashboard] failed loading active usage vehicle labels:", vehicleRowsError);
+        } else {
+          for (const row of (vehicleRows ?? []) as Array<{ id: string; name: string | null }>) {
+            const id = (row.id ?? "").trim();
+            if (!id) continue;
+            vehicleLabelById.set(id, row.name?.trim() || id);
+          }
+        }
+      }
+
+      activeFieldAssignments = preTripCandidates
+        .map(([key, row]) => {
+          const details = parseActiveFieldDetails(row.checklist);
+          const vehicleId = (row.vehicle_id ?? "").trim();
+          return {
+            key,
+            employeeNames: details.employeeNames,
+            vehicleId,
+            truckLabel: vehicleLabelById.get(vehicleId) ?? vehicleId,
+            trailerLabel: details.trailerLabel,
+            equipmentLabel: details.equipmentLabel,
+            preTripAt: row.created_at,
+          };
+        })
+        .sort((a, b) => new Date(b.preTripAt).getTime() - new Date(a.preTripAt).getTime());
     }
 
     const isLeadership =
@@ -565,8 +775,7 @@ export default async function Home() {
 
       const startToday = new Date();
       startToday.setHours(0, 0, 0, 0);
-      const admin = createSupabaseAdmin();
-      const { data: slaNotificationRows, error: slaNotificationError } = await admin
+      const { data: slaNotificationRows, error: slaNotificationError } = await supabaseAdmin
         .from("user_notifications")
         .select("kind,dedupe_key")
         .gte("created_at", startToday.toISOString())
@@ -801,6 +1010,52 @@ export default async function Home() {
           slaDailySummary={slaDailySummary}
         />
       ) : null}
+
+      <section
+        style={{
+          marginTop: 18,
+          border: "1px solid var(--surface-border)",
+          borderRadius: 16,
+          padding: 14,
+          background: "var(--surface)",
+        }}
+      >
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Active Field Assignments</div>
+        <div style={{ opacity: 0.75, marginTop: 6, fontSize: 13 }}>
+          Live view of trucks currently in use: shown after completed pre-trip and hidden once post-trip starts.
+        </div>
+        {activeFieldAssignments.length === 0 ? (
+          <div style={{ marginTop: 10, opacity: 0.74, fontSize: 13 }}>
+            No active truck assignments right now.
+          </div>
+        ) : (
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            {activeFieldAssignments.map((assignment) => (
+              <div
+                key={assignment.key}
+                style={{
+                  border: "1px solid var(--surface-border)",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  background: "rgba(255,255,255,0.02)",
+                  lineHeight: 1.35,
+                  fontSize: 14,
+                }}
+              >
+                <span style={{ fontWeight: 800 }}>{assignment.employeeNames}</span>
+                <span style={{ opacity: 0.85 }}> - </span>
+                <Link
+                  href={`/vehicles/${encodeURIComponent(assignment.vehicleId)}`}
+                  style={{ color: "inherit", fontWeight: 800, textDecoration: "underline" }}
+                >
+                  {assignment.truckLabel}
+                </Link>
+                <span style={{ opacity: 0.85 }}> - {assignment.trailerLabel} - {assignment.equipmentLabel}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div
         style={{
