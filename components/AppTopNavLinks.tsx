@@ -17,6 +17,7 @@ export default function AppTopNavLinks() {
   const pathname = usePathname();
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [isLead, setIsLead] = useState(false);
   const [actualRole, setActualRole] = useState<AppRole | null>(null);
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(null);
@@ -83,6 +84,28 @@ export default function AppTopNavLinks() {
   }, []);
 
   useEffect(() => {
+    if (!menuOpen) return;
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
     function syncStickyTop() {
       const header = document.querySelector(".app-topnav");
       if (!(header instanceof HTMLElement)) return;
@@ -123,62 +146,109 @@ export default function AppTopNavLinks() {
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
 
+  const navLinks: Array<{ href: string; label: string; badge?: number }> = [
+    { href: "/", label: "Home" },
+    { href: "/scan", label: "Scan QR" },
+    { href: "/vehicles", label: "Vehicles" },
+    { href: "/equipment", label: "Equipment" },
+    { href: "/forms", label: "Forms" },
+    { href: "/inventory", label: "Inventory" },
+  ];
+  if (canViewMaintenanceCenter) {
+    navLinks.push({ href: "/maintenance", label: "Maintenance Center" });
+  }
+  navLinks.push({ href: "/academy", label: "OI Academy" });
+  navLinks.push({ href: "/employees", label: "Teammates" });
+  navLinks.push({ href: "/notifications", label: "Notifications", badge: unreadCount > 0 ? unreadCount : undefined });
+  navLinks.push({ href: "/form-reports", label: "Accountability Center" });
+  if (canViewAudit) {
+    navLinks.push({ href: "/audit", label: "Audit Trail" });
+  }
+  navLinks.push({ href: "/approvals", label: "Approvals" });
+  navLinks.push({ href: "/settings", label: "Settings" });
+
+  function isLinkActive(href: string) {
+    if (!pathname) return false;
+    if (href === "/") return pathname === "/";
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
   return (
-    <nav className="app-topnav-links">
-      <Link href="/" className="app-topnav-link">Home</Link>
-      <Link href="/scan" className="app-topnav-link">Scan QR</Link>
-      <Link href="/vehicles" className="app-topnav-link">Vehicles</Link>
-      <Link href="/equipment" className="app-topnav-link">Equipment</Link>
-      <Link href="/forms" className="app-topnav-link">Forms</Link>
-      <Link href="/inventory" className="app-topnav-link">Inventory</Link>
-      {canViewMaintenanceCenter ? <Link href="/maintenance" className="app-topnav-link">Maintenance Center</Link> : null}
-      <Link href="/academy" className="app-topnav-link">OI Academy</Link>
-      <Link href="/employees" className="app-topnav-link">Teammates</Link>
-      <Link href="/notifications" className="app-topnav-link">
-        Notifications{unreadCount > 0 ? ` (${unreadCount})` : ""}
-      </Link>
-      <Link href="/form-reports" className="app-topnav-link">Accountability Center</Link>
-      {canViewAudit ? <Link href="/audit" className="app-topnav-link">Audit Trail</Link> : null}
-      <Link href="/approvals" className="app-topnav-link">Approvals</Link>
-      <Link href="/settings" className="app-topnav-link">Settings</Link>
-      {showViewAsBadge ? (
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            borderRadius: 999,
-            border: "1px solid rgba(255,255,255,0.25)",
-            background: "rgba(20, 69, 35, 0.3)",
-            padding: "8px 10px",
-            fontSize: 12,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-          }}
-        >
-          Viewing as: {roleLabel(viewAsRole)}
+    <nav className="app-topnav-menu-wrap">
+      <button
+        type="button"
+        className="app-topnav-menu-button"
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        aria-controls="app-topnav-drawer"
+        onClick={() => setMenuOpen((prev) => !prev)}
+      >
+        <span className="app-topnav-menu-icon" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>Menu</span>
+        {unreadCount > 0 ? <span className="app-topnav-menu-badge">{unreadCount}</span> : null}
+      </button>
+
+      <div
+        className={`app-topnav-drawer-backdrop${menuOpen ? " open" : ""}`}
+        onClick={() => setMenuOpen(false)}
+        aria-hidden={!menuOpen}
+      />
+
+      <aside
+        id="app-topnav-drawer"
+        className={`app-topnav-drawer${menuOpen ? " open" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="App navigation"
+      >
+        <div className="app-topnav-drawer-header">
+          <div className="app-topnav-drawer-title">Directory</div>
           <button
             type="button"
-            onClick={() => {
-              writeRoleViewOverride(null);
-              setViewAsRole(null);
-              router.refresh();
-            }}
-            style={{
-              border: "1px solid rgba(255,255,255,0.32)",
-              borderRadius: 999,
-              background: "rgba(255,255,255,0.08)",
-              color: "inherit",
-              padding: "2px 8px",
-              fontSize: 11,
-              fontWeight: 800,
-              cursor: "pointer",
-            }}
+            className="app-topnav-drawer-close"
+            onClick={() => setMenuOpen(false)}
+            aria-label="Close navigation menu"
           >
-            Reset
+            Close
           </button>
-        </span>
-      ) : null}
+        </div>
+
+        <div className="app-topnav-drawer-links">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`app-topnav-drawer-link${isLinkActive(link.href) ? " active" : ""}`}
+              onClick={() => setMenuOpen(false)}
+            >
+              <span>{link.label}</span>
+              {link.badge ? <span className="app-topnav-menu-badge">{link.badge}</span> : null}
+            </Link>
+          ))}
+        </div>
+
+        {showViewAsBadge ? (
+          <div className="app-topnav-drawer-view-as">
+            <span>Viewing as: {roleLabel(viewAsRole)}</span>
+            <button
+              type="button"
+              onClick={() => {
+                writeRoleViewOverride(null);
+                setViewAsRole(null);
+                setMenuOpen(false);
+                router.refresh();
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        ) : null}
+      </aside>
+
       {isLead && pendingApprovals.length > 0 ? (
         <Link
           href={`/approvals?inspection=${encodeURIComponent(pendingApprovals[0].id)}`}
