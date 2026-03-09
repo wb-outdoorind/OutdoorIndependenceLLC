@@ -8,6 +8,7 @@ import { writeAudit } from "@/lib/audit";
 import { MAINTENANCE_ACTIVE_STATUSES, isMaintenanceClosedStatus } from "@/lib/maintenanceStatus";
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
+import VehicleDocumentsSection from "@/components/assets/VehicleDocumentsSection";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 /* =========================
@@ -1423,6 +1424,55 @@ export default function VehicleDetailPage() {
 
           <Link href={`/vehicles/${routeIdForLinks}/history`} style={actionBtnStyle()}>
             <span>Full History</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18, ...cardStyle() }}>
+        <div style={{ fontWeight: 900, marginBottom: 8 }}>Asset Documents</div>
+        <VehicleDocumentsSection vehicleId={stableVehicleId} canManage={canEditVehicle} />
+        <div style={{ opacity: 0.74, margin: "2px 0 12px", fontSize: 13 }}>
+          Form records and checklists:
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          <Link
+            href={`/vehicles/${routeIdForLinks}/history?focusType=${encodeURIComponent("Pre-Trip")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Pre-Trip Forms</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/vehicles/${routeIdForLinks}/history?focusType=${encodeURIComponent("Post-Trip")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Post-Trip Forms</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/vehicles/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Request")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Maintenance Requests</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/vehicles/${routeIdForLinks}/history?focusType=${encodeURIComponent("Maintenance Log")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Maintenance Logs</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link
+            href={`/vehicles/${routeIdForLinks}/history?focusType=${encodeURIComponent("Vehicle PM")}`}
+            style={actionBtnStyle()}
+          >
+            <span>Preventative Maintenance</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+          <Link href={`/vehicles/${routeIdForLinks}/history`} style={actionBtnStyle()}>
+            <span>All Asset Documents</span>
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
         </div>
