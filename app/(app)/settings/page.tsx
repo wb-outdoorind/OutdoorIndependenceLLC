@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import LogoutButton from "@/app/logout-button";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import {
@@ -33,6 +33,22 @@ const VIEWABLE_ROLES: AppRole[] = [
   "employee",
 ];
 
+type NotificationPrefsState = {
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  queueEventsEnabled: boolean;
+};
+
+function deriveInitials(nameOrEmail: string) {
+  const normalized = nameOrEmail.trim();
+  if (!normalized) return "U";
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+  }
+  return normalized.slice(0, 1).toUpperCase();
+}
+
 export default function SettingsPage() {
   const [theme, setTheme] = useState<AppTheme>(() => readTheme());
   const [textSize, setTextSize] = useState<AppTextSize>(() => readTextSize());
@@ -40,6 +56,17 @@ export default function SettingsPage() {
   const [actualRole, setActualRole] = useState<string | null>(null);
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(() => readRoleViewOverride());
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [displayEmail, setDisplayEmail] = useState("");
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefsState>({
+    emailEnabled: true,
+    smsEnabled: false,
+    queueEventsEnabled: true,
+  });
+  const [notificationPrefsBusy, setNotificationPrefsBusy] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const canViewAs = canUseRoleView(actualRole);
   const canViewRunbook =
@@ -61,11 +88,27 @@ export default function SettingsPage() {
         setCurrentUserId(authData.user.id);
         const { data: profile } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role,full_name,first_name,last_name,nickname,email")
           .eq("id", authData.user.id)
           .maybeSingle();
         if (!active) return;
         const nextRole = (profile?.role as string | undefined) ?? "employee";
+        const nickname =
+          typeof profile?.nickname === "string" ? profile.nickname.trim() : "";
+        const firstName =
+          typeof profile?.first_name === "string" ? profile.first_name.trim() : "";
+        const lastName =
+          typeof profile?.last_name === "string" ? profile.last_name.trim() : "";
+        const fullName =
+          typeof profile?.full_name === "string" ? profile.full_name.trim() : "";
+        const preferredName =
+          nickname || [firstName, lastName].filter(Boolean).join(" ").trim() || fullName;
+        setDisplayName(
+          preferredName
+        );
+        setDisplayEmail(
+          (typeof profile?.email === "string" ? profile.email : authData.user.email || "").trim()
+        );
         if (!canUseRoleView(nextRole)) {
           writeRoleViewOverride(null);
           void supabase
@@ -83,7 +126,7 @@ export default function SettingsPage() {
 
         const { data: prefs } = await supabase
           .from("user_ui_preferences")
-          .select("theme,text_size,role_view_override")
+          .select("theme,text_size,role_view_override,profile_photo_path")
           .eq("user_id", authData.user.id)
           .maybeSingle();
         if (!active || !prefs) return;
@@ -103,6 +146,25 @@ export default function SettingsPage() {
           (prefs.role_view_override as AppRole | null | undefined) ?? null;
         setViewAsRole(dbRoleView);
         writeRoleViewOverride(dbRoleView);
+
+        const { data: notificationPrefsRow } = await supabase
+          .from("user_notification_prefs")
+          .select("email_enabled,sms_enabled,queue_events_enabled")
+          .eq("user_id", authData.user.id)
+          .maybeSingle();
+        if (!active) return;
+        setNotificationPrefs({
+          emailEnabled: notificationPrefsRow?.email_enabled ?? true,
+          smsEnabled: notificationPrefsRow?.sms_enabled ?? false,
+          queueEventsEnabled: notificationPrefsRow?.queue_events_enabled ?? true,
+        });
+
+        const photoRes = await fetch("/api/account/profile-photo", { method: "GET" });
+        if (!active) return;
+        if (photoRes.ok) {
+          const photoJson = (await photoRes.json().catch(() => ({}))) as { url?: string | null };
+          setProfilePhotoUrl(typeof photoJson.url === "string" ? photoJson.url : null);
+        }
       })();
     }, 0);
     return () => {
@@ -149,6 +211,77 @@ export default function SettingsPage() {
     window.setTimeout(() => setSavedMessage(""), 1200);
   }
 
+  async function refreshProfilePhotoUrl() {
+    const res = await fetch("/api/account/profile-photo", { method: "GET" });
+    const json = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+    if (!res.ok) throw new Error(json.error || "Failed to load profile photo.");
+    setProfilePhotoUrl(typeof json.url === "string" ? json.url : null);
+  }
+
+  async function uploadProfilePhoto(file: File) {
+    setPhotoBusy(true);
+    try {
+      const fd = new FormData();
+      fd.set("file", file);
+      const res = await fetch("/api/account/profile-photo", {
+        method: "POST",
+        body: fd,
+      });
+      const json = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+      if (!res.ok) throw new Error(json.error || "Failed to upload profile photo.");
+      setProfilePhotoUrl(typeof json.url === "string" ? json.url : null);
+      setSavedMessage("Profile photo updated.");
+      window.setTimeout(() => setSavedMessage(""), 1400);
+    } catch (error) {
+      setSavedMessage((error as Error).message || "Failed to upload profile photo.");
+      window.setTimeout(() => setSavedMessage(""), 2200);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function removeProfilePhoto() {
+    setPhotoBusy(true);
+    try {
+      const res = await fetch("/api/account/profile-photo", { method: "DELETE" });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Failed to remove profile photo.");
+      await refreshProfilePhotoUrl();
+      setSavedMessage("Profile photo removed.");
+      window.setTimeout(() => setSavedMessage(""), 1400);
+    } catch (error) {
+      setSavedMessage((error as Error).message || "Failed to remove profile photo.");
+      window.setTimeout(() => setSavedMessage(""), 2200);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function saveNotificationPrefs(next: NotificationPrefsState) {
+    if (!currentUserId) return;
+    setNotificationPrefsBusy(true);
+    setNotificationPrefs(next);
+    try {
+      const { error } = await createSupabaseBrowser().from("user_notification_prefs").upsert(
+        {
+          user_id: currentUserId,
+          email_enabled: next.emailEnabled,
+          sms_enabled: next.smsEnabled,
+          queue_events_enabled: next.queueEventsEnabled,
+        },
+        { onConflict: "user_id" }
+      );
+      if (error) throw error;
+      setSavedMessage("Saved.");
+      window.setTimeout(() => setSavedMessage(""), 1200);
+    } catch (error) {
+      setSavedMessage((error as Error).message || "Failed to save notification preferences.");
+      window.setTimeout(() => setSavedMessage(""), 2200);
+    } finally {
+      setNotificationPrefsBusy(false);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 780, margin: "0 auto", paddingBottom: 24 }}>
       <h1 style={{ marginBottom: 8 }}>Settings</h1>
@@ -157,6 +290,74 @@ export default function SettingsPage() {
       </div>
 
       <section style={cardStyle}>
+        <h2 style={{ marginTop: 0, marginBottom: 12 }}>Profile</h2>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "120px minmax(0,1fr)" }}>
+          <div
+            style={{
+              width: 120,
+              height: 120,
+              borderRadius: 999,
+              overflow: "hidden",
+              border: "1px solid var(--surface-border)",
+              background: "rgba(255,255,255,0.05)",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 28,
+              fontWeight: 900,
+            }}
+          >
+            {profilePhotoUrl ? (
+              <img
+                src={profilePhotoUrl}
+                alt="Profile"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <span>{deriveInitials(displayName || displayEmail || "U")}</span>
+            )}
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>{displayName || "Your account"}</div>
+            <div style={{ opacity: 0.72, marginBottom: 10 }}>{displayEmail || "No email on file"}</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                style={linkButtonStyle}
+                onClick={() => photoInputRef.current?.click()}
+                disabled={photoBusy}
+              >
+                {profilePhotoUrl ? "Replace Photo" : "Upload Photo"}
+              </button>
+              <button
+                type="button"
+                style={linkButtonStyle}
+                onClick={() => void removeProfilePhoto()}
+                disabled={photoBusy || !profilePhotoUrl}
+              >
+                Remove Photo
+              </button>
+            </div>
+            <div style={{ opacity: 0.7, fontSize: 12, marginTop: 8 }}>
+              Use JPG, PNG, WEBP, or HEIC. Max 6MB.
+            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0] ?? null;
+                if (file) {
+                  void uploadProfilePhoto(file);
+                }
+                e.currentTarget.value = "";
+              }}
+            />
+          </div>
+        </div>
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 14 }}>
         <h2 style={{ marginTop: 0, marginBottom: 12 }}>Appearance</h2>
         <div style={gridStyle}>
           <Field label="Theme">
@@ -183,6 +384,57 @@ export default function SettingsPage() {
           </Field>
         </div>
         {savedMessage ? <div style={{ marginTop: 10, opacity: 0.8 }}>{savedMessage}</div> : null}
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 12 }}>Notification Preferences</h2>
+        <div style={{ opacity: 0.78, marginBottom: 10 }}>
+          Control how you receive operational alerts and queue events.
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <label style={toggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={notificationPrefs.emailEnabled}
+              disabled={notificationPrefsBusy}
+              onChange={(e) =>
+                void saveNotificationPrefs({
+                  ...notificationPrefs,
+                  emailEnabled: e.target.checked,
+                })
+              }
+            />
+            <span>Email alerts</span>
+          </label>
+          <label style={toggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={notificationPrefs.smsEnabled}
+              disabled={notificationPrefsBusy}
+              onChange={(e) =>
+                void saveNotificationPrefs({
+                  ...notificationPrefs,
+                  smsEnabled: e.target.checked,
+                })
+              }
+            />
+            <span>SMS alerts</span>
+          </label>
+          <label style={toggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={notificationPrefs.queueEventsEnabled}
+              disabled={notificationPrefsBusy}
+              onChange={(e) =>
+                void saveNotificationPrefs({
+                  ...notificationPrefs,
+                  queueEventsEnabled: e.target.checked,
+                })
+              }
+            />
+            <span>Queue event notifications</span>
+          </label>
+        </div>
       </section>
 
       {canViewAs ? (
@@ -216,7 +468,12 @@ export default function SettingsPage() {
       <section style={{ ...cardStyle, marginTop: 14 }}>
         <h2 style={{ marginTop: 0, marginBottom: 12 }}>Account</h2>
         <div style={{ opacity: 0.78, marginBottom: 10 }}>
-          Sign out from this device.
+          Manage password and sign out from this device.
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <a href="/change-password" style={linkButtonStyle}>
+            Change Password
+          </a>
         </div>
         <LogoutButton />
       </section>
@@ -308,4 +565,11 @@ const linkButtonStyle: React.CSSProperties = {
   color: "inherit",
   textDecoration: "none",
   fontWeight: 700,
+};
+
+const toggleRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "8px 0",
 };
