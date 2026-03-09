@@ -145,6 +145,7 @@ export default function AppTopNavLinks() {
     actualRole === "mechanic";
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
+  const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");
 
   const navLinks: Array<{ href: string; label: string; badge?: number }> = [
     { href: "/", label: "Home" },
@@ -154,6 +155,9 @@ export default function AppTopNavLinks() {
     { href: "/forms", label: "Forms" },
     { href: "/inventory", label: "Inventory" },
   ];
+  if (canViewPurchases) {
+    navLinks.push({ href: "/purchases", label: "Purchases" });
+  }
   if (canViewMaintenanceCenter) {
     navLinks.push({ href: "/maintenance", label: "Maintenance Center" });
   }

@@ -462,6 +462,20 @@ export default async function Home() {
       role === "team_lead_1" ||
       role === "team_lead_2";
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
+    const canViewPurchases = canAccessRoute(role, "purchases");
+
+    if (canViewPurchases) {
+      const purchasesTile = {
+        title: "Purchases",
+        href: "/purchases",
+        desc: "Itemized purchase requests, approvals, AP funding, and receipts",
+      };
+      const notificationsIndex = tiles.findIndex((tile) => tile.title === "Notifications");
+      tiles =
+        notificationsIndex >= 0
+          ? [...tiles.slice(0, notificationsIndex), purchasesTile, ...tiles.slice(notificationsIndex)]
+          : [...tiles, purchasesTile];
+    }
 
     if (canViewMaintenanceCenter) {
       const maintenanceTile = {
@@ -828,6 +842,7 @@ export default async function Home() {
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
           { label: "Create Blank PM", href: "/maintenance/pm/new" },
+          { label: "Open Purchases", href: "/purchases" },
           { label: "Open Accountability Center", href: "/form-reports" },
           { label: "Open Inventory Alerts", href: "/inventory/alerts" },
         ],
@@ -863,6 +878,7 @@ export default async function Home() {
         actions: [
           { label: "Open Maintenance Center", href: "/maintenance" },
           { label: "Create Blank PM", href: "/maintenance/pm/new" },
+          { label: "Open Purchases", href: "/purchases" },
           { label: "Open Inventory", href: "/inventory" },
           { label: "Open Notifications", href: "/notifications" },
         ],

@@ -39,15 +39,6 @@ type SystemAffected =
   | "Attachment / Implement"
   | "Other";
 
-type Attachment = {
-  id: string;
-  createdAt: string; // ISO
-  name: string;
-  mime: string;
-  dataUrl: string;
-  kind?: "receipt" | "issue" | "other";
-};
-
 type MaintenanceRequestRecord = {
   id: string;
   vehicleId: string;
@@ -84,7 +75,35 @@ type MaintenanceRequestRow = {
   description: string | null;
 };
 
-type MaintenanceLogStatus = Exclude<MaintenanceRequestStatus, "Open">;
+type PurchaseLinkedSummary = {
+  id: string;
+  overall_status: string;
+  ap_payment_method: string | null;
+  ap_payment_method_other: string | null;
+  ap_po_number: string | null;
+  funds_available_date: string | null;
+};
+
+type PurchaseLinkedItem = {
+  id: string;
+  item_name: string;
+  ap_decision: string;
+  approved_payment_method: string | null;
+  approved_payment_method_other: string | null;
+  approved_po_number: string | null;
+  funds_available_date: string | null;
+};
+
+type PurchaseLinkedResponse = {
+  requests?: PurchaseLinkedSummary[];
+  itemsByRequestId?: Record<string, PurchaseLinkedItem[]>;
+  error?: string;
+};
+
+type MaintenanceLogStatus =
+  | Exclude<MaintenanceRequestStatus, "Open">
+  | "Purchase Request Pending"
+  | "Purchase Request Approved";
 type Role = AppRole;
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 
@@ -92,6 +111,8 @@ const MAINTENANCE_LOG_STATUS_OPTIONS: MaintenanceLogStatus[] = [
   "Pending Approval",
   "Scheduled",
   "In Progress",
+  "Purchase Request Pending",
+  "Purchase Request Approved",
   "Waiting on Parts",
   "External Repair",
   "On Hold",
@@ -180,6 +201,24 @@ function parseFieldValue(raw: string | null, field: string) {
   return "";
 }
 
+function coerceMaintenanceLogStatus(
+  value: unknown,
+  fallback: MaintenanceLogStatus = "In Progress"
+): MaintenanceLogStatus {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return MAINTENANCE_LOG_STATUS_OPTIONS.includes(normalized as MaintenanceLogStatus)
+    ? (normalized as MaintenanceLogStatus)
+    : fallback;
+}
+
+function mapLogStatusToRequestStatus(status: MaintenanceLogStatus): Exclude<MaintenanceRequestStatus, "Open"> {
+  if (status === "Purchase Request Pending" || status === "Purchase Request Approved") {
+    return "Waiting on Parts";
+  }
+  return status as Exclude<MaintenanceRequestStatus, "Open">;
+}
+
 /* =========================
    Page
 ========================= */
@@ -205,14 +244,6 @@ export default function MaintenanceLogPage() {
   const [notes, setNotes] = useState("");
   const [serviceDate, setServiceDate] = useState(todayYYYYMMDD());
 
-  const [receiptPhotos, setReceiptPhotos] = useState<Attachment[]>([]);
-
-  // optional fields (keep simple defaults)
-  const [vendorName, setVendorName] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [laborCost, setLaborCost] = useState("");
-  const [partsCost, setPartsCost] = useState("");
-
   // preventative
   const [nextDueMileage, setNextDueMileage] = useState("");
   const [resetOilLife, setResetOilLife] = useState(false);
@@ -229,6 +260,10 @@ export default function MaintenanceLogPage() {
   const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
   const [linkedRequestId, setLinkedRequestId] = useState(queryRequestId);
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
+  const [linkedPurchases, setLinkedPurchases] = useState<PurchaseLinkedSummary[]>([]);
+  const [linkedPurchaseItems, setLinkedPurchaseItems] = useState<Record<string, PurchaseLinkedItem[]>>({});
+  const [linkedPurchasesLoading, setLinkedPurchasesLoading] = useState(false);
+  const [linkedPurchasesError, setLinkedPurchasesError] = useState<string | null>(null);
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
@@ -276,10 +311,6 @@ export default function MaintenanceLogPage() {
 
         const parsedTitle = parseFieldValue(logRow.notes, "Title");
         const parsedServiceDate = parseFieldValue(logRow.notes, "Service Date");
-        const parsedVendor = parseFieldValue(logRow.notes, "Vendor");
-        const parsedInvoice = parseFieldValue(logRow.notes, "Invoice");
-        const parsedLaborCost = parseFieldValue(logRow.notes, "Labor Cost");
-        const parsedPartsCost = parseFieldValue(logRow.notes, "Parts Cost");
         const parsedNextDueMileage = parseFieldValue(logRow.notes, "Next Due Mileage");
         const parsedNextDueHours = parseFieldValue(logRow.notes, "Next Due Hours");
         const parsedResetOilLife = parseFieldValue(logRow.notes, "Reset Oil Life");
@@ -287,11 +318,7 @@ export default function MaintenanceLogPage() {
         setLinkedRequestId(logRow.request_id ?? "");
         setTitle(parsedTitle || "Maintenance Log");
         setMileage(Number.isFinite(Number(logRow.mileage)) ? String(logRow.mileage) : "");
-        setStatus(
-          coerceMaintenanceRequestStatus(logRow.status_update, "In Progress") === "Open"
-            ? ""
-            : (coerceMaintenanceRequestStatus(logRow.status_update, "In Progress") as MaintenanceLogStatus)
-        );
+        setStatus(coerceMaintenanceLogStatus(logRow.status_update, "In Progress"));
         setMechanicSelfScore(
           Number.isFinite(Number(logRow.mechanic_self_score)) ? String(logRow.mechanic_self_score) : ""
         );
@@ -301,10 +328,6 @@ export default function MaintenanceLogPage() {
         } else if (typeof logRow.created_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(logRow.created_at)) {
           setServiceDate(logRow.created_at.slice(0, 10));
         }
-        setVendorName(parsedVendor);
-        setInvoiceNumber(parsedInvoice);
-        setLaborCost(parsedLaborCost);
-        setPartsCost(parsedPartsCost);
         setNextDueMileage(parsedNextDueMileage || parsedNextDueHours);
         setResetOilLife(parsedResetOilLife.toLowerCase() === "yes");
       } else if (queryRequestId) {
@@ -421,6 +444,57 @@ export default function MaintenanceLogPage() {
   }, [linkedRequestId, vehicleId]);
 
   useEffect(() => {
+    const maintenanceRequestId = linkedRequestId.trim();
+    const maintenanceLogId = editId.trim();
+    if (!maintenanceRequestId && !maintenanceLogId) {
+      const clearTimer = window.setTimeout(() => {
+        setLinkedPurchases([]);
+        setLinkedPurchaseItems({});
+        setLinkedPurchasesError(null);
+        setLinkedPurchasesLoading(false);
+      }, 0);
+      return () => window.clearTimeout(clearTimer);
+    }
+
+    let active = true;
+    void (async () => {
+      setLinkedPurchasesLoading(true);
+      setLinkedPurchasesError(null);
+
+      const params = new URLSearchParams();
+      if (maintenanceRequestId) {
+        params.set("maintenanceRequestType", "vehicle");
+        params.set("maintenanceRequestId", maintenanceRequestId);
+      }
+      if (maintenanceLogId) {
+        params.set("maintenanceLogType", "vehicle");
+        params.set("maintenanceLogId", maintenanceLogId);
+      }
+      params.set("limit", "50");
+
+      const res = await fetch(`/api/purchases?${params.toString()}`, { method: "GET" });
+      const json = (await res.json().catch(() => ({}))) as PurchaseLinkedResponse;
+      if (!active) return;
+      if (!res.ok) {
+        setLinkedPurchases([]);
+        setLinkedPurchaseItems({});
+        setLinkedPurchasesError(json.error || "Failed to load linked purchases.");
+        setLinkedPurchasesLoading(false);
+        return;
+      }
+
+      setLinkedPurchases(Array.isArray(json.requests) ? json.requests : []);
+      setLinkedPurchaseItems(json.itemsByRequestId ?? {});
+      setLinkedPurchasesError(null);
+      setLinkedPurchasesLoading(false);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [linkedRequestId, editId]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void (async () => {
         const supabase = createSupabaseBrowser();
@@ -489,15 +563,6 @@ export default function MaintenanceLogPage() {
     return () => window.clearTimeout(timer);
   }, [canSubmitPartsUsage]);
 
-  const totalCost = useMemo(() => {
-    const l = Number(laborCost);
-    const p = Number(partsCost);
-    const lf = Number.isFinite(l) ? l : 0;
-    const pf = Number.isFinite(p) ? p : 0;
-    if (!laborCost.trim() && !partsCost.trim()) return "";
-    return String(lf + pf);
-  }, [laborCost, partsCost]);
-
   const filteredInventoryItems = useMemo(() => {
     const q = partSearch.trim().toLowerCase();
     const usedIds = new Set(partsUsed.map((p) => p.item_id));
@@ -550,34 +615,6 @@ export default function MaintenanceLogPage() {
     );
   }
 
-  async function onPickReceiptPhoto(file: File) {
-    // Basic size guard to keep payload sizes reasonable.
-    if (file.size > 2_000_000) {
-      alert("That photo is large (>2MB). Please retake at a lower resolution or crop it.");
-      return;
-    }
-
-    const dataUrl = await fileToDataUrl(file);
-    const att: Attachment = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      name: file.name || "receipt.jpg",
-      mime: file.type || "image/jpeg",
-      dataUrl,
-      kind: "receipt",
-    };
-
-    setReceiptPhotos((prev) => {
-      const next = [att, ...prev];
-      // Limit to 3 receipts for form usability/performance.
-      return next.slice(0, 3);
-    });
-  }
-
-  function removeReceiptPhoto(id: string) {
-    setReceiptPhotos((prev) => prev.filter((p) => p.id !== id));
-  }
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -625,18 +662,11 @@ export default function MaintenanceLogPage() {
       ? { mechanic_self_score: parsedMechanicSelfScore }
       : {};
 
-    const l = Number(laborCost);
-    const p = Number(partsCost);
     const notesValue = notes.trim()
       ? notes.trim()
       : [
           `Title: ${title.trim()}`,
           serviceDate ? `Service Date: ${serviceDate}` : "",
-          vendorName.trim() ? `Vendor: ${vendorName.trim()}` : "",
-          invoiceNumber.trim() ? `Invoice: ${invoiceNumber.trim()}` : "",
-          Number.isFinite(l) ? `Labor Cost: ${l}` : "",
-          Number.isFinite(p) ? `Parts Cost: ${p}` : "",
-          totalCost.trim() ? `Total Cost: ${totalCost}` : "",
           nextDueMileage.trim() ? `${nextDueLabel}: ${nextDueMileage.trim()}` : "",
           resetOilLife ? "Reset Oil Life: Yes" : "",
         ]
@@ -687,10 +717,11 @@ export default function MaintenanceLogPage() {
     }
 
     if (effectiveRequestId) {
+      const linkedRequestStatus = mapLogStatusToRequestStatus(status);
       const { error: requestUpdateError } = await supabase
         .from("maintenance_requests")
         .update({
-          status,
+          status: linkedRequestStatus,
         })
         .eq("id", effectiveRequestId);
 
@@ -968,51 +999,67 @@ export default function MaintenanceLogPage() {
         </div>
 
         <div style={{ marginTop: 16, ...cardStyle }}>
-          <div style={{ fontWeight: 900, marginBottom: 12 }}>Costs (optional)</div>
-
-          <div style={gridStyle}>
-            <Field label="Vendor / Shop (optional)">
-              <input
-                value={vendorName}
-                onChange={(e) => setVendorName(e.target.value)}
-                placeholder="e.g. ABC Truck Repair"
-                style={inputStyle}
-              />
-            </Field>
-
-            <Field label="Invoice # (optional)">
-              <input
-                value={invoiceNumber}
-                onChange={(e) => setInvoiceNumber(e.target.value)}
-                placeholder="e.g. INV-10492"
-                style={inputStyle}
-              />
-            </Field>
-
-            <Field label="Labor Cost (optional)">
-              <input
-                value={laborCost}
-                onChange={(e) => setLaborCost(e.target.value)}
-                inputMode="decimal"
-                placeholder="e.g. 220"
-                style={inputStyle}
-              />
-            </Field>
-
-            <Field label="Parts Cost (optional)">
-              <input
-                value={partsCost}
-                onChange={(e) => setPartsCost(e.target.value)}
-                inputMode="decimal"
-                placeholder="e.g. 145.50"
-                style={inputStyle}
-              />
-            </Field>
-
-            <Field label="Total (auto)">
-              <input value={totalCost} readOnly style={{ ...inputStyle, opacity: 0.85 }} />
-            </Field>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Purchases</div>
+          <div style={{ opacity: 0.76, marginBottom: 10 }}>
+            Purchase requests replace cost fields for this maintenance log.
           </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <a
+              href={`/purchases?assetType=vehicle&assetId=${encodeURIComponent(vehicleId)}${linkedRequestId ? `&maintenanceRequestType=vehicle&maintenanceRequestId=${encodeURIComponent(linkedRequestId)}` : ""}${editId ? `&maintenanceLogType=vehicle&maintenanceLogId=${encodeURIComponent(editId)}` : ""}`}
+              style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+            >
+              Create / Open Purchase Request
+            </a>
+          </div>
+
+          {linkedPurchasesLoading ? (
+            <div style={{ marginTop: 12, opacity: 0.75 }}>Loading linked purchases...</div>
+          ) : linkedPurchasesError ? (
+            <div style={{ marginTop: 12, color: "#ff9d9d" }}>{linkedPurchasesError}</div>
+          ) : linkedPurchases.length ? (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {linkedPurchases.map((purchase) => {
+                const approvedItems = (linkedPurchaseItems[purchase.id] ?? []).filter(
+                  (item) => item.ap_decision === "approved"
+                );
+                return (
+                  <div
+                    key={purchase.id}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 12,
+                      padding: 10,
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 800 }}>Purchase {purchase.id.slice(0, 8)}</div>
+                      <div style={{ opacity: 0.8 }}>{purchase.overall_status.replaceAll("_", " ")}</div>
+                    </div>
+                    {approvedItems.length ? (
+                      <div style={{ marginTop: 6, fontSize: 13, opacity: 0.9 }}>
+                        Approved items: {approvedItems.map((item) => item.item_name).join(", ")}
+                      </div>
+                    ) : null}
+                    {(purchase.ap_payment_method || purchase.ap_po_number || purchase.funds_available_date) ? (
+                      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.78 }}>
+                        Payment:{" "}
+                        {purchase.ap_payment_method
+                          ? purchase.ap_payment_method === "Other" && purchase.ap_payment_method_other
+                            ? `${purchase.ap_payment_method} (${purchase.ap_payment_method_other})`
+                            : purchase.ap_payment_method
+                          : "-"}
+                        {" · "}PO#: {purchase.ap_po_number || "-"}
+                        {" · "}Funds: {purchase.funds_available_date || "-"}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, opacity: 0.7 }}>No linked purchase requests yet.</div>
+          )}
         </div>
 
         <div style={{ marginTop: 16, ...cardStyle }}>
@@ -1133,58 +1180,6 @@ export default function MaintenanceLogPage() {
           )}
         </div>
 
-        <div style={{ marginTop: 16, ...cardStyle }}>
-          <div style={{ fontWeight: 900, marginBottom: 12 }}>Receipt Photos (optional)</div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <label style={{ ...buttonStyle, cursor: "pointer" }}>
-              Take / Add Receipt Photo
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) onPickReceiptPhoto(f);
-                  e.currentTarget.value = "";
-                }}
-              />
-            </label>
-
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
-              Limit: 3 photos • Keep them reasonably small.
-            </div>
-          </div>
-
-          {receiptPhotos.length ? (
-            <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-              {receiptPhotos.map((p) => (
-                <div key={p.id} style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 10 }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.dataUrl}
-                    alt={p.name}
-                    style={{ width: "100%", borderRadius: 10, display: "block" }}
-                  />
-                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8, wordBreak: "break-word" }}>
-                    {p.name}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeReceiptPhoto(p.id)}
-                    style={{ ...secondaryButtonStyle, marginTop: 8, width: "100%" }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ marginTop: 10, opacity: 0.7 }}>No receipt photos added.</div>
-          )}
-        </div>
-
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle}>
             {isEditMode ? "Save Changes" : "Save Maintenance Log"}
@@ -1219,15 +1214,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-async function fileToDataUrl(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.readAsDataURL(file);
-  });
 }
 
 /* =========================

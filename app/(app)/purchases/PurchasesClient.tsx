@@ -1,0 +1,1407 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useRef, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import {
+  canApApprovePurchase,
+  canCreatePurchaseRequest,
+  canManagerApprovePurchase,
+  purchaseOverallStatusLabel,
+  PURCHASE_DEPARTMENTS,
+  PURCHASE_METHOD_OPTIONS,
+  PURCHASE_TIMELINE_OPTIONS,
+  type PurchaseDecision,
+  type PurchaseMethod,
+  type PurchaseTimeline,
+} from "@/lib/purchases";
+
+type PurchaseRequestRow = {
+  id: string;
+  request_date: string;
+  requested_by: string | null;
+  requested_for_id: string | null;
+  requested_for_name: string | null;
+  department: string;
+  vendor_name: string;
+  estimated_total: number | string;
+  timeline: string;
+  reason: string;
+  reimbursable: boolean;
+  purchase_method_requested: string;
+  purchase_method_other: string | null;
+  maintenance_request_type: "vehicle" | "equipment" | null;
+  maintenance_request_id: string | null;
+  maintenance_log_type: "vehicle" | "equipment" | null;
+  maintenance_log_id: string | null;
+  asset_type: "vehicle" | "equipment" | null;
+  asset_id: string | null;
+  manager_status: string;
+  manager_approved_at: string | null;
+  manager_approved_by: string | null;
+  manager_signature: string | null;
+  manager_note: string | null;
+  ap_status: string;
+  ap_reviewed_at: string | null;
+  ap_reviewed_by: string | null;
+  ap_signature: string | null;
+  ap_note: string | null;
+  funds_available_date: string | null;
+  ap_payment_method: string | null;
+  ap_payment_method_other: string | null;
+  ap_po_number: string | null;
+  overall_status:
+    | "pending_manager_approval"
+    | "pending_ap_approval"
+    | "approved"
+    | "partially_approved"
+    | "denied"
+    | "completed";
+  created_at: string;
+  updated_at: string;
+};
+
+type PurchaseItemRow = {
+  id: string;
+  purchase_request_id: string;
+  item_name: string;
+  item_description: string | null;
+  quantity: number | string;
+  estimated_unit_cost: number | string | null;
+  estimated_total: number | string | null;
+  manager_decision: string;
+  manager_note: string | null;
+  ap_decision: string;
+  ap_note: string | null;
+  approved_payment_method: string | null;
+  approved_payment_method_other: string | null;
+  approved_po_number: string | null;
+  funds_available_date: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PurchaseAttachmentRow = {
+  id: string;
+  purchase_request_id: string;
+  item_id: string | null;
+  attachment_type: "quote" | "receipt";
+  file_name: string;
+  storage_bucket: string;
+  storage_path: string;
+  uploaded_by: string | null;
+  created_at: string;
+};
+
+type TeammateOption = {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  department: string | null;
+  status: string | null;
+};
+
+type PurchasesResponse = {
+  requests?: PurchaseRequestRow[];
+  itemsByRequestId?: Record<string, PurchaseItemRow[]>;
+  attachmentsByRequestId?: Record<string, PurchaseAttachmentRow[]>;
+  teammates?: TeammateOption[];
+  error?: string;
+};
+
+type ItemDraft = {
+  localId: string;
+  name: string;
+  description: string;
+  quantity: string;
+  estimatedUnitCost: string;
+  estimatedTotal: string;
+};
+
+type ManagerDecisionDraft = {
+  decision: PurchaseDecision;
+  note: string;
+};
+
+type ApDecisionDraft = {
+  decision: PurchaseDecision;
+  note: string;
+  approvedPaymentMethod: string;
+  approvedPaymentMethodOther: string;
+  approvedPoNumber: string;
+  fundsAvailableDate: string;
+};
+
+const FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "pending_manager_approval", label: "Pending Manager" },
+  { value: "pending_ap_approval", label: "Pending AP" },
+  { value: "approved", label: "Approved" },
+  { value: "partially_approved", label: "Partially Approved" },
+  { value: "denied", label: "Denied" },
+  { value: "completed", label: "Completed" },
+] as const;
+
+function asCurrency(value: number | string | null | undefined) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return n.toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
+function fmtDate(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function fmtDateOnly(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString();
+}
+
+function statusBadgeStyle(status: string): React.CSSProperties {
+  const base: React.CSSProperties = {
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.18)",
+    padding: "3px 10px",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  };
+  if (status === "approved" || status === "completed") {
+    return { ...base, borderColor: "rgba(70,220,120,0.45)", background: "rgba(70,220,120,0.16)" };
+  }
+  if (status === "partially_approved") {
+    return { ...base, borderColor: "rgba(245,200,90,0.45)", background: "rgba(245,200,90,0.16)" };
+  }
+  if (status === "denied") {
+    return { ...base, borderColor: "rgba(255,110,110,0.45)", background: "rgba(255,110,110,0.18)" };
+  }
+  return { ...base, borderColor: "rgba(120,180,255,0.45)", background: "rgba(120,180,255,0.14)" };
+}
+
+function cardStyle(): React.CSSProperties {
+  return {
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 16,
+    padding: 16,
+    background: "rgba(255,255,255,0.03)",
+  };
+}
+
+function inputStyle(): React.CSSProperties {
+  return {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.04)",
+    color: "inherit",
+  };
+}
+
+function buttonStyle(): React.CSSProperties {
+  return {
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(255,255,255,0.06)",
+    color: "inherit",
+    borderRadius: 10,
+    padding: "10px 12px",
+    fontWeight: 800,
+    cursor: "pointer",
+  };
+}
+
+function primaryButtonStyle(): React.CSSProperties {
+  return {
+    ...buttonStyle(),
+    background: "rgba(44, 165, 95, 0.22)",
+    borderColor: "rgba(44, 165, 95, 0.52)",
+  };
+}
+
+export default function PurchasesClient({
+  role,
+  fullName,
+  email,
+}: {
+  role: string;
+  fullName: string | null;
+  email: string | null;
+}) {
+  const sp = useSearchParams();
+  const canCreate = canCreatePurchaseRequest(role);
+  const canManagerApprove = canManagerApprovePurchase(role);
+  const canApApprove = canApApprovePurchase(role);
+
+  const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [requests, setRequests] = useState<PurchaseRequestRow[]>([]);
+  const [itemsByRequestId, setItemsByRequestId] = useState<Record<string, PurchaseItemRow[]>>({});
+  const [attachmentsByRequestId, setAttachmentsByRequestId] = useState<Record<string, PurchaseAttachmentRow[]>>({});
+  const [teammates, setTeammates] = useState<TeammateOption[]>([]);
+  const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]["value"]>("all");
+  const [selectedRequestId, setSelectedRequestId] = useState("");
+  const [inlineMessage, setInlineMessage] = useState<string | null>(null);
+
+  const [requestedForId, setRequestedForId] = useState("");
+  const [department, setDepartment] = useState<(typeof PURCHASE_DEPARTMENTS)[number]>("Maintenance");
+  const [vendorName, setVendorName] = useState("");
+  const [estimatedTotal, setEstimatedTotal] = useState("");
+  const [timeline, setTimeline] = useState<PurchaseTimeline | "">("");
+  const [reason, setReason] = useState("");
+  const [reimbursable, setReimbursable] = useState(false);
+  const [purchaseMethod, setPurchaseMethod] = useState<PurchaseMethod>("Credit Card");
+  const [purchaseMethodOther, setPurchaseMethodOther] = useState("");
+  const [maintenanceRequestType, setMaintenanceRequestType] = useState<"" | "vehicle" | "equipment">("");
+  const [maintenanceRequestId, setMaintenanceRequestId] = useState("");
+  const [maintenanceLogType, setMaintenanceLogType] = useState<"" | "vehicle" | "equipment">("");
+  const [maintenanceLogId, setMaintenanceLogId] = useState("");
+  const [assetType, setAssetType] = useState<"" | "vehicle" | "equipment">("");
+  const [assetId, setAssetId] = useState("");
+  const [items, setItems] = useState<ItemDraft[]>([
+    {
+      localId: crypto.randomUUID(),
+      name: "",
+      description: "",
+      quantity: "1",
+      estimatedUnitCost: "",
+      estimatedTotal: "",
+    },
+  ]);
+  const [quoteFiles, setQuoteFiles] = useState<File[]>([]);
+
+  const [managerSignature, setManagerSignature] = useState("");
+  const [managerNote, setManagerNote] = useState("");
+  const [managerDecisions, setManagerDecisions] = useState<Record<string, ManagerDecisionDraft>>({});
+
+  const [apSignature, setApSignature] = useState("");
+  const [apNote, setApNote] = useState("");
+  const [apFundsAvailableDate, setApFundsAvailableDate] = useState("");
+  const [apPaymentMethod, setApPaymentMethod] = useState("");
+  const [apPaymentMethodOther, setApPaymentMethodOther] = useState("");
+  const [apPoNumber, setApPoNumber] = useState("");
+  const [apDecisions, setApDecisions] = useState<Record<string, ApDecisionDraft>>({});
+
+  const createQuoteCaptureRef = useRef<HTMLInputElement | null>(null);
+  const createQuoteFileRef = useRef<HTMLInputElement | null>(null);
+  const detailQuoteCaptureRef = useRef<HTMLInputElement | null>(null);
+  const detailQuoteFileRef = useRef<HTMLInputElement | null>(null);
+  const receiptCaptureRef = useRef<HTMLInputElement | null>(null);
+  const receiptFileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const qMaintenanceRequestType = sp?.get("maintenanceRequestType");
+    const qMaintenanceRequestId = sp?.get("maintenanceRequestId");
+    const qMaintenanceLogType = sp?.get("maintenanceLogType");
+    const qMaintenanceLogId = sp?.get("maintenanceLogId");
+    const qAssetType = sp?.get("assetType");
+    const qAssetId = sp?.get("assetId");
+    if (qMaintenanceRequestType === "vehicle" || qMaintenanceRequestType === "equipment") {
+      setMaintenanceRequestType(qMaintenanceRequestType);
+    }
+    if (qMaintenanceRequestId) setMaintenanceRequestId(qMaintenanceRequestId);
+    if (qMaintenanceLogType === "vehicle" || qMaintenanceLogType === "equipment") {
+      setMaintenanceLogType(qMaintenanceLogType);
+    }
+    if (qMaintenanceLogId) setMaintenanceLogId(qMaintenanceLogId);
+    if (qAssetType === "vehicle" || qAssetType === "equipment") setAssetType(qAssetType);
+    if (qAssetId) setAssetId(qAssetId);
+  }, [sp]);
+
+  async function loadData(preferSelectedId?: string) {
+    setLoading(true);
+    setLoadingError(null);
+    const res = await fetch("/api/purchases", { method: "GET" });
+    const json = (await res.json().catch(() => ({}))) as PurchasesResponse;
+    if (!res.ok) {
+      setLoadingError(json.error || "Failed to load purchases.");
+      setLoading(false);
+      return;
+    }
+    const nextRequests = Array.isArray(json.requests) ? json.requests : [];
+    setRequests(nextRequests);
+    setItemsByRequestId(json.itemsByRequestId ?? {});
+    setAttachmentsByRequestId(json.attachmentsByRequestId ?? {});
+    setTeammates(Array.isArray(json.teammates) ? json.teammates : []);
+
+    const selected = preferSelectedId || selectedRequestId;
+    if (selected && nextRequests.some((row) => row.id === selected)) {
+      setSelectedRequestId(selected);
+    } else {
+      setSelectedRequestId(nextRequests[0]?.id ?? "");
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredRequests = useMemo(() => {
+    if (statusFilter === "all") return requests;
+    return requests.filter((row) => row.overall_status === statusFilter);
+  }, [requests, statusFilter]);
+
+  const selectedRequest = useMemo(
+    () => requests.find((row) => row.id === selectedRequestId) ?? null,
+    [requests, selectedRequestId]
+  );
+
+  const selectedItems = useMemo(
+    () => (selectedRequest ? itemsByRequestId[selectedRequest.id] ?? [] : []),
+    [itemsByRequestId, selectedRequest]
+  );
+
+  const selectedAttachments = useMemo(
+    () => (selectedRequest ? attachmentsByRequestId[selectedRequest.id] ?? [] : []),
+    [attachmentsByRequestId, selectedRequest]
+  );
+
+  const selectedQuotes = useMemo(
+    () => selectedAttachments.filter((row) => row.attachment_type === "quote"),
+    [selectedAttachments]
+  );
+  const selectedReceipts = useMemo(
+    () => selectedAttachments.filter((row) => row.attachment_type === "receipt"),
+    [selectedAttachments]
+  );
+
+  useEffect(() => {
+    if (!selectedRequest) return;
+
+    const nextManagerDraft: Record<string, ManagerDecisionDraft> = {};
+    const nextApDraft: Record<string, ApDecisionDraft> = {};
+    for (const item of selectedItems) {
+      nextManagerDraft[item.id] = {
+        decision:
+          item.manager_decision === "approved" || item.manager_decision === "denied"
+            ? (item.manager_decision as PurchaseDecision)
+            : "pending",
+        note: item.manager_note ?? "",
+      };
+
+      nextApDraft[item.id] = {
+        decision:
+          item.ap_decision === "approved" || item.ap_decision === "denied"
+            ? (item.ap_decision as PurchaseDecision)
+            : "pending",
+        note: item.ap_note ?? "",
+        approvedPaymentMethod: item.approved_payment_method ?? selectedRequest.ap_payment_method ?? "",
+        approvedPaymentMethodOther: item.approved_payment_method_other ?? selectedRequest.ap_payment_method_other ?? "",
+        approvedPoNumber: item.approved_po_number ?? selectedRequest.ap_po_number ?? "",
+        fundsAvailableDate: item.funds_available_date ?? selectedRequest.funds_available_date ?? "",
+      };
+    }
+    setManagerDecisions(nextManagerDraft);
+    setManagerSignature(selectedRequest.manager_signature ?? "");
+    setManagerNote(selectedRequest.manager_note ?? "");
+
+    setApDecisions(nextApDraft);
+    setApSignature(selectedRequest.ap_signature ?? "");
+    setApNote(selectedRequest.ap_note ?? "");
+    setApFundsAvailableDate(selectedRequest.funds_available_date ?? "");
+    setApPaymentMethod(selectedRequest.ap_payment_method ?? "");
+    setApPaymentMethodOther(selectedRequest.ap_payment_method_other ?? "");
+    setApPoNumber(selectedRequest.ap_po_number ?? "");
+  }, [selectedItems, selectedRequest]);
+
+  const activeTeammates = useMemo(
+    () =>
+      teammates
+        .filter((row) => !row.status || row.status.toLowerCase() === "active")
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [teammates]
+  );
+
+  function updateItem(localId: string, patch: Partial<ItemDraft>) {
+    setItems((prev) => prev.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
+  }
+
+  function addItemRow() {
+    setItems((prev) => [
+      ...prev,
+      {
+        localId: crypto.randomUUID(),
+        name: "",
+        description: "",
+        quantity: "1",
+        estimatedUnitCost: "",
+        estimatedTotal: "",
+      },
+    ]);
+  }
+
+  function removeItemRow(localId: string) {
+    setItems((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.localId !== localId)));
+  }
+
+  function resetCreateForm() {
+    setVendorName("");
+    setEstimatedTotal("");
+    setTimeline("");
+    setReason("");
+    setReimbursable(false);
+    setPurchaseMethod("Credit Card");
+    setPurchaseMethodOther("");
+    setItems([
+      {
+        localId: crypto.randomUUID(),
+        name: "",
+        description: "",
+        quantity: "1",
+        estimatedUnitCost: "",
+        estimatedTotal: "",
+      },
+    ]);
+    setQuoteFiles([]);
+  }
+
+  async function uploadAttachments(
+    purchaseRequestId: string,
+    attachmentType: "quote" | "receipt",
+    files: File[],
+    itemId?: string
+  ) {
+    for (const file of files) {
+      const fd = new FormData();
+      fd.set("purchaseRequestId", purchaseRequestId);
+      fd.set("attachmentType", attachmentType);
+      if (itemId) fd.set("itemId", itemId);
+      fd.set("file", file);
+      const uploadRes = await fetch("/api/purchases/attachments", {
+        method: "POST",
+        body: fd,
+      });
+      if (!uploadRes.ok) {
+        const uploadJson = (await uploadRes.json().catch(() => ({}))) as { error?: string };
+        throw new Error(uploadJson.error || "Attachment upload failed.");
+      }
+    }
+  }
+
+  async function onCreateRequest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canCreate) {
+      setInlineMessage("You do not have permission to create purchase requests.");
+      return;
+    }
+    if (!requestedForId.trim()) {
+      setInlineMessage("Teammate Name is required.");
+      return;
+    }
+    if (!vendorName.trim()) {
+      setInlineMessage("Vendor/store name is required.");
+      return;
+    }
+    if (!reason.trim()) {
+      setInlineMessage("Reason for purchase is required.");
+      return;
+    }
+    const preparedItems = items
+      .map((row) => ({
+        name: row.name.trim(),
+        description: row.description.trim(),
+        quantity: row.quantity.trim() || "1",
+        estimatedUnitCost: row.estimatedUnitCost.trim(),
+        estimatedTotal: row.estimatedTotal.trim(),
+      }))
+      .filter((row) => row.name);
+    if (!preparedItems.length) {
+      setInlineMessage("At least one item is required.");
+      return;
+    }
+    if (purchaseMethod === "Other" && !purchaseMethodOther.trim()) {
+      setInlineMessage("Please specify the purchase method.");
+      return;
+    }
+
+    setSaving(true);
+    setInlineMessage(null);
+    const payload = {
+      requestedForId,
+      department,
+      vendorName,
+      estimatedTotal,
+      timeline: timeline || undefined,
+      reason,
+      reimbursable,
+      purchaseMethodRequested: purchaseMethod,
+      purchaseMethodOther: purchaseMethod === "Other" ? purchaseMethodOther.trim() : "",
+      maintenanceRequestType: maintenanceRequestType || undefined,
+      maintenanceRequestId: maintenanceRequestId.trim() || undefined,
+      maintenanceLogType: maintenanceLogType || undefined,
+      maintenanceLogId: maintenanceLogId.trim() || undefined,
+      assetType: assetType || undefined,
+      assetId: assetId.trim() || undefined,
+      items: preparedItems,
+    };
+
+    const res = await fetch("/api/purchases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      request?: PurchaseRequestRow;
+      error?: string;
+    };
+    if (!res.ok || !json.request?.id) {
+      setInlineMessage(json.error || "Failed to create purchase request.");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      if (quoteFiles.length > 0) {
+        await uploadAttachments(json.request.id, "quote", quoteFiles);
+      }
+      resetCreateForm();
+      await loadData(json.request.id);
+      setInlineMessage("Purchase request created.");
+    } catch (err) {
+      setInlineMessage((err as Error).message || "Request created but attachment upload failed.");
+      await loadData(json.request.id);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitManagerApproval() {
+    if (!selectedRequest) return;
+    setSaving(true);
+    setInlineMessage(null);
+    const managerDecisionsPayload = selectedItems.map((item) => ({
+      itemId: item.id,
+      decision: managerDecisions[item.id]?.decision ?? "pending",
+      note: managerDecisions[item.id]?.note ?? "",
+    }));
+    const res = await fetch("/api/purchases", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: selectedRequest.id,
+        stage: "manager",
+        managerSignature: managerSignature.trim(),
+        managerNote: managerNote.trim(),
+        managerDecisions: managerDecisionsPayload,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setInlineMessage(json.error || "Failed to submit manager approval.");
+      setSaving(false);
+      return;
+    }
+    await loadData(selectedRequest.id);
+    setInlineMessage("Manager approval saved.");
+    setSaving(false);
+  }
+
+  async function submitApApproval() {
+    if (!selectedRequest) return;
+    setSaving(true);
+    setInlineMessage(null);
+    const apDecisionsPayload = selectedItems.map((item) => ({
+      itemId: item.id,
+      decision: apDecisions[item.id]?.decision ?? "pending",
+      note: apDecisions[item.id]?.note ?? "",
+      approvedPaymentMethod: apDecisions[item.id]?.approvedPaymentMethod || apPaymentMethod || "",
+      approvedPaymentMethodOther: apDecisions[item.id]?.approvedPaymentMethodOther || apPaymentMethodOther || "",
+      approvedPoNumber: apDecisions[item.id]?.approvedPoNumber || apPoNumber || "",
+      fundsAvailableDate: apDecisions[item.id]?.fundsAvailableDate || apFundsAvailableDate || "",
+    }));
+    const res = await fetch("/api/purchases", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: selectedRequest.id,
+        stage: "ap",
+        apSignature: apSignature.trim(),
+        apNote: apNote.trim(),
+        fundsAvailableDate: apFundsAvailableDate || undefined,
+        paymentMethod: apPaymentMethod || undefined,
+        paymentMethodOther: apPaymentMethodOther || undefined,
+        poNumber: apPoNumber || undefined,
+        apDecisions: apDecisionsPayload,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setInlineMessage(json.error || "Failed to submit AP approval.");
+      setSaving(false);
+      return;
+    }
+    await loadData(selectedRequest.id);
+    setInlineMessage("Accounts payable approval saved.");
+    setSaving(false);
+  }
+
+  async function markCompleted() {
+    if (!selectedRequest) return;
+    setSaving(true);
+    setInlineMessage(null);
+    const res = await fetch("/api/purchases", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: selectedRequest.id,
+        stage: "complete",
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setInlineMessage(json.error || "Failed to mark completed.");
+      setSaving(false);
+      return;
+    }
+    await loadData(selectedRequest.id);
+    setInlineMessage("Purchase request marked completed.");
+    setSaving(false);
+  }
+
+  async function handleQuoteFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setQuoteFiles((prev) => [...prev, ...Array.from(files)]);
+  }
+
+  async function handleReceiptUpload(files: FileList | null) {
+    if (!selectedRequest || !files || files.length === 0) return;
+    setSaving(true);
+    setInlineMessage(null);
+    try {
+      await uploadAttachments(selectedRequest.id, "receipt", Array.from(files));
+      await loadData(selectedRequest.id);
+      setInlineMessage("Receipt uploaded.");
+    } catch (err) {
+      setInlineMessage((err as Error).message || "Failed to upload receipt.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleQuoteUploadToExisting(files: FileList | null) {
+    if (!selectedRequest || !files || files.length === 0) return;
+    setSaving(true);
+    setInlineMessage(null);
+    try {
+      await uploadAttachments(selectedRequest.id, "quote", Array.from(files));
+      await loadData(selectedRequest.id);
+      setInlineMessage("Quote uploaded.");
+    } catch (err) {
+      setInlineMessage((err as Error).message || "Failed to upload quote.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <main style={{ maxWidth: 1400, margin: "0 auto", paddingBottom: 32 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ marginBottom: 6 }}>Purchases</h1>
+          <div style={{ opacity: 0.78 }}>
+            Purchase requests linked to maintenance logs or created independently.
+          </div>
+        </div>
+        <Link href="/" style={buttonStyle()}>
+          Back Home
+        </Link>
+      </div>
+
+      <div style={{ marginTop: 12, ...cardStyle() }}>
+        Signed in as <strong>{(fullName || email || "Unknown").trim()}</strong> ({role.replaceAll("_", " ")})
+      </div>
+
+      {inlineMessage ? (
+        <div style={{ marginTop: 12, ...cardStyle(), opacity: 0.95 }}>{inlineMessage}</div>
+      ) : null}
+
+      {loading ? (
+        <div style={{ marginTop: 12, ...cardStyle() }}>Loading purchases...</div>
+      ) : loadingError ? (
+        <div style={{ marginTop: 12, ...cardStyle(), color: "#ffb0b0" }}>{loadingError}</div>
+      ) : (
+        <>
+          <section style={{ marginTop: 14, display: "grid", gap: 14, gridTemplateColumns: "minmax(420px, 1.2fr) minmax(360px, 1fr)" }}>
+            <form onSubmit={onCreateRequest} style={cardStyle()}>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>Create Purchase Request</div>
+              <div style={{ opacity: 0.75, marginBottom: 10 }}>Date of Request: {new Date().toLocaleDateString()}</div>
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Teammate Name *</span>
+                  <select value={requestedForId} onChange={(e) => setRequestedForId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving}>
+                    <option value="">Select teammate...</option>
+                    {activeTeammates.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name} {row.role ? `(${row.role.replaceAll("_", " ")})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Department *</span>
+                  <select value={department} onChange={(e) => setDepartment(e.target.value as (typeof PURCHASE_DEPARTMENTS)[number])} style={inputStyle()} disabled={!canCreate || saving}>
+                    {PURCHASE_DEPARTMENTS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Vendor / Store Name *</span>
+                  <input value={vendorName} onChange={(e) => setVendorName(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Total Estimated Purchase Amount</span>
+                  <input value={estimatedTotal} onChange={(e) => setEstimatedTotal(e.target.value)} inputMode="decimal" style={inputStyle()} disabled={!canCreate || saving} />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Timeline for Purchase</span>
+                  <select value={timeline} onChange={(e) => setTimeline((e.target.value as PurchaseTimeline) || "")} style={inputStyle()} disabled={!canCreate || saving}>
+                    <option value="">Auto (linked urgency/default)</option>
+                    {PURCHASE_TIMELINE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Purchase Method *</span>
+                  <select value={purchaseMethod} onChange={(e) => setPurchaseMethod(e.target.value as PurchaseMethod)} style={inputStyle()} disabled={!canCreate || saving}>
+                    {PURCHASE_METHOD_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {purchaseMethod === "Other" ? (
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Other Purchase Method *</span>
+                    <input
+                      value={purchaseMethodOther}
+                      onChange={(e) => setPurchaseMethodOther(e.target.value)}
+                      style={inputStyle()}
+                      disabled={!canCreate || saving}
+                    />
+                  </label>
+                ) : null}
+              </div>
+
+              <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
+                <span>Reason for Purchase *</span>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  style={{ ...inputStyle(), resize: "vertical" }}
+                  placeholder="Specific replacement parts, emergency repair, equipment upgrades..."
+                  disabled={!canCreate || saving}
+                />
+              </label>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+                <input type="checkbox" checked={reimbursable} onChange={(e) => setReimbursable(e.target.checked)} disabled={!canCreate || saving} />
+                <span>Reimbursable expense</span>
+              </label>
+
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Linked Maintenance Context (optional)</div>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Maintenance Request Type</span>
+                    <select value={maintenanceRequestType} onChange={(e) => setMaintenanceRequestType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
+                      <option value="">None</option>
+                      <option value="vehicle">Vehicle</option>
+                      <option value="equipment">Equipment</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Maintenance Request ID</span>
+                    <input value={maintenanceRequestId} onChange={(e) => setMaintenanceRequestId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Maintenance Log Type</span>
+                    <select value={maintenanceLogType} onChange={(e) => setMaintenanceLogType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
+                      <option value="">None</option>
+                      <option value="vehicle">Vehicle</option>
+                      <option value="equipment">Equipment</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Maintenance Log ID</span>
+                    <input value={maintenanceLogId} onChange={(e) => setMaintenanceLogId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Asset Type</span>
+                    <select value={assetType} onChange={(e) => setAssetType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
+                      <option value="">None</option>
+                      <option value="vehicle">Vehicle</option>
+                      <option value="equipment">Equipment</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Asset ID</span>
+                    <input value={assetId} onChange={(e) => setAssetId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Item(s) Requested</div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {items.map((row) => (
+                    <div key={row.localId} style={{ ...cardStyle(), padding: 12 }}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Item *</span>
+                          <input value={row.name} onChange={(e) => updateItem(row.localId, { name: e.target.value })} style={inputStyle()} disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Quantity</span>
+                          <input value={row.quantity} onChange={(e) => updateItem(row.localId, { quantity: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Est. Unit Cost</span>
+                          <input value={row.estimatedUnitCost} onChange={(e) => updateItem(row.localId, { estimatedUnitCost: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Est. Total</span>
+                          <input value={row.estimatedTotal} onChange={(e) => updateItem(row.localId, { estimatedTotal: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                      </div>
+                      <label style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                        <span>Description (optional)</span>
+                        <textarea value={row.description} onChange={(e) => updateItem(row.localId, { description: e.target.value })} rows={2} style={{ ...inputStyle(), resize: "vertical" }} disabled={!canCreate || saving} />
+                      </label>
+                      <div style={{ marginTop: 8 }}>
+                        <button type="button" onClick={() => removeItemRow(row.localId)} style={buttonStyle()} disabled={!canCreate || saving || items.length <= 1}>
+                          Remove Item
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={addItemRow} style={{ ...buttonStyle(), marginTop: 8 }} disabled={!canCreate || saving}>
+                  Add Item
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Add Quote (Camera / Photo / File)</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" onClick={() => createQuoteCaptureRef.current?.click()} style={buttonStyle()} disabled={!canCreate || saving}>
+                    Add Quote Photo
+                  </button>
+                  <button type="button" onClick={() => createQuoteFileRef.current?.click()} style={buttonStyle()} disabled={!canCreate || saving}>
+                    Add Quote File
+                  </button>
+                </div>
+                <input
+                  ref={createQuoteCaptureRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    void handleQuoteFiles(e.currentTarget.files);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <input
+                  ref={createQuoteFileRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    void handleQuoteFiles(e.currentTarget.files);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                {quoteFiles.length ? (
+                  <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                    {quoteFiles.map((file, idx) => (
+                      <div key={`${file.name}-${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ opacity: 0.85 }}>{file.name}</span>
+                        <button
+                          type="button"
+                          style={buttonStyle()}
+                          onClick={() =>
+                            setQuoteFiles((prev) => prev.filter((_, fileIdx) => fileIdx !== idx))
+                          }
+                          disabled={saving}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 8, opacity: 0.75 }}>No quote files selected.</div>
+                )}
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <button type="submit" style={primaryButtonStyle()} disabled={!canCreate || saving}>
+                  {saving ? "Saving..." : "Submit Purchase Request"}
+                </button>
+              </div>
+            </form>
+
+            <section style={cardStyle()}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 900 }}>Purchase Queue</div>
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof FILTER_OPTIONS)[number]["value"])} style={{ ...inputStyle(), width: 220 }}>
+                  {FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ marginTop: 10, display: "grid", gap: 8, maxHeight: 820, overflowY: "auto" }}>
+                {filteredRequests.length === 0 ? (
+                  <div style={{ opacity: 0.75 }}>No purchase requests for this filter.</div>
+                ) : (
+                  filteredRequests.map((row) => {
+                    const itemCount = (itemsByRequestId[row.id] ?? []).length;
+                    const selected = row.id === selectedRequestId;
+                    return (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => setSelectedRequestId(row.id)}
+                        style={{
+                          textAlign: "left",
+                          borderRadius: 12,
+                          border: selected ? "1px solid rgba(120,180,255,0.7)" : "1px solid rgba(255,255,255,0.14)",
+                          background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
+                          color: "inherit",
+                          padding: 12,
+                          cursor: "pointer",
+                          display: "grid",
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                          <div style={{ fontWeight: 800 }}>{row.vendor_name}</div>
+                          <span style={statusBadgeStyle(row.overall_status)}>{purchaseOverallStatusLabel(row.overall_status)}</span>
+                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.86 }}>
+                          {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
+                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.75 }}>
+                          {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
+                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          </section>
+
+          {selectedRequest ? (
+            <section style={{ marginTop: 14, ...cardStyle() }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>Purchase Detail</div>
+                  <div style={{ opacity: 0.74 }}>Request ID: {selectedRequest.id}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={statusBadgeStyle(selectedRequest.overall_status)}>{purchaseOverallStatusLabel(selectedRequest.overall_status)}</span>
+                  {(selectedRequest.overall_status === "approved" || selectedRequest.overall_status === "partially_approved") ? (
+                    <button type="button" onClick={markCompleted} style={buttonStyle()} disabled={saving}>
+                      Mark Completed
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                <div><strong>Teammate:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
+                <div><strong>Date:</strong> {fmtDateOnly(selectedRequest.request_date)}</div>
+                <div><strong>Department:</strong> {selectedRequest.department}</div>
+                <div><strong>Vendor:</strong> {selectedRequest.vendor_name}</div>
+                <div><strong>Estimated Total:</strong> {asCurrency(selectedRequest.estimated_total)}</div>
+                <div><strong>Timeline:</strong> {selectedRequest.timeline}</div>
+                <div><strong>Reimbursable:</strong> {selectedRequest.reimbursable ? "Yes" : "No"}</div>
+                <div>
+                  <strong>Requested Method:</strong> {selectedRequest.purchase_method_requested}
+                  {selectedRequest.purchase_method_requested === "Other" && selectedRequest.purchase_method_other
+                    ? ` (${selectedRequest.purchase_method_other})`
+                    : ""}
+                </div>
+                <div><strong>Reason:</strong> {selectedRequest.reason}</div>
+              </div>
+
+              <div style={{ marginTop: 10, ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Maintenance Link</div>
+                <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                  <div>
+                    <strong>Asset:</strong>{" "}
+                    {selectedRequest.asset_type && selectedRequest.asset_id
+                      ? `${selectedRequest.asset_type} · ${selectedRequest.asset_id}`
+                      : "None"}
+                  </div>
+                  <div>
+                    <strong>Maintenance Request:</strong>{" "}
+                    {selectedRequest.maintenance_request_type && selectedRequest.maintenance_request_id
+                      ? `${selectedRequest.maintenance_request_type} · ${selectedRequest.maintenance_request_id}`
+                      : "None"}
+                  </div>
+                  <div>
+                    <strong>Maintenance Log:</strong>{" "}
+                    {selectedRequest.maintenance_log_type && selectedRequest.maintenance_log_id
+                      ? `${selectedRequest.maintenance_log_type} · ${selectedRequest.maintenance_log_id}`
+                      : "None"}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>Requested Items</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Item</th>
+                        <th style={thStyle}>Qty</th>
+                        <th style={thStyle}>Est Unit</th>
+                        <th style={thStyle}>Est Total</th>
+                        <th style={thStyle}>Manager</th>
+                        <th style={thStyle}>AP</th>
+                        <th style={thStyle}>PO / Funds</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedItems.map((item) => (
+                        <tr key={item.id}>
+                          <td style={tdStyle}>
+                            <div style={{ fontWeight: 700 }}>{item.item_name}</div>
+                            {item.item_description ? (
+                              <div style={{ opacity: 0.72, fontSize: 12 }}>{item.item_description}</div>
+                            ) : null}
+                          </td>
+                          <td style={tdStyle}>{item.quantity}</td>
+                          <td style={tdStyle}>{asCurrency(item.estimated_unit_cost)}</td>
+                          <td style={tdStyle}>{asCurrency(item.estimated_total)}</td>
+                          <td style={tdStyle}>{item.manager_decision}</td>
+                          <td style={tdStyle}>{item.ap_decision}</td>
+                          <td style={tdStyle}>
+                            {item.approved_po_number || "-"}
+                            <div style={{ fontSize: 12, opacity: 0.7 }}>
+                              {item.funds_available_date ? `Funds: ${fmtDateOnly(item.funds_available_date)}` : "Funds: -"}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
+                <div style={{ ...cardStyle(), padding: 12 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>Quotes</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <button type="button" onClick={() => detailQuoteCaptureRef.current?.click()} style={buttonStyle()} disabled={saving}>
+                      Add Quote Photo
+                    </button>
+                    <button type="button" onClick={() => detailQuoteFileRef.current?.click()} style={buttonStyle()} disabled={saving}>
+                      Add Quote File
+                    </button>
+                  </div>
+                  <input
+                    ref={detailQuoteCaptureRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      void handleQuoteUploadToExisting(e.currentTarget.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  <input
+                    ref={detailQuoteFileRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      void handleQuoteUploadToExisting(e.currentTarget.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  {selectedQuotes.length ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {selectedQuotes.map((row) => (
+                        <a key={row.id} href={`/api/purchases/attachments/view?id=${encodeURIComponent(row.id)}`} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline", opacity: 0.9 }}>
+                          {row.file_name} · {fmtDate(row.created_at)}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.75 }}>No quotes uploaded.</div>
+                  )}
+                </div>
+
+                <div style={{ ...cardStyle(), padding: 12 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>Receipts (Purchase Detail)</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <button type="button" onClick={() => receiptCaptureRef.current?.click()} style={buttonStyle()} disabled={saving}>
+                      Add Receipt Photo
+                    </button>
+                    <button type="button" onClick={() => receiptFileRef.current?.click()} style={buttonStyle()} disabled={saving}>
+                      Add Receipt File
+                    </button>
+                  </div>
+                  <input
+                    ref={receiptCaptureRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      void handleReceiptUpload(e.currentTarget.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  <input
+                    ref={receiptFileRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      void handleReceiptUpload(e.currentTarget.files);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                  {selectedReceipts.length ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {selectedReceipts.map((row) => (
+                        <a key={row.id} href={`/api/purchases/attachments/view?id=${encodeURIComponent(row.id)}`} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline", opacity: 0.9 }}>
+                          {row.file_name} · {fmtDate(row.created_at)}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.75 }}>No receipts uploaded yet.</div>
+                  )}
+                </div>
+              </div>
+
+              {canManagerApprove ? (
+                <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Manager Approval</div>
+                  <div style={{ opacity: 0.75, marginBottom: 8 }}>
+                    Approve/deny one or all requested items. Signature required to finalize.
+                  </div>
+                  {selectedItems.map((item) => (
+                    <div key={item.id} style={{ ...cardStyle(), padding: 10, marginTop: 8 }}>
+                      <div style={{ fontWeight: 800 }}>{item.item_name}</div>
+                      <div style={{ marginTop: 8, display: "grid", gap: 8, gridTemplateColumns: "160px 1fr" }}>
+                        <select
+                          value={managerDecisions[item.id]?.decision ?? "pending"}
+                          onChange={(e) =>
+                            setManagerDecisions((prev) => ({
+                              ...prev,
+                              [item.id]: {
+                                decision: e.target.value as PurchaseDecision,
+                                note: prev[item.id]?.note ?? "",
+                              },
+                            }))
+                          }
+                          style={inputStyle()}
+                          disabled={saving}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="approved">Approved</option>
+                          <option value="denied">Denied</option>
+                        </select>
+                        <input
+                          value={managerDecisions[item.id]?.note ?? ""}
+                          onChange={(e) =>
+                            setManagerDecisions((prev) => ({
+                              ...prev,
+                              [item.id]: {
+                                decision: prev[item.id]?.decision ?? "pending",
+                                note: e.target.value,
+                              },
+                            }))
+                          }
+                          placeholder="Item approval note (optional)"
+                          style={inputStyle()}
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Manager E-Signature *</span>
+                      <input value={managerSignature} onChange={(e) => setManagerSignature(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Manager Notes</span>
+                      <input value={managerNote} onChange={(e) => setManagerNote(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <button type="button" onClick={submitManagerApproval} style={primaryButtonStyle()} disabled={saving}>
+                      Submit Manager Approval
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {canApApprove ? (
+                <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Accounts Payable Approval</div>
+                  <div style={{ opacity: 0.75, marginBottom: 8 }}>
+                    Approve/deny item-level purchases, then assign funding date, payment method, and PO.
+                  </div>
+                  {selectedItems.map((item) => {
+                    const row = apDecisions[item.id];
+                    return (
+                      <div key={item.id} style={{ ...cardStyle(), padding: 10, marginTop: 8 }}>
+                        <div style={{ fontWeight: 800 }}>{item.item_name}</div>
+                        <div style={{ marginTop: 8, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+                          <select
+                            value={row?.decision ?? "pending"}
+                            onChange={(e) =>
+                              setApDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  decision: e.target.value as PurchaseDecision,
+                                  note: prev[item.id]?.note ?? "",
+                                  approvedPaymentMethod: prev[item.id]?.approvedPaymentMethod ?? "",
+                                  approvedPaymentMethodOther: prev[item.id]?.approvedPaymentMethodOther ?? "",
+                                  approvedPoNumber: prev[item.id]?.approvedPoNumber ?? "",
+                                  fundsAvailableDate: prev[item.id]?.fundsAvailableDate ?? "",
+                                },
+                              }))
+                            }
+                            style={inputStyle()}
+                            disabled={saving}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="denied">Denied</option>
+                          </select>
+                          <input
+                            value={row?.note ?? ""}
+                            onChange={(e) =>
+                              setApDecisions((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  decision: prev[item.id]?.decision ?? "pending",
+                                  note: e.target.value,
+                                  approvedPaymentMethod: prev[item.id]?.approvedPaymentMethod ?? "",
+                                  approvedPaymentMethodOther: prev[item.id]?.approvedPaymentMethodOther ?? "",
+                                  approvedPoNumber: prev[item.id]?.approvedPoNumber ?? "",
+                                  fundsAvailableDate: prev[item.id]?.fundsAvailableDate ?? "",
+                                },
+                              }))
+                            }
+                            placeholder="AP note (optional)"
+                            style={inputStyle()}
+                            disabled={saving}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Funds Available Date</span>
+                      <input type="date" value={apFundsAvailableDate} onChange={(e) => setApFundsAvailableDate(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>AP Payment Method</span>
+                      <select value={apPaymentMethod} onChange={(e) => setApPaymentMethod(e.target.value)} style={inputStyle()} disabled={saving}>
+                        <option value="">Select...</option>
+                        {PURCHASE_METHOD_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {apPaymentMethod === "Other" ? (
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>Other Payment Method</span>
+                        <input value={apPaymentMethodOther} onChange={(e) => setApPaymentMethodOther(e.target.value)} style={inputStyle()} disabled={saving} />
+                      </label>
+                    ) : null}
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>PO #</span>
+                      <input value={apPoNumber} onChange={(e) => setApPoNumber(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>AP E-Signature *</span>
+                      <input value={apSignature} onChange={(e) => setApSignature(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>AP Notes</span>
+                      <input value={apNote} onChange={(e) => setApNote(e.target.value)} style={inputStyle()} disabled={saving} />
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <button type="button" onClick={submitApApproval} style={primaryButtonStyle()} disabled={saving}>
+                      Submit AP Approval
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : (
+            <section style={{ marginTop: 14, ...cardStyle() }}>
+              <div style={{ opacity: 0.75 }}>No purchase request selected.</div>
+            </section>
+          )}
+        </>
+      )}
+    </main>
+  );
+}
+
+const thStyle: React.CSSProperties = {
+  textAlign: "left",
+  padding: "10px 8px",
+  borderBottom: "1px solid rgba(255,255,255,0.15)",
+  whiteSpace: "nowrap",
+  fontSize: 13,
+};
+
+const tdStyle: React.CSSProperties = {
+  padding: "10px 8px",
+  borderBottom: "1px solid rgba(255,255,255,0.08)",
+  verticalAlign: "top",
+  fontSize: 13,
+};
