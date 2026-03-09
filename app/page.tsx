@@ -241,6 +241,12 @@ function parseActiveFieldDetails(checklist: unknown) {
   return { employeeNames, trailerLabel, equipmentLabel };
 }
 
+function formatActiveStartTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 function todayDateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
@@ -1015,42 +1021,108 @@ export default async function Home() {
         style={{
           marginTop: 18,
           border: "1px solid var(--surface-border)",
-          borderRadius: 16,
-          padding: 14,
+          borderRadius: 18,
+          padding: 16,
           background: "var(--surface)",
         }}
       >
-        <div style={{ fontWeight: 900, fontSize: 16 }}>Active Field Assignments</div>
-        <div style={{ opacity: 0.75, marginTop: 6, fontSize: 13 }}>
-          Live view of trucks currently in use: shown after completed pre-trip and hidden once post-trip starts.
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ fontWeight: 900, fontSize: 17 }}>Current Field Activity</div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              borderRadius: 999,
+              border: "1px solid rgba(126,255,167,0.45)",
+              background: "rgba(126,255,167,0.12)",
+              padding: "4px 10px",
+            }}
+          >
+            {activeFieldAssignments.length} Active
+          </div>
+        </div>
+        <div style={{ opacity: 0.75, marginTop: 6, fontSize: 13, lineHeight: 1.35 }}>
+          Live view of trucks in use after completed pre-trip. Entries are removed when post-trip is started or submitted.
         </div>
         {activeFieldAssignments.length === 0 ? (
-          <div style={{ marginTop: 10, opacity: 0.74, fontSize: 13 }}>
+          <div style={{ marginTop: 12, opacity: 0.74, fontSize: 13 }}>
             No active truck assignments right now.
           </div>
         ) : (
-          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
             {activeFieldAssignments.map((assignment) => (
               <div
                 key={assignment.key}
                 style={{
                   border: "1px solid var(--surface-border)",
-                  borderRadius: 12,
-                  padding: "10px 12px",
-                  background: "rgba(255,255,255,0.02)",
-                  lineHeight: 1.35,
+                  borderRadius: 14,
+                  padding: 12,
+                  background: "rgba(255,255,255,0.025)",
                   fontSize: 14,
                 }}
               >
-                <span style={{ fontWeight: 800 }}>{assignment.employeeNames}</span>
-                <span style={{ opacity: 0.85 }}> - </span>
-                <Link
-                  href={`/vehicles/${encodeURIComponent(assignment.vehicleId)}`}
-                  style={{ color: "inherit", fontWeight: 800, textDecoration: "underline" }}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    marginBottom: 10,
+                  }}
                 >
-                  {assignment.truckLabel}
-                </Link>
-                <span style={{ opacity: 0.85 }}> - {assignment.trailerLabel} - {assignment.equipmentLabel}</span>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: 0.2,
+                      textTransform: "uppercase",
+                      opacity: 0.72,
+                    }}
+                  >
+                    Assignment Active
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.74 }}>
+                    Pre-trip completed {formatActiveStartTime(assignment.preTripAt)}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.2, opacity: 0.68 }}>
+                      Teammate(s)
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 800 }}>{assignment.employeeNames}</div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.2, opacity: 0.68 }}>
+                      Truck
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      <Link
+                        href={`/vehicles/${encodeURIComponent(assignment.vehicleId)}`}
+                        style={{ color: "inherit", fontWeight: 800, textDecoration: "underline" }}
+                      >
+                        {assignment.truckLabel}
+                      </Link>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.2, opacity: 0.68 }}>
+                      Trailer
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 700, opacity: 0.9 }}>{assignment.trailerLabel}</div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.2, opacity: 0.68 }}>
+                      Equipment
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 700, opacity: 0.9 }}>{assignment.equipmentLabel}</div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
