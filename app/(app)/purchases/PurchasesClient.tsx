@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   canApApprovePurchase,
   canCreatePurchaseRequest,
@@ -101,6 +101,17 @@ type PurchaseVendorRow = {
   created_at: string;
 };
 
+type MaintenanceLogOption = {
+  id: string;
+  type: "vehicle" | "equipment";
+  asset_id: string;
+  asset_name: string | null;
+  status: string | null;
+  created_at: string;
+  title: string | null;
+  maintenance_request_id: string | null;
+};
+
 type TeammateOption = {
   id: string;
   name: string;
@@ -116,13 +127,12 @@ type PurchasesResponse = {
   attachmentsByRequestId?: Record<string, PurchaseAttachmentRow[]>;
   vendorsByRequestId?: Record<string, PurchaseVendorRow[]>;
   teammates?: TeammateOption[];
+  maintenanceLogOptions?: MaintenanceLogOption[];
   prefill?: {
     requestedForId?: string | null;
     department?: string | null;
     timeline?: PurchaseTimeline | null;
     reason?: string | null;
-    itemName?: string | null;
-    itemDescription?: string | null;
   } | null;
   error?: string;
 };
@@ -189,6 +199,15 @@ function summarizeVendors(vendors: string[]) {
   if (!vendors.length) return "No vendor";
   if (vendors.length === 1) return vendors[0];
   return `${vendors[0]} +${vendors.length - 1} more`;
+}
+
+function maintenanceLogOptionLabel(row: MaintenanceLogOption) {
+  const type = row.type === "vehicle" ? "Vehicle" : "Equipment";
+  const title = row.title?.trim() ? row.title.trim() : "Maintenance Log";
+  const asset = row.asset_name?.trim() ? row.asset_name.trim() : row.asset_id;
+  const status = row.status?.trim() ? row.status.trim() : "Unknown status";
+  const date = fmtDate(row.created_at);
+  return `${type} · ${title} · ${asset} · ${status} · ${date}`;
 }
 
 function statusBadgeStyle(status: string): React.CSSProperties {
@@ -261,7 +280,10 @@ export default function PurchasesClient({
   fullName: string | null;
   email: string | null;
 }) {
+  const router = useRouter();
   const sp = useSearchParams();
+  const returnToRaw = (sp?.get("returnTo") || "").trim();
+  const returnTo = returnToRaw.startsWith("/") ? returnToRaw : "";
   const canCreate = canCreatePurchaseRequest(role);
   const canManagerApprove = canManagerApprovePurchase(role);
   const canApApprove = canApApprovePurchase(role);
@@ -274,6 +296,8 @@ export default function PurchasesClient({
   const [attachmentsByRequestId, setAttachmentsByRequestId] = useState<Record<string, PurchaseAttachmentRow[]>>({});
   const [vendorsByRequestId, setVendorsByRequestId] = useState<Record<string, PurchaseVendorRow[]>>({});
   const [teammates, setTeammates] = useState<TeammateOption[]>([]);
+  const [maintenanceLogOptions, setMaintenanceLogOptions] = useState<MaintenanceLogOption[]>([]);
+  const [maintenanceLogSearch, setMaintenanceLogSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]["value"]>("all");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
@@ -357,6 +381,7 @@ export default function PurchasesClient({
     if (assetType) params.set("assetType", assetType);
     if (assetId.trim()) params.set("assetId", assetId.trim());
     params.set("prefill", "1");
+    params.set("includeLinks", "1");
     const contextKey = [
       maintenanceRequestType || "",
       maintenanceRequestId.trim(),
@@ -378,6 +403,7 @@ export default function PurchasesClient({
     setAttachmentsByRequestId(json.attachmentsByRequestId ?? {});
     setVendorsByRequestId(json.vendorsByRequestId ?? {});
     setTeammates(Array.isArray(json.teammates) ? json.teammates : []);
+    setMaintenanceLogOptions(Array.isArray(json.maintenanceLogOptions) ? json.maintenanceLogOptions : []);
 
     if (prefillAppliedKeyRef.current !== contextKey && json.prefill) {
       const prefill = json.prefill;
@@ -396,22 +422,6 @@ export default function PurchasesClient({
       }
       if (typeof prefill.reason === "string" && prefill.reason) {
         setReason((prev) => (prev.trim() ? prev : prefill.reason ?? ""));
-      }
-      if (typeof prefill.itemName === "string" && prefill.itemName) {
-        setItems((prev) => {
-          if (!prev.length) return prev;
-          const first = prev[0];
-          if (first.name.trim()) return prev;
-          return [{ ...first, name: prefill.itemName ?? "" }, ...prev.slice(1)];
-        });
-      }
-      if (typeof prefill.itemDescription === "string" && prefill.itemDescription) {
-        setItems((prev) => {
-          if (!prev.length) return prev;
-          const first = prev[0];
-          if (first.description.trim()) return prev;
-          return [{ ...first, description: prefill.itemDescription ?? "" }, ...prev.slice(1)];
-        });
       }
       prefillAppliedKeyRef.current = contextKey;
     }
@@ -514,8 +524,62 @@ export default function PurchasesClient({
     [teammates]
   );
 
+  const filteredMaintenanceLogOptions = useMemo(() => {
+    const needle = maintenanceLogSearch.trim().toLowerCase();
+    if (!needle) return maintenanceLogOptions;
+    return maintenanceLogOptions.filter((row) => {
+      const haystack = [
+        row.id,
+        row.type,
+        row.asset_id,
+        row.asset_name ?? "",
+        row.status ?? "",
+        row.title ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [maintenanceLogOptions, maintenanceLogSearch]);
+
+  const selectedMaintenanceLogOption = useMemo(() => {
+    if (!maintenanceLogType || !maintenanceLogId) return null;
+    return (
+      maintenanceLogOptions.find(
+        (row) => row.type === maintenanceLogType && row.id === maintenanceLogId
+      ) ?? null
+    );
+  }, [maintenanceLogId, maintenanceLogOptions, maintenanceLogType]);
+
   function updateItem(localId: string, patch: Partial<ItemDraft>) {
     setItems((prev) => prev.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
+  }
+
+  function selectMaintenanceLog(value: string) {
+    if (!value) {
+      setMaintenanceLogType("");
+      setMaintenanceLogId("");
+      setMaintenanceRequestType("");
+      setMaintenanceRequestId("");
+      return;
+    }
+    const [nextType, nextId] = value.split(":");
+    if ((nextType !== "vehicle" && nextType !== "equipment") || !nextId) return;
+    const option =
+      maintenanceLogOptions.find((row) => row.type === nextType && row.id === nextId) ?? null;
+    setMaintenanceLogType(nextType);
+    setMaintenanceLogId(nextId);
+    if (option?.maintenance_request_id) {
+      setMaintenanceRequestType(nextType);
+      setMaintenanceRequestId(option.maintenance_request_id);
+    } else {
+      setMaintenanceRequestType("");
+      setMaintenanceRequestId("");
+    }
+    if (option?.asset_id) {
+      setAssetType(nextType);
+      setAssetId(option.asset_id);
+    }
   }
 
   function updateVendor(localId: string, patch: Partial<VendorDraft>) {
@@ -672,10 +736,18 @@ export default function PurchasesClient({
         await uploadAttachments(json.request.id, "quote", quoteFiles);
       }
       resetCreateForm();
+      if (returnTo) {
+        router.replace(returnTo);
+        return;
+      }
       await loadData(json.request.id);
       setInlineMessage("Purchase request created.");
     } catch (err) {
       setInlineMessage((err as Error).message || "Request created but attachment upload failed.");
+      if (returnTo) {
+        router.replace(returnTo);
+        return;
+      }
       await loadData(json.request.id);
     } finally {
       setSaving(false);
@@ -970,45 +1042,94 @@ export default function PurchasesClient({
 
               <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
                 <div style={{ fontWeight: 800, marginBottom: 8 }}>Linked Maintenance Context (optional)</div>
-                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                <div style={{ display: "grid", gap: 10 }}>
                   <label style={{ display: "grid", gap: 6 }}>
-                    <span>Maintenance Request Type</span>
-                    <select value={maintenanceRequestType} onChange={(e) => setMaintenanceRequestType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
+                    <span>Search Maintenance Logs</span>
+                    <input
+                      value={maintenanceLogSearch}
+                      onChange={(e) => setMaintenanceLogSearch(e.target.value)}
+                      placeholder="Search by title, asset, status, or ID"
+                      style={inputStyle()}
+                      disabled={!canCreate || saving}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Link Maintenance Log</span>
+                    <select
+                      value={
+                        maintenanceLogType && maintenanceLogId
+                          ? `${maintenanceLogType}:${maintenanceLogId}`
+                          : ""
+                      }
+                      onChange={(e) => selectMaintenanceLog(e.target.value)}
+                      style={inputStyle()}
+                      disabled={!canCreate || saving}
+                    >
                       <option value="">None</option>
-                      <option value="vehicle">Vehicle</option>
-                      <option value="equipment">Equipment</option>
+                      {filteredMaintenanceLogOptions.map((row) => (
+                        <option key={`${row.type}:${row.id}`} value={`${row.type}:${row.id}`}>
+                          {maintenanceLogOptionLabel(row)}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Maintenance Request ID</span>
-                    <input value={maintenanceRequestId} onChange={(e) => setMaintenanceRequestId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
-                  </label>
-
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Maintenance Log Type</span>
-                    <select value={maintenanceLogType} onChange={(e) => setMaintenanceLogType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
-                      <option value="">None</option>
-                      <option value="vehicle">Vehicle</option>
-                      <option value="equipment">Equipment</option>
-                    </select>
-                  </label>
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Maintenance Log ID</span>
-                    <input value={maintenanceLogId} onChange={(e) => setMaintenanceLogId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
-                  </label>
-
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Asset Type</span>
-                    <select value={assetType} onChange={(e) => setAssetType(e.target.value as "" | "vehicle" | "equipment")} style={inputStyle()} disabled={!canCreate || saving}>
-                      <option value="">None</option>
-                      <option value="vehicle">Vehicle</option>
-                      <option value="equipment">Equipment</option>
-                    </select>
-                  </label>
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Asset ID</span>
-                    <input value={assetId} onChange={(e) => setAssetId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving} />
-                  </label>
+                  {selectedMaintenanceLogOption ? (
+                    <div
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 12,
+                        padding: 10,
+                        background: "rgba(255,255,255,0.02)",
+                        display: "grid",
+                        gap: 4,
+                        fontSize: 13,
+                      }}
+                    >
+                      <div>
+                        <strong>Linked Log:</strong> {selectedMaintenanceLogOption.id}
+                      </div>
+                      <div>
+                        <strong>Type:</strong> {selectedMaintenanceLogOption.type}
+                      </div>
+                      <div>
+                        <strong>Asset:</strong>{" "}
+                        {selectedMaintenanceLogOption.asset_name || selectedMaintenanceLogOption.asset_id}
+                      </div>
+                      <div>
+                        <strong>Maintenance Request ID:</strong>{" "}
+                        {selectedMaintenanceLogOption.maintenance_request_id || "-"}
+                      </div>
+                    </div>
+                  ) : maintenanceLogId || maintenanceRequestId || assetId ? (
+                    <div
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 12,
+                        padding: 10,
+                        background: "rgba(255,255,255,0.02)",
+                        display: "grid",
+                        gap: 4,
+                        fontSize: 13,
+                      }}
+                    >
+                      <div>
+                        <strong>Linked Log:</strong>{" "}
+                        {maintenanceLogType && maintenanceLogId
+                          ? `${maintenanceLogType} · ${maintenanceLogId}`
+                          : "-"}
+                      </div>
+                      <div>
+                        <strong>Linked Request:</strong>{" "}
+                        {maintenanceRequestType && maintenanceRequestId
+                          ? `${maintenanceRequestType} · ${maintenanceRequestId}`
+                          : "-"}
+                      </div>
+                      <div>
+                        <strong>Asset:</strong>{" "}
+                        {assetType && assetId ? `${assetType} · ${assetId}` : "-"}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

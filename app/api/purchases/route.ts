@@ -144,8 +144,17 @@ type PurchasePrefill = {
   department: string | null;
   timeline: PurchaseTimeline | null;
   reason: string | null;
-  itemName: string | null;
-  itemDescription: string | null;
+};
+
+type MaintenanceLogLookupRow = {
+  id: string;
+  type: LinkType;
+  asset_id: string;
+  asset_name: string | null;
+  status: string | null;
+  created_at: string;
+  title: string | null;
+  maintenance_request_id: string | null;
 };
 
 function asString(value: unknown) {
@@ -326,11 +335,9 @@ async function buildLinkedPrefill(
     maintenanceLogId: string | null;
   },
   fallbackTimeline: PurchaseTimeline
-): Promise<Pick<PurchasePrefill, "timeline" | "reason" | "itemName" | "itemDescription">> {
+): Promise<Pick<PurchasePrefill, "timeline" | "reason">> {
   let linkedUrgency: string | null = null;
   let linkedReason: string | null = null;
-  let linkedItemName: string | null = null;
-  let linkedItemDescription: string | null = null;
 
   const maintenanceRequestType = context.maintenanceRequestType;
   const maintenanceRequestId = context.maintenanceRequestId;
@@ -361,8 +368,6 @@ async function buildLinkedPrefill(
       ]
         .filter(Boolean)
         .join(" ");
-      linkedItemName = system ? `${system} parts / repair` : "Replacement parts / repair";
-      linkedItemDescription = parsed.title ?? summary;
     } else {
       const { data } = await admin
         .from("equipment_maintenance_requests")
@@ -388,8 +393,6 @@ async function buildLinkedPrefill(
       ]
         .filter(Boolean)
         .join(" ");
-      linkedItemName = system ? `${system} parts / repair` : "Replacement parts / repair";
-      linkedItemDescription = parsed.title ?? summary;
     }
   }
 
@@ -410,8 +413,6 @@ async function buildLinkedPrefill(
       ]
         .filter(Boolean)
         .join(" ");
-      linkedItemName = parsed.title ? `Parts for ${parsed.title}` : "Replacement parts / repair";
-      linkedItemDescription = summary ?? parsed.title ?? null;
       if (row?.request_id) {
         linkedUrgency = await lookupLinkedUrgency(admin, "vehicle", row.request_id);
       }
@@ -431,8 +432,6 @@ async function buildLinkedPrefill(
       ]
         .filter(Boolean)
         .join(" ");
-      linkedItemName = parsed.title ? `Parts for ${parsed.title}` : "Replacement parts / repair";
-      linkedItemDescription = summary ?? parsed.title ?? null;
       if (row?.request_id) {
         linkedUrgency = await lookupLinkedUrgency(admin, "equipment", row.request_id);
       }
@@ -442,9 +441,181 @@ async function buildLinkedPrefill(
   return {
     timeline: timelineFromUrgency(linkedUrgency) ?? fallbackTimeline,
     reason: linkedReason,
-    itemName: linkedItemName,
-    itemDescription: linkedItemDescription,
   };
+}
+
+async function buildMaintenanceLogOptions(
+  admin: ReturnType<typeof createSupabaseAdmin>,
+  context: {
+    assetType: LinkType | null;
+    assetId: string | null;
+    maintenanceLogType: LinkType | null;
+    maintenanceLogId: string | null;
+  }
+) {
+  let vehicleLogsQuery = admin
+    .from("maintenance_logs")
+    .select("id,vehicle_id,request_id,status_update,notes,created_at")
+    .order("created_at", { ascending: false })
+    .limit(120);
+  let equipmentLogsQuery = admin
+    .from("equipment_maintenance_logs")
+    .select("id,equipment_id,request_id,status_update,notes,created_at")
+    .order("created_at", { ascending: false })
+    .limit(120);
+
+  if (context.assetType === "vehicle" && context.assetId) {
+    vehicleLogsQuery = vehicleLogsQuery.eq("vehicle_id", context.assetId);
+    equipmentLogsQuery = equipmentLogsQuery.limit(0);
+  } else if (context.assetType === "equipment" && context.assetId) {
+    equipmentLogsQuery = equipmentLogsQuery.eq("equipment_id", context.assetId);
+    vehicleLogsQuery = vehicleLogsQuery.limit(0);
+  }
+
+  const [vehicleLogsRes, equipmentLogsRes] = await Promise.all([vehicleLogsQuery, equipmentLogsQuery]);
+  if (vehicleLogsRes.error) {
+    return { options: [] as MaintenanceLogLookupRow[], error: vehicleLogsRes.error.message };
+  }
+  if (equipmentLogsRes.error) {
+    return { options: [] as MaintenanceLogLookupRow[], error: equipmentLogsRes.error.message };
+  }
+
+  const vehicleLogs = (vehicleLogsRes.data ?? []) as Array<{
+    id: string;
+    vehicle_id: string;
+    request_id: string | null;
+    status_update: string | null;
+    notes: string | null;
+    created_at: string;
+  }>;
+  const equipmentLogs = (equipmentLogsRes.data ?? []) as Array<{
+    id: string;
+    equipment_id: string;
+    request_id: string | null;
+    status_update: string | null;
+    notes: string | null;
+    created_at: string;
+  }>;
+
+  const vehicleIds = Array.from(new Set(vehicleLogs.map((row) => row.vehicle_id).filter(Boolean)));
+  const equipmentIds = Array.from(new Set(equipmentLogs.map((row) => row.equipment_id).filter(Boolean)));
+
+  const [vehiclesRes, equipmentRes] = await Promise.all([
+    vehicleIds.length
+      ? admin.from("vehicles").select("id,name").in("id", vehicleIds)
+      : Promise.resolve({ data: [], error: null }),
+    equipmentIds.length
+      ? admin.from("equipment").select("id,name").in("id", equipmentIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (vehiclesRes.error) {
+    return { options: [] as MaintenanceLogLookupRow[], error: vehiclesRes.error.message };
+  }
+  if (equipmentRes.error) {
+    return { options: [] as MaintenanceLogLookupRow[], error: equipmentRes.error.message };
+  }
+
+  const vehicleNameById = new Map<string, string>();
+  for (const row of (vehiclesRes.data ?? []) as Array<{ id: string; name: string | null }>) {
+    vehicleNameById.set(row.id, row.name?.trim() || row.id);
+  }
+  const equipmentNameById = new Map<string, string>();
+  for (const row of (equipmentRes.data ?? []) as Array<{ id: string; name: string | null }>) {
+    equipmentNameById.set(row.id, row.name?.trim() || row.id);
+  }
+
+  const options: MaintenanceLogLookupRow[] = [
+    ...vehicleLogs.map((row) => ({
+      id: row.id,
+      type: "vehicle" as const,
+      asset_id: row.vehicle_id,
+      asset_name: vehicleNameById.get(row.vehicle_id) ?? row.vehicle_id,
+      status: row.status_update,
+      created_at: row.created_at,
+      title: parseTitleAndBody(row.notes).title,
+      maintenance_request_id: row.request_id,
+    })),
+    ...equipmentLogs.map((row) => ({
+      id: row.id,
+      type: "equipment" as const,
+      asset_id: row.equipment_id,
+      asset_name: equipmentNameById.get(row.equipment_id) ?? row.equipment_id,
+      status: row.status_update,
+      created_at: row.created_at,
+      title: parseTitleAndBody(row.notes).title,
+      maintenance_request_id: row.request_id,
+    })),
+  ]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 180);
+
+  if (context.maintenanceLogType && context.maintenanceLogId) {
+    const alreadyIncluded = options.some(
+      (row) => row.type === context.maintenanceLogType && row.id === context.maintenanceLogId
+    );
+    if (!alreadyIncluded) {
+      if (context.maintenanceLogType === "vehicle") {
+        const { data } = await admin
+          .from("maintenance_logs")
+          .select("id,vehicle_id,request_id,status_update,notes,created_at")
+          .eq("id", context.maintenanceLogId)
+          .maybeSingle();
+        const row = data as
+          | {
+              id: string;
+              vehicle_id: string;
+              request_id: string | null;
+              status_update: string | null;
+              notes: string | null;
+              created_at: string;
+            }
+          | null;
+        if (row) {
+          options.unshift({
+            id: row.id,
+            type: "vehicle",
+            asset_id: row.vehicle_id,
+            asset_name: vehicleNameById.get(row.vehicle_id) ?? row.vehicle_id,
+            status: row.status_update,
+            created_at: row.created_at,
+            title: parseTitleAndBody(row.notes).title,
+            maintenance_request_id: row.request_id,
+          });
+        }
+      } else {
+        const { data } = await admin
+          .from("equipment_maintenance_logs")
+          .select("id,equipment_id,request_id,status_update,notes,created_at")
+          .eq("id", context.maintenanceLogId)
+          .maybeSingle();
+        const row = data as
+          | {
+              id: string;
+              equipment_id: string;
+              request_id: string | null;
+              status_update: string | null;
+              notes: string | null;
+              created_at: string;
+            }
+          | null;
+        if (row) {
+          options.unshift({
+            id: row.id,
+            type: "equipment",
+            asset_id: row.equipment_id,
+            asset_name: equipmentNameById.get(row.equipment_id) ?? row.equipment_id,
+            status: row.status_update,
+            created_at: row.created_at,
+            title: parseTitleAndBody(row.notes).title,
+            maintenance_request_id: row.request_id,
+          });
+        }
+      }
+    }
+  }
+
+  return { options, error: null as string | null };
 }
 
 async function syncLinkedMaintenanceLogStatus(
@@ -544,6 +715,7 @@ export async function GET(req: Request) {
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.trunc(limitRaw))) : 250;
   const includePrefill = asString(url.searchParams.get("prefill")) === "1";
+  const includeLinks = asString(url.searchParams.get("includeLinks")) === "1";
 
   const admin = createSupabaseAdmin();
   let query = admin
@@ -628,6 +800,20 @@ export async function GET(req: Request) {
     status: row.status,
   }));
 
+  let maintenanceLogOptions: MaintenanceLogLookupRow[] = [];
+  if (includeLinks) {
+    const linkedLogsRes = await buildMaintenanceLogOptions(admin, {
+      assetType,
+      assetId,
+      maintenanceLogType,
+      maintenanceLogId,
+    });
+    if (linkedLogsRes.error) {
+      return NextResponse.json({ error: linkedLogsRes.error }, { status: 500 });
+    }
+    maintenanceLogOptions = linkedLogsRes.options;
+  }
+
   let prefill: PurchasePrefill | null = null;
   if (includePrefill) {
     const linkedPrefill = await buildLinkedPrefill(
@@ -647,8 +833,6 @@ export async function GET(req: Request) {
         : "Maintenance",
       timeline: linkedPrefill.timeline,
       reason: linkedPrefill.reason,
-      itemName: linkedPrefill.itemName,
-      itemDescription: linkedPrefill.itemDescription,
     };
   }
 
@@ -658,6 +842,7 @@ export async function GET(req: Request) {
     attachmentsByRequestId: mapRowsByRequestId(attachments),
     vendorsByRequestId: mapRowsByRequestId(vendors),
     teammates,
+    maintenanceLogOptions,
     prefill,
   });
 }

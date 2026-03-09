@@ -273,6 +273,29 @@ export default function MaintenanceLogPage() {
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
   const canEditExistingManagedForms = canEditManagedForms(userRole);
+  const purchaseReturnTo = useMemo(() => {
+    const q = new URLSearchParams();
+    if (linkedRequestId) q.set("requestId", linkedRequestId);
+    if (editId) q.set("editId", editId);
+    return `/vehicles/${encodeURIComponent(vehicleId)}/forms/maintenance-log${
+      q.toString() ? `?${q.toString()}` : ""
+    }`;
+  }, [editId, linkedRequestId, vehicleId]);
+  const purchaseLinkHref = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set("assetType", "vehicle");
+    q.set("assetId", vehicleId);
+    if (linkedRequestId) {
+      q.set("maintenanceRequestType", "vehicle");
+      q.set("maintenanceRequestId", linkedRequestId);
+    }
+    if (editId) {
+      q.set("maintenanceLogType", "vehicle");
+      q.set("maintenanceLogId", editId);
+    }
+    q.set("returnTo", purchaseReturnTo);
+    return `/purchases?${q.toString()}`;
+  }, [editId, linkedRequestId, purchaseReturnTo, vehicleId]);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -1005,7 +1028,7 @@ export default function MaintenanceLogPage() {
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <a
-              href={`/purchases?assetType=vehicle&assetId=${encodeURIComponent(vehicleId)}${linkedRequestId ? `&maintenanceRequestType=vehicle&maintenanceRequestId=${encodeURIComponent(linkedRequestId)}` : ""}${editId ? `&maintenanceLogType=vehicle&maintenanceLogId=${encodeURIComponent(editId)}` : ""}`}
+              href={purchaseLinkHref}
               style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
             >
               Create / Open Purchase Request
