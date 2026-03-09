@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import type { AppRole } from "@/lib/roleView";
+import EmployeeMenuSelect from "@/components/EmployeeMenuSelect";
+import { fetchEmployeeAvatarUrls, type EmployeeBadgeOption } from "@/lib/employeeBadges";
 
 type AcademyTrainingHubProps = {
   viewerId: string | null;
@@ -196,6 +198,7 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
   const [draftStatusBySkillId, setDraftStatusBySkillId] = useState<Record<string, number>>({});
   const [draftNoteBySkillId, setDraftNoteBySkillId] = useState<Record<string, string>>({});
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
 
   const [assignmentDraft, setAssignmentDraft] = useState<AssignmentDraft>({
     trainee_id: "",
@@ -644,6 +647,66 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
       .sort((a, b) => formatPerson(a, "").localeCompare(formatPerson(b, "")));
   }, [profiles]);
 
+  const traineeBadgeOptions = useMemo(
+    () =>
+      traineeProfileOptions.map(
+        (profile) =>
+          ({
+            id: profile.id,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            nickname: profile.nickname,
+            full_name: profile.full_name,
+            email: profile.email,
+            department: profile.department,
+            role: profile.role,
+            status: profile.status,
+          }) as EmployeeBadgeOption
+      ),
+    [traineeProfileOptions]
+  );
+
+  const trainerBadgeOptions = useMemo(
+    () =>
+      trainerProfileOptions.map(
+        (profile) =>
+          ({
+            id: profile.id,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            nickname: profile.nickname,
+            full_name: profile.full_name,
+            email: profile.email,
+            department: profile.department,
+            role: profile.role,
+            status: profile.status,
+          }) as EmployeeBadgeOption
+      ),
+    [trainerProfileOptions]
+  );
+
+  useEffect(() => {
+    let active = true;
+    const ids = Array.from(
+      new Set([...traineeBadgeOptions, ...trainerBadgeOptions].map((row) => row.id).filter(Boolean))
+    );
+    if (!ids.length) {
+      void Promise.resolve().then(() => {
+        if (!active) return;
+        setAvatarUrlById({});
+      });
+      return;
+    }
+    void (async () => {
+      const urls = await fetchEmployeeAvatarUrls(ids);
+      if (!active) return;
+      setAvatarUrlById(urls);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [trainerBadgeOptions, traineeBadgeOptions]);
+
   async function saveDailyProgress() {
     if (!viewerId || !program || !activeEnrollment || !canEditAnyProgress) return;
     if (!activeEnrollmentSupportsDailyForm) {
@@ -936,32 +999,30 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
               <h4 style={{ marginTop: 0 }}>Assign Apprentice</h4>
               <div style={threeColGridStyle}>
                 <Field label="Apprentice">
-                  <select
+                  <EmployeeMenuSelect
                     value={assignmentDraft.trainee_id}
-                    onChange={(e) => setAssignmentDraft((prev) => ({ ...prev, trainee_id: e.target.value }))}
+                    onChange={(nextValue) =>
+                      setAssignmentDraft((prev) => ({ ...prev, trainee_id: nextValue }))
+                    }
+                    options={traineeBadgeOptions}
+                    placeholder="Select apprentice..."
+                    avatarUrlById={avatarUrlById}
                     style={inputStyle}
-                  >
-                    <option value="">Select apprentice...</option>
-                    {traineeProfileOptions.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {formatPerson(profile)} {profile.department ? `(${profile.department})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </Field>
                 <Field label="Trainer">
-                  <select
+                  <EmployeeMenuSelect
                     value={assignmentDraft.trainer_id}
-                    onChange={(e) => setAssignmentDraft((prev) => ({ ...prev, trainer_id: e.target.value }))}
+                    onChange={(nextValue) =>
+                      setAssignmentDraft((prev) => ({ ...prev, trainer_id: nextValue }))
+                    }
+                    options={trainerBadgeOptions}
+                    placeholder="Unassigned"
+                    allowClear
+                    clearLabel="Unassigned"
+                    avatarUrlById={avatarUrlById}
                     style={inputStyle}
-                  >
-                    <option value="">Unassigned</option>
-                    {trainerProfileOptions.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {formatPerson(profile)} {profile.role ? `(${profile.role})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </Field>
                 <Field label="Start Date">
                   <input
@@ -1007,18 +1068,18 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                           {hasDailyFormEnabled(row.trainee?.department || row.department) ? "Open Checklist" : "Open Progress"}
                         </button>
                         {canManageAssignments ? (
-                          <select
-                            value={row.trainer_id ?? ""}
-                            onChange={(e) => void updateEnrollmentTrainer(row.id, e.target.value)}
-                            style={{ ...inputStyle, minWidth: 220 }}
-                          >
-                            <option value="">Set trainer...</option>
-                            {trainerProfileOptions.map((profile) => (
-                              <option key={profile.id} value={profile.id}>
-                                {formatPerson(profile)}
-                              </option>
-                            ))}
-                          </select>
+                          <div style={{ minWidth: 220 }}>
+                            <EmployeeMenuSelect
+                              value={row.trainer_id ?? ""}
+                              onChange={(nextValue) => void updateEnrollmentTrainer(row.id, nextValue)}
+                              options={trainerBadgeOptions}
+                              placeholder="Set trainer..."
+                              allowClear
+                              clearLabel="Unassigned"
+                              avatarUrlById={avatarUrlById}
+                              style={inputStyle}
+                            />
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -1150,18 +1211,16 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                     />
                   </Field>
                   <Field label="Crew Leader">
-                    <select
+                    <EmployeeMenuSelect
                       value={certDraft.crew_leader_id}
-                      onChange={(e) => setCertDraft((prev) => ({ ...prev, crew_leader_id: e.target.value }))}
+                      onChange={(nextValue) =>
+                        setCertDraft((prev) => ({ ...prev, crew_leader_id: nextValue }))
+                      }
+                      options={trainerBadgeOptions}
+                      placeholder="Select crew leader..."
+                      avatarUrlById={avatarUrlById}
                       style={inputStyle}
-                    >
-                      <option value="">Select crew leader...</option>
-                      {trainerProfileOptions.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {formatPerson(profile)}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </Field>
                   <Field label="Start Date">
                     <input

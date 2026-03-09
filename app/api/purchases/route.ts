@@ -793,6 +793,10 @@ export async function GET(req: Request) {
 
   const teammates = ((teammateRows ?? []) as ProfileRow[]).map((row) => ({
     id: row.id,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    nickname: row.nickname,
+    full_name: row.full_name,
     name: profileDisplayName(row),
     email: row.email,
     role: row.role,

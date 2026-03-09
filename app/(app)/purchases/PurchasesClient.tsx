@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import EmployeeMenuSelect from "@/components/EmployeeMenuSelect";
+import {
+  employeeBadgePrimary,
+  fetchEmployeeAvatarUrls,
+  type EmployeeBadgeOption,
+} from "@/lib/employeeBadges";
 import {
   canApApprovePurchase,
   canCreatePurchaseRequest,
@@ -114,6 +120,10 @@ type MaintenanceLogOption = {
 
 type TeammateOption = {
   id: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
+  full_name: string | null;
   name: string;
   email: string | null;
   role: string | null;
@@ -296,6 +306,7 @@ export default function PurchasesClient({
   const [attachmentsByRequestId, setAttachmentsByRequestId] = useState<Record<string, PurchaseAttachmentRow[]>>({});
   const [vendorsByRequestId, setVendorsByRequestId] = useState<Record<string, PurchaseVendorRow[]>>({});
   const [teammates, setTeammates] = useState<TeammateOption[]>([]);
+  const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
   const [maintenanceLogOptions, setMaintenanceLogOptions] = useState<MaintenanceLogOption[]>([]);
   const [maintenanceLogSearch, setMaintenanceLogSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]["value"]>("all");
@@ -520,9 +531,48 @@ export default function PurchasesClient({
     () =>
       teammates
         .filter((row) => !row.status || row.status.toLowerCase() === "active")
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort((a, b) => employeeBadgePrimary(a).localeCompare(employeeBadgePrimary(b))),
     [teammates]
   );
+
+  const teammateBadgeOptions = useMemo(
+    () =>
+      activeTeammates.map(
+        (row) =>
+          ({
+            id: row.id,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            nickname: row.nickname,
+            full_name: row.full_name,
+            email: row.email,
+            department: row.department,
+            role: row.role,
+            status: row.status,
+          }) as EmployeeBadgeOption
+      ),
+    [activeTeammates]
+  );
+
+  useEffect(() => {
+    let active = true;
+    const ids = teammateBadgeOptions.map((row) => row.id).filter(Boolean);
+    if (!ids.length) {
+      void Promise.resolve().then(() => {
+        if (!active) return;
+        setAvatarUrlById({});
+      });
+      return;
+    }
+    void (async () => {
+      const urls = await fetchEmployeeAvatarUrls(ids);
+      if (!active) return;
+      setAvatarUrlById(urls);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [teammateBadgeOptions]);
 
   const filteredMaintenanceLogOptions = useMemo(() => {
     const needle = maintenanceLogSearch.trim().toLowerCase();
@@ -917,14 +967,15 @@ export default function PurchasesClient({
               <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span>Teammate Name *</span>
-                  <select value={requestedForId} onChange={(e) => setRequestedForId(e.target.value)} style={inputStyle()} disabled={!canCreate || saving}>
-                    <option value="">Select teammate...</option>
-                    {activeTeammates.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.name} {row.role ? `(${row.role.replaceAll("_", " ")})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <EmployeeMenuSelect
+                    value={requestedForId}
+                    onChange={setRequestedForId}
+                    options={teammateBadgeOptions}
+                    placeholder="Select teammate..."
+                    disabled={!canCreate || saving}
+                    avatarUrlById={avatarUrlById}
+                    style={inputStyle()}
+                  />
                 </label>
 
                 <label style={{ display: "grid", gap: 6 }}>

@@ -3,11 +3,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import EmployeeMenuSelect from "@/components/EmployeeMenuSelect";
+import {
+  employeeBadgePrimary,
+  fetchEmployeeAvatarUrls,
+  type EmployeeBadgeOption,
+} from "@/lib/employeeBadges";
 
 type ProfileRow = {
   id: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
   full_name: string | null;
   email: string | null;
+  department: string | null;
   role: string | null;
 };
 
@@ -239,7 +249,7 @@ function defaultForm(): NewFormState {
 }
 
 function profileLabel(profile: ProfileRow) {
-  return profile.full_name?.trim() || profile.email?.trim() || profile.id;
+  return employeeBadgePrimary(profile);
 }
 
 export default function AccountabilityTrackerPanel({
@@ -270,6 +280,7 @@ export default function AccountabilityTrackerPanel({
   const [employeeQuery, setEmployeeQuery] = useState("");
   const [actionStatusFilter, setActionStatusFilter] = useState<"all" | "open" | "resolved" | "dismissed">("open");
   const [expandedLinkedFlagId, setExpandedLinkedFlagId] = useState<number | null>(null);
+  const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
   const [newAction, setNewAction] = useState<NewActionForm>({
     target_user_id: "",
     role_scope: "teammate",
@@ -277,6 +288,42 @@ export default function AccountabilityTrackerPanel({
     note: "",
     due_date: "",
   });
+
+  const profileBadgeOptions = useMemo(
+    () =>
+      profiles.map((profile) => ({
+        id: profile.id,
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        nickname: profile.nickname,
+        full_name: profile.full_name,
+        email: profile.email,
+        department: profile.department,
+        role: profile.role,
+        status: null,
+      })) as EmployeeBadgeOption[],
+    [profiles]
+  );
+
+  useEffect(() => {
+    let active = true;
+    const ids = profileBadgeOptions.map((profile) => profile.id).filter(Boolean);
+    if (!ids.length) {
+      void Promise.resolve().then(() => {
+        if (!active) return;
+        setAvatarUrlById({});
+      });
+      return;
+    }
+    void (async () => {
+      const urls = await fetchEmployeeAvatarUrls(ids);
+      if (!active) return;
+      setAvatarUrlById(urls);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [profileBadgeOptions]);
 
   function exportFormAsPrintablePdf(row: AccountabilityFormRow & { linkedFlag: FlaggedGradeRow | null }) {
     const teammate = byId[row.teammate_id] || row.teammate_id;
@@ -855,26 +902,22 @@ export default function AccountabilityTrackerPanel({
         <div style={sectionStyle()}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>2) New Occurrence</div>
           <div style={{ display: "grid", gap: 8 }}>
-            <select
+            <EmployeeMenuSelect
               value={occurrenceForm.teammate_id}
-              onChange={(e) => setOccurrenceForm((p) => ({ ...p, teammate_id: e.target.value }))}
+              onChange={(nextValue) => setOccurrenceForm((prev) => ({ ...prev, teammate_id: nextValue }))}
+              options={profileBadgeOptions}
+              placeholder="Teammate Name *"
+              avatarUrlById={avatarUrlById}
               style={inputStyle()}
-            >
-              <option value="">Teammate Name *</option>
-              {profiles.map((p) => (
-                <option key={`tm-${p.id}`} value={p.id}>{profileLabel(p)}</option>
-              ))}
-            </select>
-            <select
+            />
+            <EmployeeMenuSelect
               value={occurrenceForm.manager_id}
-              onChange={(e) => setOccurrenceForm((p) => ({ ...p, manager_id: e.target.value }))}
+              onChange={(nextValue) => setOccurrenceForm((prev) => ({ ...prev, manager_id: nextValue }))}
+              options={profileBadgeOptions}
+              placeholder="Manager / Lead *"
+              avatarUrlById={avatarUrlById}
               style={inputStyle()}
-            >
-              <option value="">Manager / Lead *</option>
-              {profiles.map((p) => (
-                <option key={`mgr-${p.id}`} value={p.id}>{profileLabel(p)}</option>
-              ))}
-            </select>
+            />
             <select
               value={occurrenceForm.category}
               onChange={(e) =>
@@ -961,27 +1004,23 @@ export default function AccountabilityTrackerPanel({
         <div style={sectionStyle()}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>3) Accountability Form</div>
           <div style={{ display: "grid", gap: 8 }}>
-            <select
+            <EmployeeMenuSelect
               value={disciplineForm.teammate_id}
-              onChange={(e) => setDisciplineForm((p) => ({ ...p, teammate_id: e.target.value }))}
+              onChange={(nextValue) => setDisciplineForm((prev) => ({ ...prev, teammate_id: nextValue }))}
+              options={profileBadgeOptions}
+              placeholder="Teammate Name *"
+              avatarUrlById={avatarUrlById}
               style={inputStyle()}
-            >
-              <option value="">Teammate Name *</option>
-              {profiles.map((p) => (
-                <option key={`form-tm-${p.id}`} value={p.id}>{profileLabel(p)}</option>
-              ))}
-            </select>
+            />
             <input type="date" value={disciplineForm.form_date} onChange={(e) => setDisciplineForm((p) => ({ ...p, form_date: e.target.value }))} style={inputStyle()} />
-            <select
+            <EmployeeMenuSelect
               value={disciplineForm.manager_id}
-              onChange={(e) => setDisciplineForm((p) => ({ ...p, manager_id: e.target.value }))}
+              onChange={(nextValue) => setDisciplineForm((prev) => ({ ...prev, manager_id: nextValue }))}
+              options={profileBadgeOptions}
+              placeholder="Supervisor / Manager *"
+              avatarUrlById={avatarUrlById}
               style={inputStyle()}
-            >
-              <option value="">Supervisor / Manager *</option>
-              {profiles.map((p) => (
-                <option key={`form-mgr-${p.id}`} value={p.id}>{profileLabel(p)}</option>
-              ))}
-            </select>
+            />
             <select value={disciplineForm.category} onChange={(e) => setDisciplineForm((p) => ({ ...p, category: e.target.value as AccountabilityCategory }))} style={inputStyle()}>
               {CATEGORY_OPTIONS.map((c) => <option key={`form-cat-${c.value}`} value={c.value}>{c.label}</option>)}
             </select>
@@ -1137,18 +1176,16 @@ export default function AccountabilityTrackerPanel({
           </select>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-          <select
+          <EmployeeMenuSelect
             value={newAction.target_user_id}
-            onChange={(e) => setNewAction((prev) => ({ ...prev, target_user_id: e.target.value }))}
+            onChange={(nextValue) => setNewAction((prev) => ({ ...prev, target_user_id: nextValue }))}
+            options={profileBadgeOptions}
+            placeholder="Target user (optional)"
+            allowClear
+            clearLabel="No target user"
+            avatarUrlById={avatarUrlById}
             style={inputStyle()}
-          >
-            <option value="">Target user (optional)</option>
-            {profiles.map((p) => (
-              <option key={`action-target-${p.id}`} value={p.id}>
-                {(p.full_name || p.email || p.id) + (p.role ? ` (${p.role})` : "")}
-              </option>
-            ))}
-          </select>
+          />
           <select
             value={newAction.role_scope}
             onChange={(e) => setNewAction((prev) => ({ ...prev, role_scope: e.target.value as NewActionForm["role_scope"] }))}

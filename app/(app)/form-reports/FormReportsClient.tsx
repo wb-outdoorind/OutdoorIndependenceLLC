@@ -56,8 +56,12 @@ type RequestRow = {
 
 type ProfileRow = {
   id: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
   full_name: string | null;
   email: string | null;
+  department: string | null;
   role: string | null;
 };
 
@@ -393,7 +397,7 @@ export default function FormReportsClient() {
           .limit(1500),
         supabase
           .from("profiles")
-          .select("id,full_name,email,role")
+          .select("id,first_name,last_name,nickname,full_name,email,department,role")
           .eq("status", "Active")
           .order("full_name", { ascending: true }),
         supabase
