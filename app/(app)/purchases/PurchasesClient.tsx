@@ -187,27 +187,33 @@ type ApDecisionDraft = {
   fundsAvailableDate: string;
 };
 
-const FILTER_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "waiting_operations_manager_approval", label: "Waiting for Operations Manager Approval" },
-  { value: "waiting_ap_department_approval", label: "Waiting for AP Department Approval" },
-  { value: "approved_purchases", label: "Approved Purchases" },
-  { value: "past_purchases", label: "Past Purchases" },
-  { value: "denied", label: "Denied" },
-  { value: "completed", label: "Completed (Linked Maintenance Closed)" },
-] as const;
-
-const QUEUE_BUCKETS: Array<{
-  value: Exclude<(typeof FILTER_OPTIONS)[number]["value"], "all">;
+type QueueBucketValue = PurchaseRequestRow["overall_status"];
+type QueueBucket = {
+  value: QueueBucketValue;
   label: string;
-}> = [
+};
+
+const REQUEST_QUEUE_BUCKETS: QueueBucket[] = [
   { value: "waiting_operations_manager_approval", label: "Waiting for Operations Manager Approval" },
   { value: "waiting_ap_department_approval", label: "Waiting for AP Department Approval" },
+  { value: "denied", label: "Denied" },
+];
+
+const DETAIL_QUEUE_BUCKETS: QueueBucket[] = [
   { value: "approved_purchases", label: "Approved Purchases" },
   { value: "past_purchases", label: "Past Purchases" },
-  { value: "denied", label: "Denied" },
   { value: "completed", label: "Completed (Linked Maintenance Closed)" },
 ];
+
+const REQUEST_FILTER_OPTIONS = [
+  { value: "all", label: "All Request Buckets" },
+  ...REQUEST_QUEUE_BUCKETS,
+] as const;
+
+const DETAIL_FILTER_OPTIONS = [
+  { value: "all", label: "All Detail Buckets" },
+  ...DETAIL_QUEUE_BUCKETS,
+] as const;
 
 function asCurrency(value: number | string | null | undefined) {
   const n = Number(value);
@@ -344,7 +350,8 @@ export default function PurchasesClient({
   const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
   const [maintenanceLogOptions, setMaintenanceLogOptions] = useState<MaintenanceLogOption[]>([]);
   const [maintenanceLogSearch, setMaintenanceLogSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]["value"]>("all");
+  const [requestQueueFilter, setRequestQueueFilter] = useState<(typeof REQUEST_FILTER_OPTIONS)[number]["value"]>("all");
+  const [detailQueueFilter, setDetailQueueFilter] = useState<(typeof DETAIL_FILTER_OPTIONS)[number]["value"]>("all");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const prefillAppliedKeyRef = useRef("__unset__");
@@ -497,10 +504,25 @@ export default function PurchasesClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId, assetType, maintenanceLogId, maintenanceLogType, maintenanceRequestId, maintenanceRequestType]);
 
-  const filteredRequests = useMemo(() => {
-    if (statusFilter === "all") return requests;
-    return requests.filter((row) => row.overall_status === statusFilter);
-  }, [requests, statusFilter]);
+  const requestQueueRows = useMemo(
+    () => requests.filter((row) => REQUEST_QUEUE_BUCKETS.some((bucket) => bucket.value === row.overall_status)),
+    [requests]
+  );
+
+  const detailQueueRows = useMemo(
+    () => requests.filter((row) => DETAIL_QUEUE_BUCKETS.some((bucket) => bucket.value === row.overall_status)),
+    [requests]
+  );
+
+  const filteredRequestQueueRows = useMemo(() => {
+    if (requestQueueFilter === "all") return requestQueueRows;
+    return requestQueueRows.filter((row) => row.overall_status === requestQueueFilter);
+  }, [requestQueueFilter, requestQueueRows]);
+
+  const filteredDetailQueueRows = useMemo(() => {
+    if (detailQueueFilter === "all") return detailQueueRows;
+    return detailQueueRows.filter((row) => row.overall_status === detailQueueFilter);
+  }, [detailQueueFilter, detailQueueRows]);
 
   const selectedRequest = useMemo(
     () => requests.find((row) => row.id === selectedRequestId) ?? null,
@@ -1069,6 +1091,130 @@ export default function PurchasesClient({
     }
   }
 
+  function renderQueueGroup({
+    title,
+    filterValue,
+    onFilterChange,
+    filterOptions,
+    buckets,
+    rows,
+    emptyText,
+  }: {
+    title: string;
+    filterValue: string;
+    onFilterChange: (value: string) => void;
+    filterOptions: ReadonlyArray<{ value: string; label: string }>;
+    buckets: QueueBucket[];
+    rows: PurchaseRequestRow[];
+    emptyText: string;
+  }) {
+    const visibleBuckets =
+      filterValue === "all" ? buckets : buckets.filter((bucket) => bucket.value === filterValue);
+
+    return (
+      <div
+        style={{
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 12,
+          padding: 10,
+          background: "rgba(255,255,255,0.02)",
+          display: "grid",
+          gap: 8,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 800 }}>{title}</div>
+          <select value={filterValue} onChange={(e) => onFilterChange(e.target.value)} style={{ ...inputStyle(), width: 240 }}>
+            {filterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          {rows.length === 0 ? (
+            <div style={{ opacity: 0.72, fontSize: 13 }}>{emptyText}</div>
+          ) : (
+            visibleBuckets.map((bucket) => {
+              const bucketRows = rows.filter((row) => row.overall_status === bucket.value);
+              return (
+                <div
+                  key={bucket.value}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 12,
+                    padding: 10,
+                    display: "grid",
+                    gap: 8,
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                    <div style={{ fontWeight: 800 }}>{bucket.label}</div>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>
+                      {bucketRows.length} request{bucketRows.length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+
+                  {bucketRows.length === 0 ? (
+                    <div style={{ opacity: 0.66, fontSize: 13 }}>No requests in this bucket.</div>
+                  ) : (
+                    bucketRows.map((row) => {
+                      const itemCount = (itemsByRequestId[row.id] ?? []).length;
+                      const vendorNames = (vendorsByRequestId[row.id] ?? [])
+                        .map((vendor) => vendor.vendor_name)
+                        .filter(Boolean);
+                      const vendorLabel = summarizeVendors(
+                        vendorNames.length ? vendorNames : [row.vendor_name]
+                      );
+                      const selected = row.id === selectedRequestId;
+                      return (
+                        <button
+                          key={row.id}
+                          type="button"
+                          onClick={() => setSelectedRequestId(row.id)}
+                          style={{
+                            textAlign: "left",
+                            borderRadius: 12,
+                            border: selected
+                              ? "1px solid rgba(120,180,255,0.7)"
+                              : "1px solid rgba(255,255,255,0.14)",
+                            background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
+                            color: "inherit",
+                            padding: 12,
+                            cursor: "pointer",
+                            display: "grid",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                            <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
+                            <span style={statusBadgeStyle(row.overall_status)}>
+                              {purchaseOverallStatusLabel(row.overall_status)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.86 }}>
+                            {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.75 }}>
+                            {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main style={{ maxWidth: 1400, margin: "0 auto", paddingBottom: 32 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -1425,96 +1571,28 @@ export default function PurchasesClient({
             </form>
 
             <section style={{ ...cardStyle(), order: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 900 }}>Purchase Queue by Bucket</div>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof FILTER_OPTIONS)[number]["value"])} style={{ ...inputStyle(), width: 220 }}>
-                  {FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ marginTop: 10, display: "grid", gap: 8, maxHeight: 820, overflowY: "auto" }}>
-                {filteredRequests.length === 0 ? (
-                  <div style={{ opacity: 0.75 }}>No purchase requests for this filter.</div>
-                ) : (
-                  (statusFilter === "all"
-                    ? QUEUE_BUCKETS
-                    : QUEUE_BUCKETS.filter((bucket) => bucket.value === statusFilter)
-                  ).map((bucket) => {
-                    const bucketRows = filteredRequests.filter((row) => row.overall_status === bucket.value);
-                    return (
-                      <div
-                        key={bucket.value}
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.12)",
-                          borderRadius: 12,
-                          padding: 10,
-                          display: "grid",
-                          gap: 8,
-                          background: "rgba(255,255,255,0.02)",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                          <div style={{ fontWeight: 800 }}>{bucket.label}</div>
-                          <div style={{ opacity: 0.75, fontSize: 12 }}>
-                            {bucketRows.length} request{bucketRows.length === 1 ? "" : "s"}
-                          </div>
-                        </div>
-
-                        {bucketRows.length === 0 ? (
-                          <div style={{ opacity: 0.66, fontSize: 13 }}>No requests in this bucket.</div>
-                        ) : (
-                          bucketRows.map((row) => {
-                            const itemCount = (itemsByRequestId[row.id] ?? []).length;
-                            const vendorNames = (vendorsByRequestId[row.id] ?? [])
-                              .map((vendor) => vendor.vendor_name)
-                              .filter(Boolean);
-                            const vendorLabel = summarizeVendors(
-                              vendorNames.length ? vendorNames : [row.vendor_name]
-                            );
-                            const selected = row.id === selectedRequestId;
-                            return (
-                              <button
-                                key={row.id}
-                                type="button"
-                                onClick={() => setSelectedRequestId(row.id)}
-                                style={{
-                                  textAlign: "left",
-                                  borderRadius: 12,
-                                  border: selected
-                                    ? "1px solid rgba(120,180,255,0.7)"
-                                    : "1px solid rgba(255,255,255,0.14)",
-                                  background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
-                                  color: "inherit",
-                                  padding: 12,
-                                  cursor: "pointer",
-                                  display: "grid",
-                                  gap: 6,
-                                }}
-                              >
-                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                                  <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
-                                  <span style={statusBadgeStyle(row.overall_status)}>
-                                    {purchaseOverallStatusLabel(row.overall_status)}
-                                  </span>
-                                </div>
-                                <div style={{ fontSize: 13, opacity: 0.86 }}>
-                                  {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
-                                </div>
-                                <div style={{ fontSize: 13, opacity: 0.75 }}>
-                                  {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
-                                </div>
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+              <div style={{ fontWeight: 900 }}>Purchase Queues</div>
+              <div style={{ marginTop: 10, display: "grid", gap: 10, maxHeight: 820, overflowY: "auto" }}>
+                {renderQueueGroup({
+                  title: "Purchase Request Queue",
+                  filterValue: requestQueueFilter,
+                  onFilterChange: (value) =>
+                    setRequestQueueFilter(value as (typeof REQUEST_FILTER_OPTIONS)[number]["value"]),
+                  filterOptions: REQUEST_FILTER_OPTIONS,
+                  buckets: REQUEST_QUEUE_BUCKETS,
+                  rows: filteredRequestQueueRows,
+                  emptyText: "No purchase requests in request queue buckets for this filter.",
+                })}
+                {renderQueueGroup({
+                  title: "Purchase Detail Queue",
+                  filterValue: detailQueueFilter,
+                  onFilterChange: (value) =>
+                    setDetailQueueFilter(value as (typeof DETAIL_FILTER_OPTIONS)[number]["value"]),
+                  filterOptions: DETAIL_FILTER_OPTIONS,
+                  buckets: DETAIL_QUEUE_BUCKETS,
+                  rows: filteredDetailQueueRows,
+                  emptyText: "No purchase requests in detail queue buckets for this filter.",
+                })}
               </div>
             </section>
           </section>
