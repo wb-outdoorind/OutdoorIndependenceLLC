@@ -1,5 +1,5 @@
 type SupabaseLikeClient = {
-  from: (table: string) => any;
+  from: (table: string) => unknown;
 };
 
 type SyncResult = {
@@ -20,8 +20,23 @@ export async function syncVehicleMileageForward(params: {
   const mileage = normalizeReading(params.mileage);
   if (mileage === null) return { ok: false, message: "Invalid mileage." };
 
-  const { data: vehicleRow, error: vehicleReadError } = await params.supabase
-    .from("vehicles")
+  const vehiclesTable = params.supabase.from("vehicles") as {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        maybeSingle: () => Promise<{
+          data: Record<string, unknown> | null;
+          error: { message?: string } | null;
+        }>;
+      };
+    };
+    update: (values: Record<string, unknown>) => {
+      eq: (column: string, value: string) => Promise<{
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+
+  const { data: vehicleRow, error: vehicleReadError } = await vehiclesTable
     .select("mileage")
     .eq("id", params.vehicleId)
     .maybeSingle();
@@ -36,8 +51,7 @@ export async function syncVehicleMileageForward(params: {
       ? Math.max(existingMileage, mileage)
       : mileage;
 
-  const { error: vehicleUpdateError } = await params.supabase
-    .from("vehicles")
+  const { error: vehicleUpdateError } = await vehiclesTable
     .update({ mileage: nextMileage })
     .eq("id", params.vehicleId);
 
@@ -56,8 +70,23 @@ export async function syncEquipmentHoursForward(params: {
   const hours = normalizeReading(params.hours);
   if (hours === null) return { ok: false, message: "Invalid hours." };
 
-  const { data: equipmentRow, error: equipmentReadError } = await params.supabase
-    .from("equipment")
+  const equipmentTable = params.supabase.from("equipment") as {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        maybeSingle: () => Promise<{
+          data: Record<string, unknown> | null;
+          error: { message?: string } | null;
+        }>;
+      };
+    };
+    update: (values: Record<string, unknown>) => {
+      eq: (column: string, value: string) => Promise<{
+        error: { message?: string } | null;
+      }>;
+    };
+  };
+
+  const { data: equipmentRow, error: equipmentReadError } = await equipmentTable
     .select("current_hours")
     .eq("id", params.equipmentId)
     .maybeSingle();
@@ -72,8 +101,7 @@ export async function syncEquipmentHoursForward(params: {
       ? Math.max(existingHours, hours)
       : hours;
 
-  const { error: equipmentUpdateError } = await params.supabase
-    .from("equipment")
+  const { error: equipmentUpdateError } = await equipmentTable
     .update({ current_hours: nextHours })
     .eq("id", params.equipmentId);
 

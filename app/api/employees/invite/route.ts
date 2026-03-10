@@ -11,6 +11,7 @@ const ALLOWED_ROLES = new Set([
   "operations_manager",
   "office_admin",
   "mechanic",
+  "teammate",
   "apprentice",
   "team_lead_1",
   "team_lead_2",
@@ -89,7 +90,8 @@ export async function POST(req: Request) {
     let nickname = String(body.nickname || "").trim();
     if (!nickname) nickname = first_name;
     const full_name = [first_name, middle_initial || null, last_name].filter(Boolean).join(" ");
-    const role = String(body.role || "").trim();
+    const rawRole = String(body.role || "").trim();
+    const role = rawRole === "teammate" ? "team_member_1" : rawRole;
     const phone = String(body.phone || "").trim();
     const department = String(body.department || "").trim();
 

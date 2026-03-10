@@ -8,6 +8,8 @@ import { canAccessRoute } from "@/lib/routeAccess";
 import {
   canUseRoleView,
   readRoleViewOverride,
+  ROLE_VIEW_CHANGED_EVENT,
+  ROLE_VIEW_STORAGE_KEY,
   roleLabel,
   writeRoleViewOverride,
   type AppRole,
@@ -111,8 +113,21 @@ export default function AppTopNavLinks() {
       setActualRole((profile?.role as AppRole | undefined) ?? "employee");
       setViewAsRole(readRoleViewOverride());
     })();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== ROLE_VIEW_STORAGE_KEY) return;
+      setViewAsRole(readRoleViewOverride());
+    };
+    const onRoleViewChanged = () => {
+      setViewAsRole(readRoleViewOverride());
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(ROLE_VIEW_CHANGED_EVENT, onRoleViewChanged);
+
     return () => {
       active = false;
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(ROLE_VIEW_CHANGED_EVENT, onRoleViewChanged);
     };
   }, []);
 
@@ -175,6 +190,8 @@ export default function AppTopNavLinks() {
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
   const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");
+  const canViewAccountability = canAccessRoute(effectiveNavRole, "accountability_center");
+  const canViewApprovals = canAccessRoute(effectiveNavRole, "lead_approvals");
 
   const navLinks: Array<{ href: string; label: string; badge?: number }> = [
     { href: "/", label: "Home" },
@@ -193,11 +210,15 @@ export default function AppTopNavLinks() {
   navLinks.push({ href: "/academy", label: "OI Academy" });
   navLinks.push({ href: "/employees", label: "Teammates" });
   navLinks.push({ href: "/notifications", label: "Notifications", badge: unreadCount > 0 ? unreadCount : undefined });
-  navLinks.push({ href: "/form-reports", label: "Accountability Center" });
+  if (canViewAccountability) {
+    navLinks.push({ href: "/form-reports", label: "Accountability Center" });
+  }
   if (canViewAudit) {
     navLinks.push({ href: "/audit", label: "Audit Trail" });
   }
-  navLinks.push({ href: "/approvals", label: "Approvals" });
+  if (canViewApprovals) {
+    navLinks.push({ href: "/approvals", label: "Approvals" });
+  }
   navLinks.push({ href: "/settings", label: "Settings" });
 
   function isLinkActive(href: string) {
@@ -282,7 +303,7 @@ export default function AppTopNavLinks() {
         ) : null}
       </aside>
 
-      {isLead && pendingApprovals.length > 0 ? (
+      {canViewApprovals && isLead && pendingApprovals.length > 0 ? (
         <Link
           href={`/approvals?inspection=${encodeURIComponent(pendingApprovals[0].id)}`}
           style={{

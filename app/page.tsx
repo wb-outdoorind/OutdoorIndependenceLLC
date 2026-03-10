@@ -540,7 +540,7 @@ export default async function Home() {
       const allowed = new Set<string>();
       const roleByIdentity = new Map<string, string>();
       for (const p of teammateProfiles) {
-        const roleLabel = (p.role ?? "teammate").replaceAll("_", " ");
+        const roleLabel = (p.role ?? "team_member_1").replaceAll("_", " ");
         if (p.id) {
           const id = p.id.trim().toLowerCase();
           allowed.add(id);
@@ -592,7 +592,7 @@ export default async function Home() {
       const byRoleMap = new Map<string, number>();
       for (const row of gradeRows) {
         const identity = (row.submitted_by ?? "").trim().toLowerCase();
-        const roleLabel = roleByIdentity.get(identity) ?? "teammate";
+        const roleLabel = roleByIdentity.get(identity) ?? "team_member_1";
         byRoleMap.set(roleLabel, (byRoleMap.get(roleLabel) ?? 0) + 1);
       }
       const byRole = Array.from(byRoleMap.entries())
@@ -645,7 +645,7 @@ export default async function Home() {
         const key = identity || "unknown";
         const current = heatMapAgg.get(key) ?? {
           name: row.submitted_by || "Unknown",
-          role: roleByIdentity.get(identity) ?? "teammate",
+          role: roleByIdentity.get(identity) ?? "team_member_1",
           current: [],
           previous: [],
           flags: 0,

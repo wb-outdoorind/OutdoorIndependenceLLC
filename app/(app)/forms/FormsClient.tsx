@@ -17,6 +17,7 @@ type FormType =
 
 type HistoryFilter = "pre_post" | "all" | FormType;
 type HistoryAssetTypeFilter = "all" | "vehicle" | "equipment";
+type HistoryScope = "mine" | "mine_plus_reports" | "all";
 
 type VehicleAssetRow = {
   id: string;
@@ -60,8 +61,10 @@ type HistoryItem = {
 type FormsHistoryResponse = {
   items?: HistoryItem[];
   meta?: {
-    scopeApplied?: "mine" | "all";
+    scopeApplied?: HistoryScope;
     canViewFullHistory?: boolean;
+    canUseDirectReportsScope?: boolean;
+    nextCursor?: string | null;
   };
   error?: string;
 };
@@ -130,6 +133,16 @@ const FULL_HISTORY_ROLES = new Set([
   "team_lead_1",
   "team_lead_2",
 ]);
+
+const DIRECT_REPORT_SCOPE_ROLES = new Set([
+  "owner",
+  "operations_manager",
+  "office_admin",
+  "team_lead_1",
+  "team_lead_2",
+]);
+
+const HISTORY_PAGE_SIZE = 120;
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -203,6 +216,10 @@ function canCreatePmForms(role: string | null | undefined) {
 
 function canViewFullHistory(role: string | null | undefined) {
   return FULL_HISTORY_ROLES.has((role ?? "").trim());
+}
+
+function canUseDirectReportsScope(role: string | null | undefined) {
+  return DIRECT_REPORT_SCOPE_ROLES.has((role ?? "").trim());
 }
 
 function normalizedScanCandidates(rawValue: string) {
@@ -286,13 +303,18 @@ export default function FormsClient({
   const [launching, setLaunching] = useState(false);
 
   const fullHistory = canViewFullHistory(role);
-  const [historyScope, setHistoryScope] = useState<"mine" | "all">("mine");
+  const directReportsScopeAllowed = canUseDirectReportsScope(role);
+  const [historyScope, setHistoryScope] = useState<HistoryScope>(
+    fullHistory && directReportsScopeAllowed ? "mine_plus_reports" : "mine"
+  );
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [historyAssetTypeFilter, setHistoryAssetTypeFilter] = useState<HistoryAssetTypeFilter>("all");
   const [historyAssetFilter, setHistoryAssetFilter] = useState<string>("all");
   const [historyAssetFilterMenuOpen, setHistoryAssetFilterMenuOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<HistoryItem[]>([]);
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -349,7 +371,11 @@ export default function FormsClient({
     [allowedFormOptions, effectiveSelectedFormType]
   );
 
-  const effectiveHistoryScope: "mine" | "all" = fullHistory ? historyScope : "mine";
+  const effectiveHistoryScope: HistoryScope = useMemo(() => {
+    if (!fullHistory) return "mine";
+    if (!directReportsScopeAllowed && historyScope === "mine_plus_reports") return "mine";
+    return historyScope;
+  }, [directReportsScopeAllowed, fullHistory, historyScope]);
 
   const assetOptions = useMemo<AssetOption[]>(() => {
     if (!selectedOption) return [];
@@ -469,12 +495,14 @@ export default function FormsClient({
   useEffect(() => {
     let active = true;
 
-    async function loadHistory() {
+    async function loadHistoryFirstPage() {
       setHistoryLoading(true);
+      setHistoryLoadingMore(false);
       setHistoryError(null);
+      setHistoryNextCursor(null);
       const scope = effectiveHistoryScope;
       const types = historyTypesForFilter(historyFilter);
-      const url = `/api/forms/history?scope=${encodeURIComponent(scope)}&types=${encodeURIComponent(types)}`;
+      const url = `/api/forms/history?scope=${encodeURIComponent(scope)}&types=${encodeURIComponent(types)}&limit=${HISTORY_PAGE_SIZE}`;
 
       const res = await fetch(url, { method: "GET" });
       const json = (await res.json().catch(() => ({}))) as FormsHistoryResponse;
@@ -482,21 +510,52 @@ export default function FormsClient({
 
       if (!res.ok) {
         setHistoryRows([]);
+        setHistoryNextCursor(null);
         setHistoryError(json.error || "Failed to load form history.");
       } else {
         setHistoryRows(Array.isArray(json.items) ? json.items : []);
+        setHistoryNextCursor(typeof json.meta?.nextCursor === "string" ? json.meta.nextCursor : null);
         setHistoryError(null);
       }
 
       setHistoryLoading(false);
     }
 
-    void loadHistory();
+    void loadHistoryFirstPage();
 
     return () => {
       active = false;
     };
   }, [effectiveHistoryScope, historyFilter]);
+
+  async function loadMoreHistory() {
+    if (!historyNextCursor || historyLoadingMore || historyLoading) return;
+    setHistoryLoadingMore(true);
+    setHistoryError(null);
+
+    const scope = effectiveHistoryScope;
+    const types = historyTypesForFilter(historyFilter);
+    const url = `/api/forms/history?scope=${encodeURIComponent(scope)}&types=${encodeURIComponent(types)}&limit=${HISTORY_PAGE_SIZE}&cursor=${encodeURIComponent(historyNextCursor)}`;
+
+    const res = await fetch(url, { method: "GET" });
+    const json = (await res.json().catch(() => ({}))) as FormsHistoryResponse;
+
+    if (!res.ok) {
+      setHistoryError(json.error || "Failed to load more history.");
+      setHistoryLoadingMore(false);
+      return;
+    }
+
+    const nextItems = Array.isArray(json.items) ? json.items : [];
+    setHistoryRows((prev) => {
+      if (!nextItems.length) return prev;
+      const seen = new Set(prev.map((row) => row.key));
+      const additions = nextItems.filter((row) => !seen.has(row.key));
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+    setHistoryNextCursor(typeof json.meta?.nextCursor === "string" ? json.meta.nextCursor : null);
+    setHistoryLoadingMore(false);
+  }
 
   const historyAssetOptions = useMemo<HistorySpecificAssetFilterOption[]>(() => {
     const map = new Map<string, string>();
@@ -767,10 +826,11 @@ export default function FormsClient({
               <span style={{ fontWeight: 800 }}>History Scope</span>
               <select
                 value={historyScope}
-                onChange={(e) => setHistoryScope(e.target.value as "mine" | "all")}
+                onChange={(e) => setHistoryScope(e.target.value as HistoryScope)}
                 style={inputStyle()}
               >
                 <option value="mine">Mine</option>
+                {directReportsScopeAllowed ? <option value="mine_plus_reports">Mine + Direct Reports</option> : null}
                 <option value="all">All Teammates</option>
               </select>
             </label>
@@ -846,6 +906,13 @@ export default function FormsClient({
                 </div>
               ))
             )}
+            {!historyLoading && historyNextCursor ? (
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
+                <button type="button" onClick={loadMoreHistory} style={buttonStyle()} disabled={historyLoadingMore}>
+                  {historyLoadingMore ? "Loading more..." : "Load More"}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

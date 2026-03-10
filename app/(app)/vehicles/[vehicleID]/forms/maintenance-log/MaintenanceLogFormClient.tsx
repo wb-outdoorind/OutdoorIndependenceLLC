@@ -698,6 +698,8 @@ export default function MaintenanceLogPage() {
           .join("\n");
 
     const supabase = createSupabaseBrowser();
+    const { data: authSnapshot } = await supabase.auth.getUser();
+    const currentUserId = authSnapshot.user?.id ?? null;
     let savedLogId = editId;
     let error: { message: string } | null = null;
 
@@ -722,6 +724,7 @@ export default function MaintenanceLogPage() {
         .from("maintenance_logs")
         .insert({
           vehicle_id: vehicleId,
+          submitted_by_user_id: currentUserId,
           request_id: effectiveRequestId || null,
           ...mechanicSelfScorePatch,
           mileage: m,

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { isMechanicOrHigher } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
@@ -34,59 +36,182 @@ type MutableEquipmentPatch = {
   external_id?: string | null;
 };
 
-function canManageAssets(role: string | null | undefined) {
-  const normalized = (role ?? "").trim().toLowerCase();
-  return (
-    normalized === "owner" ||
-    normalized === "operations_manager" ||
-    normalized === "office_admin" ||
-    normalized === "mechanic"
-  );
+function asObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-function normalizeVehiclePatch(value: unknown): MutableVehiclePatch {
-  const raw = (value ?? {}) as Record<string, unknown>;
+function parseTextField(
+  value: unknown,
+  opts: { maxLen: number; allowNull?: boolean }
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return opts.allowNull === false ? undefined : null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return opts.allowNull === false ? undefined : null;
+  return trimmed.slice(0, opts.maxLen);
+}
+
+function parseNumberField(
+  value: unknown,
+  opts: { integer?: boolean; min?: number; max?: number }
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return undefined;
+  if (opts.integer && !Number.isInteger(parsed)) return undefined;
+  if (opts.min != null && parsed < opts.min) return undefined;
+  if (opts.max != null && parsed > opts.max) return undefined;
+  return parsed;
+}
+
+function normalizeVehiclePatch(value: unknown): { patch: MutableVehiclePatch; invalid: string[] } {
+  const raw = asObject(value);
+  if (!raw) return { patch: {}, invalid: ["patch"] };
+
   const patch: MutableVehiclePatch = {};
-  if ("name" in raw) patch.name = raw.name as string | null;
-  if ("type" in raw) patch.type = raw.type as string | null;
-  if ("make" in raw) patch.make = raw.make as string | null;
-  if ("model" in raw) patch.model = raw.model as string | null;
-  if ("year" in raw) patch.year = raw.year as number | null;
-  if ("plate" in raw) patch.plate = raw.plate as string | null;
-  if ("vin" in raw) patch.vin = raw.vin as string | null;
-  if ("fuel" in raw) patch.fuel = raw.fuel as string | null;
-  if ("oil_type" in raw) patch.oil_type = raw.oil_type as string | null;
-  if ("mileage" in raw) patch.mileage = raw.mileage as number | null;
-  if ("status" in raw) patch.status = raw.status as string | null;
-  if ("asset" in raw) patch.asset = raw.asset as string | null;
-  return patch;
+  const invalid: string[] = [];
+
+  const name = parseTextField(raw.name, { maxLen: 160, allowNull: false });
+  if (name !== undefined) patch.name = name;
+  else if ("name" in raw) invalid.push("name");
+
+  const type = parseTextField(raw.type, { maxLen: 80, allowNull: false });
+  if (type !== undefined) patch.type = type;
+  else if ("type" in raw) invalid.push("type");
+
+  const make = parseTextField(raw.make, { maxLen: 120 });
+  if (make !== undefined) patch.make = make;
+  else if ("make" in raw) invalid.push("make");
+
+  const model = parseTextField(raw.model, { maxLen: 120 });
+  if (model !== undefined) patch.model = model;
+  else if ("model" in raw) invalid.push("model");
+
+  const year = parseNumberField(raw.year, { integer: true, min: 1900, max: 2200 });
+  if (year !== undefined) patch.year = year;
+  else if ("year" in raw) invalid.push("year");
+
+  const plate = parseTextField(raw.plate, { maxLen: 40 });
+  if (plate !== undefined) patch.plate = plate;
+  else if ("plate" in raw) invalid.push("plate");
+
+  const vin = parseTextField(raw.vin, { maxLen: 80 });
+  if (vin !== undefined) patch.vin = vin;
+  else if ("vin" in raw) invalid.push("vin");
+
+  const fuel = parseTextField(raw.fuel, { maxLen: 80 });
+  if (fuel !== undefined) patch.fuel = fuel;
+  else if ("fuel" in raw) invalid.push("fuel");
+
+  const oilType = parseTextField(raw.oil_type, { maxLen: 80 });
+  if (oilType !== undefined) patch.oil_type = oilType;
+  else if ("oil_type" in raw) invalid.push("oil_type");
+
+  const mileage = parseNumberField(raw.mileage, { min: 0 });
+  if (mileage !== undefined) patch.mileage = mileage;
+  else if ("mileage" in raw) invalid.push("mileage");
+
+  const status = parseTextField(raw.status, { maxLen: 80, allowNull: false });
+  if (status !== undefined) patch.status = status;
+  else if ("status" in raw) invalid.push("status");
+
+  const asset = parseTextField(raw.asset, { maxLen: 120 });
+  if (asset !== undefined) patch.asset = asset;
+  else if ("asset" in raw) invalid.push("asset");
+
+  return { patch, invalid };
 }
 
-function normalizeEquipmentPatch(value: unknown): MutableEquipmentPatch {
-  const raw = (value ?? {}) as Record<string, unknown>;
+function normalizeEquipmentPatch(value: unknown): { patch: MutableEquipmentPatch; invalid: string[] } {
+  const raw = asObject(value);
+  if (!raw) return { patch: {}, invalid: ["patch"] };
+
   const patch: MutableEquipmentPatch = {};
-  if ("name" in raw) patch.name = raw.name as string | null;
-  if ("equipment_type" in raw) patch.equipment_type = raw.equipment_type as string | null;
-  if ("make" in raw) patch.make = raw.make as string | null;
-  if ("model" in raw) patch.model = raw.model as string | null;
-  if ("year" in raw) patch.year = raw.year as number | null;
-  if ("serial_number" in raw) patch.serial_number = raw.serial_number as string | null;
-  if ("license_plate" in raw) patch.license_plate = raw.license_plate as string | null;
-  if ("fuel_type" in raw) patch.fuel_type = raw.fuel_type as string | null;
-  if ("oil_type" in raw) patch.oil_type = raw.oil_type as string | null;
-  if ("current_hours" in raw) patch.current_hours = raw.current_hours as number | null;
-  if ("status" in raw) patch.status = raw.status as string | null;
-  if ("external_id" in raw) patch.external_id = raw.external_id as string | null;
-  return patch;
+  const invalid: string[] = [];
+
+  const name = parseTextField(raw.name, { maxLen: 160, allowNull: false });
+  if (name !== undefined) patch.name = name;
+  else if ("name" in raw) invalid.push("name");
+
+  const equipmentType = parseTextField(raw.equipment_type, { maxLen: 80, allowNull: false });
+  if (equipmentType !== undefined) patch.equipment_type = equipmentType;
+  else if ("equipment_type" in raw) invalid.push("equipment_type");
+
+  const make = parseTextField(raw.make, { maxLen: 120 });
+  if (make !== undefined) patch.make = make;
+  else if ("make" in raw) invalid.push("make");
+
+  const model = parseTextField(raw.model, { maxLen: 120 });
+  if (model !== undefined) patch.model = model;
+  else if ("model" in raw) invalid.push("model");
+
+  const year = parseNumberField(raw.year, { integer: true, min: 1900, max: 2200 });
+  if (year !== undefined) patch.year = year;
+  else if ("year" in raw) invalid.push("year");
+
+  const serialNumber = parseTextField(raw.serial_number, { maxLen: 120 });
+  if (serialNumber !== undefined) patch.serial_number = serialNumber;
+  else if ("serial_number" in raw) invalid.push("serial_number");
+
+  const licensePlate = parseTextField(raw.license_plate, { maxLen: 40 });
+  if (licensePlate !== undefined) patch.license_plate = licensePlate;
+  else if ("license_plate" in raw) invalid.push("license_plate");
+
+  const fuelType = parseTextField(raw.fuel_type, { maxLen: 80 });
+  if (fuelType !== undefined) patch.fuel_type = fuelType;
+  else if ("fuel_type" in raw) invalid.push("fuel_type");
+
+  const oilType = parseTextField(raw.oil_type, { maxLen: 80 });
+  if (oilType !== undefined) patch.oil_type = oilType;
+  else if ("oil_type" in raw) invalid.push("oil_type");
+
+  const currentHours = parseNumberField(raw.current_hours, { min: 0 });
+  if (currentHours !== undefined) patch.current_hours = currentHours;
+  else if ("current_hours" in raw) invalid.push("current_hours");
+
+  const status = parseTextField(raw.status, { maxLen: 80, allowNull: false });
+  if (status !== undefined) patch.status = status;
+  else if ("status" in raw) invalid.push("status");
+
+  const externalId = parseTextField(raw.external_id, { maxLen: 120 });
+  if (externalId !== undefined) patch.external_id = externalId;
+  else if ("external_id" in raw) invalid.push("external_id");
+
+  return { patch, invalid };
 }
 
 export async function POST(req: Request) {
+  const ip = readClientIp(req);
+  const routeLimit = await evaluateRateLimit({
+    key: `assets-update:ip:${ip}`,
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (!routeLimit.ok) return rateLimitExceededResponse(routeLimit);
+
   const session = await getCurrentUserProfileStrict();
-  const role = session?.effectiveRole ?? "employee";
+  const role = session?.profile?.role ?? "employee";
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
-  if (!canManageAssets(role)) {
+
+  const actorLimit = await evaluateRateLimit({
+    key: `assets-update:user:${session.user.id}`,
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (!actorLimit.ok) return rateLimitExceededResponse(actorLimit);
+
+  if (!isMechanicOrHigher(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -105,7 +230,17 @@ export async function POST(req: Request) {
   const admin = createSupabaseAdmin();
 
   if (assetType === "vehicle") {
-    const patch = normalizeVehiclePatch(body.patch);
+    const { patch, invalid } = normalizeVehiclePatch(body.patch);
+    if (invalid.length) {
+      return NextResponse.json(
+        { error: `Invalid patch fields: ${invalid.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({ error: "No valid vehicle fields to update" }, { status: 400 });
+    }
+
     const { data, error } = await admin
       .from("vehicles")
       .update(patch)
@@ -118,7 +253,17 @@ export async function POST(req: Request) {
   }
 
   if (assetType === "equipment") {
-    const patch = normalizeEquipmentPatch(body.patch);
+    const { patch, invalid } = normalizeEquipmentPatch(body.patch);
+    if (invalid.length) {
+      return NextResponse.json(
+        { error: `Invalid patch fields: ${invalid.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({ error: "No valid equipment fields to update" }, { status: 400 });
+    }
+
     const { data, error } = await admin
       .from("equipment")
       .update(patch)

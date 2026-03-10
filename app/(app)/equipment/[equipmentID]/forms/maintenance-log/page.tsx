@@ -545,6 +545,8 @@ export default function EquipmentMaintenanceLogPage() {
           .join("\n");
 
     const supabase = createSupabaseBrowser();
+    const { data: authSnapshot } = await supabase.auth.getUser();
+    const currentUserId = authSnapshot.user?.id ?? null;
     let savedLogId = editId;
     let error: { message: string } | null = null;
 
@@ -569,6 +571,7 @@ export default function EquipmentMaintenanceLogPage() {
         .from("equipment_maintenance_logs")
         .insert({
           equipment_id: equipmentId,
+          submitted_by_user_id: currentUserId,
           request_id: selectedRequestId || null,
           ...mechanicSelfScorePatch,
           hours: h,

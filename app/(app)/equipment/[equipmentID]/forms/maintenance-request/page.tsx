@@ -405,6 +405,8 @@ export default function EquipmentMaintenanceRequestPage() {
       .join("\n");
 
     const supabase = createSupabaseBrowser();
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = authData.user?.id ?? null;
     let savedRequestId = editId;
     let error: { message: string } | null = null;
 
@@ -431,6 +433,7 @@ export default function EquipmentMaintenanceRequestPage() {
         .from("equipment_maintenance_requests")
         .insert({
           equipment_id: equipmentId,
+          submitted_by_user_id: currentUserId,
           status,
           urgency,
           system_affected: systemAffected,

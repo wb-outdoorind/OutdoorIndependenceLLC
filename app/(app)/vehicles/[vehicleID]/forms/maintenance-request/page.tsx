@@ -448,6 +448,8 @@ export default function MaintenanceRequestPage() {
       return alert("Description of issue is required.");
 
     const supabase = createSupabaseBrowser();
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = authData.user?.id ?? null;
     const combinedDescription = [
       `Title: ${finalTitle}`,
       "",
@@ -489,6 +491,7 @@ export default function MaintenanceRequestPage() {
         .from("maintenance_requests")
         .insert({
           vehicle_id: vehicleId,
+          submitted_by_user_id: currentUserId,
           status,
           urgency,
           system_affected: systemAffected,

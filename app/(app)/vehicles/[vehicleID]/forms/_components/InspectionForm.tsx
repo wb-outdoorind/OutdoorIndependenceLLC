@@ -1190,6 +1190,7 @@ export default function InspectionForm({
       .insert({
         vehicle_id: vehicleId,
         inspection_type: type === "pre-trip" ? "Pre-Trip" : "Post-Trip",
+        submitted_by_user_id: currentUserId,
         checklist,
         overall_status: inspectionStatus,
         mileage: m,

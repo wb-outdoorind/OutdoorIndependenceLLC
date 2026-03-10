@@ -155,6 +155,7 @@ export default function FormDraftManager() {
   const [hasTrackableFields, setHasTrackableFields] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
   const [statusText, setStatusText] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (!enabled) return;
@@ -197,17 +198,27 @@ export default function FormDraftManager() {
     const saveNow = (manual = false) => {
       const snapshot = serializeDraft();
       if (!snapshot) return;
-      window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
-      setHasDraft(true);
-      if (manual) {
-        const at = formatSavedAt(snapshot.savedAt);
-        setStatusText(at ? `Draft saved (${at})` : "Draft saved");
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
+        setHasDraft(true);
+        setSaveError("");
+        if (manual) {
+          const at = formatSavedAt(snapshot.savedAt);
+          setStatusText(at ? `Draft saved (${at})` : "Draft saved");
+        }
+      } catch (error) {
+        console.error("Failed to save local form draft:", error);
+        setSaveError("Draft save failed: local storage is full or blocked on this device.");
+        if (manual) {
+          setStatusText("Draft save failed");
+        }
       }
     };
 
     const clearNow = (manual = false) => {
       window.localStorage.removeItem(storageKey);
       setHasDraft(false);
+      setSaveError("");
       if (manual) setStatusText("Draft cleared");
     };
 
@@ -307,6 +318,22 @@ export default function FormDraftManager() {
           Clear Draft
         </button>
       </div>
+      {saveError ? (
+        <div
+          style={{
+            border: "1px solid rgba(255,120,120,0.4)",
+            borderRadius: 8,
+            padding: "6px 10px",
+            background: "rgba(64,14,14,0.8)",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#ffd5d5",
+            maxWidth: 320,
+          }}
+        >
+          {saveError}
+        </div>
+      ) : null}
       {statusText ? (
         <div
           style={{

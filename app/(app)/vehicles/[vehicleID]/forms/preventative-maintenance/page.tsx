@@ -409,6 +409,8 @@ export default function VehiclePreventativeMaintenanceForm() {
 
     try {
       const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData.user?.id ?? null;
       const failedCount = Object.values(checks).filter((value) => value === "fail").length;
       const pmSummary = failedCount > 0 ? `${failedCount} failed item(s)` : "All truck PM checks passed";
 
@@ -416,6 +418,7 @@ export default function VehiclePreventativeMaintenanceForm() {
         .from("vehicle_pm_events")
         .insert({
           vehicle_id: vehicleId,
+          submitted_by_user_id: currentUserId,
           mileage: m,
           notes: repairsNotes.trim() || null,
           result: {

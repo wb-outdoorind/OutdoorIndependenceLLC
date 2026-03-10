@@ -15,7 +15,7 @@ type FormHistoryType =
   | "equipment_maintenance_log"
   | "equipment_pm";
 
-type Scope = "mine" | "all";
+type Scope = "mine" | "mine_plus_reports" | "all";
 
 type HistoryItem = {
   key: string;
@@ -23,6 +23,7 @@ type HistoryItem = {
   formLabel: string;
   createdAt: string;
   submittedBy: string | null;
+  submittedByUserId: string | null;
   assetType: "vehicle" | "equipment";
   assetId: string;
   assetLabel: string;
@@ -38,6 +39,7 @@ type InspectionRow = {
   vehicle_id: string;
   checklist: unknown;
   overall_status: string | null;
+  submitted_by_user_id: string | null;
 };
 
 type VehicleRequestRow = {
@@ -48,6 +50,7 @@ type VehicleRequestRow = {
   urgency: string | null;
   system_affected: string | null;
   description: string | null;
+  submitted_by_user_id: string | null;
 };
 
 type VehicleLogRow = {
@@ -56,6 +59,7 @@ type VehicleLogRow = {
   vehicle_id: string;
   status_update: string | null;
   notes: string | null;
+  submitted_by_user_id: string | null;
 };
 
 type VehiclePmRow = {
@@ -64,6 +68,7 @@ type VehiclePmRow = {
   vehicle_id: string;
   notes: string | null;
   result: unknown;
+  submitted_by_user_id: string | null;
 };
 
 type EquipmentRequestRow = {
@@ -74,6 +79,7 @@ type EquipmentRequestRow = {
   urgency: string | null;
   system_affected: string | null;
   description: string | null;
+  submitted_by_user_id: string | null;
 };
 
 type EquipmentLogRow = {
@@ -82,6 +88,7 @@ type EquipmentLogRow = {
   equipment_id: string;
   status_update: string | null;
   notes: string | null;
+  submitted_by_user_id: string | null;
 };
 
 type EquipmentPmRow = {
@@ -90,6 +97,22 @@ type EquipmentPmRow = {
   equipment_id: string;
   notes: string | null;
   result: unknown;
+  submitted_by_user_id: string | null;
+};
+
+type IdentityProfileRow = {
+  id: string;
+  full_name: string | null;
+  first_name: string | null;
+  nickname: string | null;
+  email: string | null;
+  department: string | null;
+  role: string | null;
+};
+
+type CursorToken = {
+  createdAt: string;
+  key: string;
 };
 
 const ALL_TYPES: FormHistoryType[] = [
@@ -112,8 +135,23 @@ const FULL_HISTORY_ROLES = new Set([
   "team_lead_2",
 ]);
 
+const DIRECT_REPORT_SCOPE_ROLES = new Set([
+  "owner",
+  "operations_manager",
+  "office_admin",
+  "team_lead_1",
+  "team_lead_2",
+]);
+
+const LEAD_ROLES = new Set(["team_lead_1", "team_lead_2"]);
+const DIRECT_REPORT_FALLBACK_ROLES = ["apprentice", "team_member_1", "team_member_2"] as const;
+
 function canViewFullHistory(role: string | null | undefined) {
   return FULL_HISTORY_ROLES.has((role ?? "").trim());
+}
+
+function canUseDirectReportsScope(role: string | null | undefined) {
+  return DIRECT_REPORT_SCOPE_ROLES.has((role ?? "").trim());
 }
 
 function parseTypes(raw: string | null): Set<FormHistoryType> {
@@ -132,8 +170,51 @@ function parseTypes(raw: string | null): Set<FormHistoryType> {
   return set;
 }
 
+function parseLimit(raw: string | null) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return 100;
+  const rounded = Math.trunc(parsed);
+  if (rounded < 1) return 1;
+  if (rounded > 250) return 250;
+  return rounded;
+}
+
+function parseCursor(raw: string | null): CursorToken | null {
+  if (!raw?.trim()) return null;
+  try {
+    const decoded = Buffer.from(raw, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as CursorToken;
+    if (!parsed || typeof parsed.createdAt !== "string" || typeof parsed.key !== "string") return null;
+    if (!parsed.createdAt.trim() || !parsed.key.trim()) return null;
+    return { createdAt: parsed.createdAt, key: parsed.key };
+  } catch {
+    return null;
+  }
+}
+
+function encodeCursor(item: Pick<HistoryItem, "createdAt" | "key">) {
+  return Buffer.from(JSON.stringify({ createdAt: item.createdAt, key: item.key }), "utf8").toString("base64url");
+}
+
 function normalizeIdentity(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function addIdentityToken(set: Set<string>, value: string | null | undefined) {
+  const normalized = normalizeIdentity(value);
+  if (!normalized) return;
+  set.add(normalized);
+}
+
+function addIdentityTokens(set: Set<string>, row: Partial<IdentityProfileRow>) {
+  addIdentityToken(set, row.full_name);
+  addIdentityToken(set, row.first_name);
+  addIdentityToken(set, row.nickname);
+  addIdentityToken(set, row.email);
+  const email = normalizeIdentity(row.email);
+  if (email.includes("@")) {
+    addIdentityToken(set, email.split("@")[0] ?? "");
+  }
 }
 
 function firstFieldValue(raw: string | null | undefined, keys: string[]) {
@@ -213,6 +294,25 @@ function encodeFocus(type: string, id: string) {
   return q.toString();
 }
 
+function toMillis(value: string) {
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) ? millis : 0;
+}
+
+function compareHistoryDesc(a: Pick<HistoryItem, "createdAt" | "key">, b: Pick<HistoryItem, "createdAt" | "key">) {
+  const timeDelta = toMillis(b.createdAt) - toMillis(a.createdAt);
+  if (timeDelta !== 0) return timeDelta;
+  return b.key.localeCompare(a.key);
+}
+
+function shouldIncludeAfterCursor(item: Pick<HistoryItem, "createdAt" | "key">, cursor: CursorToken) {
+  const itemTime = toMillis(item.createdAt);
+  const cursorTime = toMillis(cursor.createdAt);
+  if (itemTime < cursorTime) return true;
+  if (itemTime > cursorTime) return false;
+  return item.key < cursor.key;
+}
+
 export async function GET(req: Request) {
   const ip = readClientIp(req);
   const routeLimit = await evaluateRateLimit({
@@ -236,36 +336,92 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const selectedTypes = parseTypes(url.searchParams.get("types"));
+  const pageLimit = parseLimit(url.searchParams.get("limit"));
+  const cursor = parseCursor(url.searchParams.get("cursor"));
 
   const requestedScope = (url.searchParams.get("scope") || "mine").trim().toLowerCase();
   const role = session.profile?.role ?? null;
   const fullHistoryAllowed = canViewFullHistory(role);
-  const scope: Scope = requestedScope === "all" && fullHistoryAllowed ? "all" : "mine";
+  const directReportsScopeAllowed = canUseDirectReportsScope(role);
 
-  const profileName = normalizeIdentity(
-    typeof session.profile?.full_name === "string" ? session.profile.full_name : null
-  );
-  const profileEmail = normalizeIdentity(
-    typeof session.profile?.email === "string" ? session.profile.email : session.user.email ?? null
-  );
+  let scope: Scope = "mine";
+  if (requestedScope === "all" && fullHistoryAllowed) {
+    scope = "all";
+  } else if (requestedScope === "mine_plus_reports" && fullHistoryAllowed && directReportsScopeAllowed) {
+    scope = "mine_plus_reports";
+  }
 
-  const ownIdentity = new Set<string>([profileName, profileEmail].filter(Boolean));
-  if (profileName) {
-    const firstName = profileName.split(/\s+/).filter(Boolean)[0];
-    if (firstName) ownIdentity.add(firstName);
-  }
-  if (profileEmail.includes("@")) {
-    const localPart = profileEmail.split("@")[0]?.trim();
-    if (localPart) ownIdentity.add(localPart.toLowerCase());
-  }
   const admin = createSupabaseAdmin();
+  const scopedUserIds = new Set<string>([session.user.id]);
+  const scopedIdentities = new Set<string>();
+
+  addIdentityTokens(scopedIdentities, {
+    full_name: typeof session.profile?.full_name === "string" ? session.profile.full_name : null,
+    first_name: typeof session.profile?.first_name === "string" ? session.profile.first_name : null,
+    nickname: typeof session.profile?.nickname === "string" ? session.profile.nickname : null,
+    email:
+      typeof session.profile?.email === "string" && session.profile.email.trim()
+        ? session.profile.email
+        : session.user.email ?? null,
+  });
+
+  if (scope === "mine_plus_reports") {
+    const reportProfiles: IdentityProfileRow[] = [];
+
+    const { data: directRows, error: directRowsError } = await admin
+      .from("profiles")
+      .select("id,full_name,first_name,nickname,email,department,role")
+      .eq("manager_id", session.user.id)
+      .limit(1000);
+
+    if (directRowsError) {
+      return NextResponse.json({ error: directRowsError.message }, { status: 500 });
+    }
+
+    for (const row of (directRows ?? []) as IdentityProfileRow[]) {
+      if (!row.id || row.id === session.user.id) continue;
+      reportProfiles.push(row);
+    }
+
+    if (!reportProfiles.length) {
+      const actorDepartment =
+        typeof session.profile?.department === "string" ? session.profile.department.trim() : "";
+      const normalizedRole = (role ?? "").trim();
+      if (
+        actorDepartment &&
+        (LEAD_ROLES.has(normalizedRole) ||
+          normalizedRole === "office_admin" ||
+          normalizedRole === "operations_manager")
+      ) {
+        const { data: fallbackRows, error: fallbackError } = await admin
+          .from("profiles")
+          .select("id,full_name,first_name,nickname,email,department,role")
+          .eq("department", actorDepartment)
+          .in("role", [...DIRECT_REPORT_FALLBACK_ROLES])
+          .limit(1000);
+        if (fallbackError) {
+          return NextResponse.json({ error: fallbackError.message }, { status: 500 });
+        }
+        for (const row of (fallbackRows ?? []) as IdentityProfileRow[]) {
+          if (!row.id || row.id === session.user.id) continue;
+          reportProfiles.push(row);
+        }
+      }
+    }
+
+    for (const row of reportProfiles) {
+      scopedUserIds.add(row.id);
+      addIdentityTokens(scopedIdentities, row);
+    }
+  }
+
   const items: HistoryItem[] = [];
-  const perTypeLimit = 350;
+  const perTypeLimit = Math.max(300, Math.min(1600, pageLimit * 8));
 
   if (selectedTypes.has("pre_trip") || selectedTypes.has("post_trip")) {
     const { data, error } = await admin
       .from("inspections")
-      .select("id,created_at,inspection_type,vehicle_id,checklist,overall_status")
+      .select("id,created_at,inspection_type,vehicle_id,checklist,overall_status,submitted_by_user_id")
       .in("inspection_type", ["Pre-Trip", "Post-Trip"])
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
@@ -285,6 +441,7 @@ export async function GET(req: Request) {
         formLabel: formLabel(type),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "vehicle",
         assetId: row.vehicle_id,
         assetLabel: row.vehicle_id,
@@ -298,7 +455,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("vehicle_maintenance_request")) {
     const { data, error } = await admin
       .from("maintenance_requests")
-      .select("id,created_at,vehicle_id,status,urgency,system_affected,description")
+      .select("id,created_at,vehicle_id,status,urgency,system_affected,description,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -320,6 +477,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("vehicle_maintenance_request"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "vehicle",
         assetId: row.vehicle_id,
         assetLabel: row.vehicle_id,
@@ -333,7 +491,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("vehicle_maintenance_log")) {
     const { data, error } = await admin
       .from("maintenance_logs")
-      .select("id,created_at,vehicle_id,status_update,notes")
+      .select("id,created_at,vehicle_id,status_update,notes,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -348,6 +506,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("vehicle_maintenance_log"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "vehicle",
         assetId: row.vehicle_id,
         assetLabel: row.vehicle_id,
@@ -361,7 +520,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("vehicle_pm")) {
     const { data, error } = await admin
       .from("vehicle_pm_events")
-      .select("id,created_at,vehicle_id,notes,result")
+      .select("id,created_at,vehicle_id,notes,result,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -379,6 +538,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("vehicle_pm"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "vehicle",
         assetId: row.vehicle_id,
         assetLabel: row.vehicle_id,
@@ -392,7 +552,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("equipment_maintenance_request")) {
     const { data, error } = await admin
       .from("equipment_maintenance_requests")
-      .select("id,created_at,equipment_id,status,urgency,system_affected,description")
+      .select("id,created_at,equipment_id,status,urgency,system_affected,description,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -414,6 +574,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("equipment_maintenance_request"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "equipment",
         assetId: row.equipment_id,
         assetLabel: row.equipment_id,
@@ -427,7 +588,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("equipment_maintenance_log")) {
     const { data, error } = await admin
       .from("equipment_maintenance_logs")
-      .select("id,created_at,equipment_id,status_update,notes")
+      .select("id,created_at,equipment_id,status_update,notes,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -442,6 +603,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("equipment_maintenance_log"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "equipment",
         assetId: row.equipment_id,
         assetLabel: row.equipment_id,
@@ -455,7 +617,7 @@ export async function GET(req: Request) {
   if (selectedTypes.has("equipment_pm")) {
     const { data, error } = await admin
       .from("equipment_pm_events")
-      .select("id,created_at,equipment_id,notes,result")
+      .select("id,created_at,equipment_id,notes,result,submitted_by_user_id")
       .order("created_at", { ascending: false })
       .limit(perTypeLimit);
 
@@ -473,6 +635,7 @@ export async function GET(req: Request) {
         formLabel: formLabel("equipment_pm"),
         createdAt: row.created_at,
         submittedBy,
+        submittedByUserId: row.submitted_by_user_id ?? null,
         assetType: "equipment",
         assetId: row.equipment_id,
         assetLabel: row.equipment_id,
@@ -484,12 +647,15 @@ export async function GET(req: Request) {
   }
 
   let scopedItems = items;
-  if (scope === "mine") {
+  if (scope !== "all") {
     scopedItems = items.filter((item) => {
+      if (item.submittedByUserId) {
+        return scopedUserIds.has(item.submittedByUserId);
+      }
       const who = normalizeIdentity(item.submittedBy);
       if (!who) return false;
-      if (ownIdentity.has(who)) return true;
-      for (const candidate of ownIdentity) {
+      if (scopedIdentities.has(who)) return true;
+      for (const candidate of scopedIdentities) {
         if (candidate.length < 3) continue;
         if (who.includes(candidate) || candidate.includes(who)) return true;
       }
@@ -497,11 +663,19 @@ export async function GET(req: Request) {
     });
   }
 
+  const sortedItems = [...scopedItems].sort(compareHistoryDesc);
+  const cursorItems = cursor
+    ? sortedItems.filter((item) => shouldIncludeAfterCursor(item, cursor))
+    : sortedItems;
+  const pagedItems = cursorItems.slice(0, pageLimit);
+  const hasMore = cursorItems.length > pagedItems.length;
+  const nextCursor = hasMore && pagedItems.length ? encodeCursor(pagedItems[pagedItems.length - 1]) : null;
+
   const vehicleIds = Array.from(
-    new Set(scopedItems.filter((item) => item.assetType === "vehicle").map((item) => item.assetId))
+    new Set(pagedItems.filter((item) => item.assetType === "vehicle").map((item) => item.assetId))
   );
   const equipmentIds = Array.from(
-    new Set(scopedItems.filter((item) => item.assetType === "equipment").map((item) => item.assetId))
+    new Set(pagedItems.filter((item) => item.assetType === "equipment").map((item) => item.assetId))
   );
 
   const vehicleNameById = new Map<string, string>();
@@ -530,22 +704,21 @@ export async function GET(req: Request) {
     }
   }
 
-  const normalizedItems = scopedItems
-    .map((item) => ({
-      ...item,
-      assetLabel:
-        item.assetType === "vehicle"
-          ? vehicleNameById.get(item.assetId) ?? item.assetId
-          : equipmentNameById.get(item.assetId) ?? item.assetId,
-    }))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 1000);
+  const normalizedItems = pagedItems.map((item) => ({
+    ...item,
+    assetLabel:
+      item.assetType === "vehicle"
+        ? vehicleNameById.get(item.assetId) ?? item.assetId
+        : equipmentNameById.get(item.assetId) ?? item.assetId,
+  }));
 
   return NextResponse.json({
     items: normalizedItems,
     meta: {
       scopeApplied: scope,
       canViewFullHistory: fullHistoryAllowed,
+      canUseDirectReportsScope: directReportsScopeAllowed,
+      nextCursor,
     },
   });
 }

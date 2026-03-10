@@ -589,6 +589,8 @@ export default function EquipmentPreventativeMaintenancePage() {
     const parsedHours = hours.trim() ? Number(hours) : null;
 
     const supabase = createSupabaseBrowser();
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = authData.user?.id ?? null;
 
     if (isTrailerEquipment) {
       if (hours.trim() && (!Number.isFinite(parsedHours) || !Number.isInteger(parsedHours) || (parsedHours ?? 0) < 0)) {
@@ -633,6 +635,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       const summary = trailerFailCount > 0 ? `${trailerFailCount} failed item(s)` : "All trailer PM checks passed";
       const { error } = await supabase.from("equipment_pm_events").insert({
         equipment_id: equipment.id,
+        submitted_by_user_id: currentUserId,
         template_id: null,
         hours: parsedHours,
         notes: trailerNotes.trim() || null,
@@ -722,6 +725,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       const summary = mowerFailCount > 0 ? `${mowerFailCount} failed item(s)` : "All mower PM checks passed";
       const { error } = await supabase.from("equipment_pm_events").insert({
         equipment_id: equipment.id,
+        submitted_by_user_id: currentUserId,
         template_id: null,
         hours: parsedHours,
         notes: mowerNotes.trim() || null,
@@ -797,6 +801,7 @@ export default function EquipmentPreventativeMaintenancePage() {
       const summary = applicatorFailCount > 0 ? `${applicatorFailCount} failed item(s)` : "All applicator PM checks passed";
       const { error } = await supabase.from("equipment_pm_events").insert({
         equipment_id: equipment.id,
+        submitted_by_user_id: currentUserId,
         template_id: null,
         hours: parsedHours,
         notes: applicatorNotes.trim() || null,
@@ -843,6 +848,7 @@ export default function EquipmentPreventativeMaintenancePage() {
     const summary = failCount > 0 ? `${failCount} failed item(s)` : "All checked items passed";
     const { error } = await supabase.from("equipment_pm_events").insert({
       equipment_id: equipment.id,
+      submitted_by_user_id: currentUserId,
       template_id: template?.id ?? null,
       hours: parsedHours,
       notes: notes.trim() || null,
