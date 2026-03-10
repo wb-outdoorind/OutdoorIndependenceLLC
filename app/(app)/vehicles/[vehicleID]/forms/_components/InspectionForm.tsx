@@ -7,7 +7,6 @@ import { loadVehicleContext } from "@/lib/assetContext";
 import { syncVehicleMileageForward } from "@/lib/assetReadings";
 import {
   confirmLeaveForm,
-  getSignedInDisplayName,
   requestFormDraftClear,
   requestFormDraftSave,
   UnsavedChangesBanner,
@@ -15,6 +14,7 @@ import {
   useUnsavedChangesState,
 } from "@/lib/forms";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import { employeeBadgePrimary, employeeBadgeSecondary } from "@/lib/employeeBadges";
 
 export type Choice = "pass" | "fail";
 type ChoiceOrBlank = Choice | "";
@@ -93,6 +93,28 @@ type MaintenanceRequestStatusRow = {
   created_at: string;
 };
 type Role = AppRole;
+type PersonOption = {
+  id: string;
+  full_name: string | null;
+  first_name: string | null;
+  middle_initial: string | null;
+  last_name: string | null;
+  nickname: string | null;
+  email: string | null;
+  department: string | null;
+  role: Role | null;
+};
+
+type PeopleResponse = {
+  actor?: {
+    id: string;
+    role: Role | null;
+    displayName: string;
+  };
+  crewOptions?: PersonOption[];
+  leadOptions?: PersonOption[];
+  error?: string;
+};
 
 const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   truck: "Truck Loadout Equipment",
@@ -100,6 +122,38 @@ const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   plow: "Attachment Selection",
   salter: "Salter Selection",
 };
+
+const TEAM_LEAD_ROLES = new Set<Role>(["team_lead_1", "team_lead_2"]);
+const MANAGEMENT_ROLES = new Set<Role>(["owner", "operations_manager", "office_admin"]);
+const LOCKED_TEAMMATE_ROLES = new Set<Role>([
+  "employee",
+  "apprentice",
+  "team_member_1",
+  "team_member_2",
+  "team_lead_1",
+  "team_lead_2",
+  "mechanic",
+]);
+const SPECIFIED_ASSET_TYPES_FOR_LEAD_APPROVAL = new Set<VehicleType>(["truck", "car"]);
+
+function isTeamLeadRole(role: string | null | undefined) {
+  return role != null && TEAM_LEAD_ROLES.has(role as Role);
+}
+
+function isManagementRole(role: string | null | undefined) {
+  return role != null && MANAGEMENT_ROLES.has(role as Role);
+}
+
+function shouldLockTeammateName(role: string | null | undefined) {
+  return role != null && LOCKED_TEAMMATE_ROLES.has(role as Role);
+}
+
+function requiresLeadApprovalForRole(role: string | null | undefined) {
+  if (!role) return true;
+  if (isManagementRole(role)) return false;
+  if (isTeamLeadRole(role)) return false;
+  return true;
+}
 
 function isSectionEquipmentPicker(sectionId: string) {
   return Boolean(SECTION_EQUIPMENT_PICKERS[sectionId]);
@@ -444,6 +498,14 @@ export default function InspectionForm({
   const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserDisplayName, setCurrentUserDisplayName] = useState("");
+  const [teammateOptions, setTeammateOptions] = useState<PersonOption[]>([]);
+  const [crewMemberIds, setCrewMemberIds] = useState<string[]>([]);
+  const [crewPickerId, setCrewPickerId] = useState("");
+  const [leadApproverOptions, setLeadApproverOptions] = useState<PersonOption[]>([]);
+  const [leadApproverId, setLeadApproverId] = useState("");
+  const [peopleLoadError, setPeopleLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!vehicleId) return;
@@ -532,36 +594,53 @@ export default function InspectionForm({
   }, [vehicleId, vehicleType]);
 
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
     void (async () => {
-      const name = await getSignedInDisplayName();
-      if (!name) return;
-      setEmployee((prev) => (prev.trim() ? prev : name));
-    })();
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const supabase = createSupabaseBrowser();
-        const { data: authData } = await supabase.auth.getUser();
-        if (!authData.user) {
+      try {
+        const res = await fetch("/api/inspections/people", {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await res.json().catch(() => ({}))) as PeopleResponse;
+        if (!active) return;
+        if (!res.ok) {
+          setPeopleLoadError(payload?.error || "Failed to load teammate options.");
           setCurrentUserRole("employee");
           return;
         }
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", authData.user.id)
-          .maybeSingle();
-        setCurrentUserRole(
-          resolveEffectiveRole(
-            (profile?.role as Role | undefined) ?? "employee",
-            readRoleViewOverride()
-          ) as Role
-        );
-      })();
-    }, 0);
-    return () => window.clearTimeout(timer);
+
+        const effectiveRole = resolveEffectiveRole(payload.actor?.role ?? "employee", readRoleViewOverride()) as Role;
+        const actorDisplayName = (payload.actor?.displayName || "").trim();
+        const nextCrew = Array.isArray(payload.crewOptions) ? payload.crewOptions : [];
+        const nextLead = Array.isArray(payload.leadOptions) ? payload.leadOptions : [];
+
+        setCurrentUserRole(effectiveRole);
+        setCurrentUserId(payload.actor?.id ?? null);
+        setCurrentUserDisplayName(actorDisplayName);
+        setTeammateOptions(nextCrew);
+        setLeadApproverOptions(nextLead);
+        setCrewMemberIds((prev) => prev.filter((id) => nextCrew.some((row) => row.id === id)));
+        setLeadApproverId((prev) => (prev && nextLead.some((row) => row.id === prev) ? prev : ""));
+        if (shouldLockTeammateName(effectiveRole)) {
+          setEmployee(actorDisplayName);
+        } else if (actorDisplayName) {
+          setEmployee((prev) => (prev.trim() ? prev : actorDisplayName));
+        }
+        setPeopleLoadError(null);
+      } catch (error) {
+        if (!active) return;
+        if ((error as Error)?.name === "AbortError") return;
+        setPeopleLoadError("Failed to load teammate options.");
+        setCurrentUserRole("employee");
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -748,6 +827,52 @@ export default function InspectionForm({
     return "";
   }, [hasInspectionFailures, inspectionStatus, mileageConsistency.failed, mileageConsistency.reason]);
 
+  const teammateNameLocked = useMemo(
+    () => shouldLockTeammateName(currentUserRole),
+    [currentUserRole]
+  );
+
+  const selectedCrewMembers = useMemo(
+    () =>
+      crewMemberIds
+        .map((id) => teammateOptions.find((row) => row.id === id) ?? null)
+        .filter((row): row is PersonOption => Boolean(row)),
+    [crewMemberIds, teammateOptions]
+  );
+
+  const availableCrewOptions = useMemo(
+    () =>
+      teammateOptions.filter(
+        (row) => row.id !== currentUserId && !crewMemberIds.includes(row.id)
+      ),
+    [teammateOptions, currentUserId, crewMemberIds]
+  );
+
+  const teamLeadApproverOptions = useMemo(
+    () => leadApproverOptions.filter((row) => isTeamLeadRole(row.role)),
+    [leadApproverOptions]
+  );
+
+  const selectableLeadApproverOptions = useMemo(() => {
+    if (teamLeadApproverOptions.length > 0) return teamLeadApproverOptions;
+    return leadApproverOptions;
+  }, [teamLeadApproverOptions, leadApproverOptions]);
+
+  const requiresLeadApproval = useMemo(() => {
+    if (!SPECIFIED_ASSET_TYPES_FOR_LEAD_APPROVAL.has(vehicleType)) return false;
+    const submitterNeedsApproval = requiresLeadApprovalForRole(currentUserRole);
+    const crewNeedsApproval = selectedCrewMembers.some((row) => requiresLeadApprovalForRole(row.role));
+    return submitterNeedsApproval || crewNeedsApproval;
+  }, [vehicleType, currentUserRole, selectedCrewMembers]);
+
+  const effectiveLeadApproverId = useMemo(() => {
+    if (!requiresLeadApproval) return "";
+    const trimmed = leadApproverId.trim();
+    if (trimmed && selectableLeadApproverOptions.some((row) => row.id === trimmed)) return trimmed;
+    if (selectableLeadApproverOptions.length === 1) return selectableLeadApproverOptions[0].id;
+    return "";
+  }, [requiresLeadApproval, leadApproverId, selectableLeadApproverOptions]);
+
   function setApplicable(secId: string, applicable: boolean) {
     setSectionState((prev) => ({
       ...prev,
@@ -777,6 +902,17 @@ export default function InspectionForm({
 
   function setExitItem(itemKey: string, value: Choice) {
     setExiting((prev) => ({ ...prev, [itemKey]: value }));
+  }
+
+  function addCrewMember(id: string) {
+    const trimmed = id.trim();
+    if (!trimmed) return;
+    if (trimmed === currentUserId) return;
+    setCrewMemberIds((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+  }
+
+  function removeCrewMember(id: string) {
+    setCrewMemberIds((prev) => prev.filter((rowId) => rowId !== id));
   }
 
   function setItemExtraValue(sectionId: string, itemKey: string, value: string) {
@@ -1032,10 +1168,24 @@ export default function InspectionForm({
     if (!vehicleId) return alert("Missing vehicle ID in the URL.");
 
     const m = Number(mileage);
+    const teammateName = teammateNameLocked
+      ? (currentUserDisplayName || employee).trim()
+      : employee.trim();
     if (!inspectionDate) return alert("Inspection date is required.");
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
-    if (!employee.trim()) return alert("Teammate is required.");
+    if (!teammateName) return alert("Teammate is required.");
     if (!inspectionStatus) return alert("Inspection status is required.");
+    if (requiresLeadApproval) {
+      if (!selectableLeadApproverOptions.length) {
+        return alert("This asset requires team lead approval, but no approver is available.");
+      }
+      if (!effectiveLeadApproverId) {
+        return alert("Select a Team Lead approver before submitting.");
+      }
+      if (!selectableLeadApproverOptions.some((row) => row.id === effectiveLeadApproverId)) {
+        return alert("Selected Team Lead approver is no longer available. Select another approver.");
+      }
+    }
 
     if (hasInspectionFailures && !notes.trim())
       return alert("Notes are required when any item is marked Fail or mileage consistency fails.");
@@ -1122,12 +1272,26 @@ export default function InspectionForm({
       defectsFound: hasInspectionFailures,
       inspectionStatus,
       notes: notes.trim(),
-      employee: employee.trim(),
+      employee: teammateName,
       inspectionDate,
       employeeSignature: employeeSignature.trim(),
       managerSignature: managerSignature.trim()
         ? managerSignature.trim()
         : undefined,
+      crewMembers: selectedCrewMembers.map((row) => ({
+        id: row.id,
+        nickname: row.nickname,
+        first_name: row.first_name,
+        middle_initial: row.middle_initial,
+        last_name: row.last_name,
+        full_name: row.full_name,
+        role: row.role,
+        department: row.department,
+      })),
+      leadApproval: {
+        required: requiresLeadApproval,
+        approverId: requiresLeadApproval ? effectiveLeadApproverId : null,
+      },
       dashLightsOn,
       itemExtraValues,
       failRequestLinks,
@@ -1179,26 +1343,31 @@ export default function InspectionForm({
     };
 
     const supabase = createSupabaseBrowser();
-    const leadStatus = "approved";
-    const leadApprovedAt = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    const leadStatus = requiresLeadApproval ? "pending" : "approved";
+    const leadRequestedAt = requiresLeadApproval ? nowIso : null;
+    const leadApprovedAt = requiresLeadApproval ? null : nowIso;
 
-    const { data: authDataForLead } = await supabase.auth.getUser();
-    const currentUserId = authDataForLead.user?.id ?? null;
+    let submitterUserId = currentUserId;
+    if (!submitterUserId) {
+      const { data: authDataForLead } = await supabase.auth.getUser();
+      submitterUserId = authDataForLead.user?.id ?? null;
+    }
 
     const { data: insertedInspection, error } = await supabase
       .from("inspections")
       .insert({
         vehicle_id: vehicleId,
         inspection_type: type === "pre-trip" ? "Pre-Trip" : "Post-Trip",
-        submitted_by_user_id: currentUserId,
+        submitted_by_user_id: submitterUserId,
         checklist,
         overall_status: inspectionStatus,
         mileage: m,
-        lead_approver_id: null,
+        lead_approver_id: requiresLeadApproval ? effectiveLeadApproverId : null,
         lead_approval_status: leadStatus,
-        lead_approval_requested_at: null,
+        lead_approval_requested_at: leadRequestedAt,
         lead_approved_at: leadApprovedAt,
-        lead_approved_by: currentUserId,
+        lead_approved_by: requiresLeadApproval ? null : submitterUserId,
       })
       .select("id")
       .single();
@@ -1207,6 +1376,21 @@ export default function InspectionForm({
       console.error("Inspection insert failed:", error);
       setSubmitError(error.message);
       return;
+    }
+
+    if (requiresLeadApproval && insertedInspection?.id) {
+      try {
+        await fetch("/api/inspections/lead-approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "request",
+            inspectionId: insertedInspection.id,
+          }),
+        });
+      } catch (requestError) {
+        console.error("Failed requesting lead approval notification:", requestError);
+      }
     }
 
     const vehicleMileageSync = await syncVehicleMileageForward({
@@ -1333,10 +1517,141 @@ export default function InspectionForm({
                 value={employee}
                 onChange={(e) => setEmployee(e.target.value)}
                 placeholder="Teammate name"
-                style={inputStyle()}
+                disabled={teammateNameLocked}
+                style={{
+                  ...inputStyle(),
+                  ...(teammateNameLocked
+                    ? {
+                        cursor: "not-allowed",
+                        opacity: 0.84,
+                      }
+                    : null),
+                }}
               />
+              {teammateNameLocked ? (
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.72 }}>
+                  Locked to the signed-in account for this role.
+                </div>
+              ) : null}
             </div>
           </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 12,
+              padding: 12,
+              background: "rgba(255,255,255,0.02)",
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            <div style={{ fontWeight: 800 }}>Crew (Joint Accountability)</div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>
+              Add teammates who were also on this run. Crew members are recorded on this inspection but do not sign this form.
+            </div>
+            {selectedCrewMembers.length === 0 ? (
+              <div style={{ fontSize: 12, opacity: 0.72 }}>No crew teammates added.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {selectedCrewMembers.map((row) => (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      padding: 8,
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div>
+                      <strong>{employeeBadgePrimary(row)}</strong>
+                      <span style={{ opacity: 0.72 }}> · {employeeBadgeSecondary(row)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      style={secondaryButtonStyle()}
+                      onClick={() => removeCrewMember(row.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(220px, 1fr) auto",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              <select
+                value={crewPickerId}
+                onChange={(e) => setCrewPickerId(e.target.value)}
+                style={inputStyle()}
+              >
+                <option value="">Select teammate...</option>
+                {availableCrewOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {employeeBadgePrimary(row)} - {employeeBadgeSecondary(row)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={buttonStyle()}
+                onClick={() => {
+                  if (!crewPickerId) return;
+                  addCrewMember(crewPickerId);
+                  setCrewPickerId("");
+                }}
+              >
+                Add Teammate
+              </button>
+            </div>
+          </div>
+
+          {requiresLeadApproval ? (
+            <div
+              style={{
+                marginTop: 12,
+                border: "1px solid rgba(255,180,120,0.35)",
+                borderRadius: 12,
+                padding: 12,
+                background: "rgba(255,180,120,0.08)",
+              }}
+            >
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Team Lead Approval Required</div>
+              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
+                One or more accountable teammates are below Team Lead on a specified asset. Select a Team Lead approver before submitting.
+              </div>
+              <select
+                value={effectiveLeadApproverId}
+                onChange={(e) => setLeadApproverId(e.target.value)}
+                style={inputStyle()}
+              >
+                <option value="">Select team lead approver...</option>
+                {selectableLeadApproverOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {employeeBadgePrimary(row)} - {employeeBadgeSecondary(row)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {peopleLoadError ? (
+            <div style={{ marginTop: 10, color: "#ff9d9d", fontSize: 12 }}>
+              {peopleLoadError}
+            </div>
+          ) : null}
         </div>
 
         {/* Sections */}
