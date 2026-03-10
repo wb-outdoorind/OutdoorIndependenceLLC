@@ -12,6 +12,7 @@ import {
   writeRoleViewOverride,
   type AppRole,
 } from "@/lib/roleView";
+import { isMechanicOrHigher } from "@/lib/roles";
 
 export default function AppTopNavLinks() {
   const pathname = usePathname();
@@ -27,39 +28,71 @@ export default function AppTopNavLinks() {
 
   useEffect(() => {
     let active = true;
+    let timer: number | null = null;
+    let inFlight = false;
+
     async function load() {
-      const [res, approvalsRes] = await Promise.all([
-        fetch("/api/notifications", { method: "GET" }),
-        fetch("/api/inspections/lead-approvals?summary=1", { method: "GET" }),
-      ]);
-      const json = await res.json().catch(() => ({}));
-      const approvalsJson = await approvalsRes.json().catch(() => ({}));
-      if (!active) return;
-      if (res.ok) {
-        setUnreadCount(Number(json.unreadCount || 0));
-      }
-      if (approvalsRes.ok) {
-        setIsLead(approvalsJson.isLead === true);
-        setPendingApprovals(
-          ((approvalsJson.pending ?? []) as Array<{
-            id: string;
-            inspectionType: string;
-            vehicleId: string;
-            teammateName: string;
-          }>).slice(0, 1)
-        );
-      } else {
+      if (!active || inFlight) return;
+      inFlight = true;
+      try {
+        const [res, approvalsRes] = await Promise.all([
+          fetch("/api/notifications", { method: "GET" }),
+          fetch("/api/inspections/lead-approvals?summary=1", { method: "GET" }),
+        ]);
+        const json = await res.json().catch(() => ({}));
+        const approvalsJson = await approvalsRes.json().catch(() => ({}));
+        if (!active) return;
+        if (res.ok) {
+          setUnreadCount(Number(json.unreadCount || 0));
+        }
+        if (approvalsRes.ok) {
+          setIsLead(approvalsJson.isLead === true);
+          setPendingApprovals(
+            ((approvalsJson.pending ?? []) as Array<{
+              id: string;
+              inspectionType: string;
+              vehicleId: string;
+              teammateName: string;
+            }>).slice(0, 1)
+          );
+        } else {
+          setIsLead(false);
+          setPendingApprovals([]);
+        }
+      } catch {
+        if (!active) return;
         setIsLead(false);
         setPendingApprovals([]);
+      } finally {
+        inFlight = false;
       }
     }
+
+    function scheduleNext(ms = 30_000) {
+      if (!active) return;
+      timer = window.setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          void load();
+        }
+        scheduleNext(30_000);
+      }, ms);
+    }
+
+    function onVisibilityOrFocus() {
+      if (document.visibilityState === "visible") {
+        void load();
+      }
+    }
+
     void load();
-    const timer = window.setInterval(() => {
-      void load();
-    }, 30000);
+    scheduleNext();
+    window.addEventListener("focus", onVisibilityOrFocus);
+    document.addEventListener("visibilitychange", onVisibilityOrFocus);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener("focus", onVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", onVisibilityOrFocus);
     };
   }, []);
 
@@ -138,11 +171,7 @@ export default function AppTopNavLinks() {
       viewAsRole &&
       viewAsRole !== actualRole
   );
-  const canViewAudit =
-    actualRole === "owner" ||
-    actualRole === "operations_manager" ||
-    actualRole === "office_admin" ||
-    actualRole === "mechanic";
+  const canViewAudit = isMechanicOrHigher(actualRole);
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
   const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");

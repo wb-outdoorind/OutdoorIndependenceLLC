@@ -8,6 +8,12 @@ import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { canAccessRoute } from "@/lib/routeAccess";
 import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
+import {
+  isManagementRole,
+  isMechanicOrHigher,
+  isTeammateRole,
+  TEAMMATE_ROLES,
+} from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -452,15 +458,9 @@ export default async function Home() {
         .sort((a, b) => new Date(b.preTripAt).getTime() - new Date(a.preTripAt).getTime());
     }
 
-    const isLeadership =
-      role === "owner" || role === "operations_manager" || role === "office_admin";
+    const isLeadership = isManagementRole(role);
     const isMechanic = role === "mechanic";
-    const isTeammateOpsRole =
-      role === "apprentice" ||
-      role === "team_member_1" ||
-      role === "team_member_2" ||
-      role === "team_lead_1" ||
-      role === "team_lead_2";
+    const isTeammateOpsRole = isTeammateRole(role);
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
     const canViewPurchases = canAccessRoute(role, "purchases");
 
@@ -522,7 +522,7 @@ export default async function Home() {
         supabase
           .from("profiles")
           .select("id,full_name,email,role")
-          .in("role", ["apprentice", "team_member_1", "team_member_2", "team_lead_1", "team_lead_2"])
+          .in("role", [...TEAMMATE_ROLES])
           .eq("status", "Active"),
         supabase
           .from("inspections")
@@ -715,7 +715,7 @@ export default async function Home() {
     }
     canExpandDashboard = Boolean(isLeadership && teammateOpsStats);
 
-    if (role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic") {
+    if (isMechanicOrHigher(role)) {
       tiles = [
         ...tiles,
         {

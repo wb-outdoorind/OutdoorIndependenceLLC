@@ -169,7 +169,7 @@ async function askOpenAI(params: {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `copilot-prompt:ip:${ip}`,
     limit: 24,
     windowMs: 60_000,
@@ -191,7 +191,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not authorized for copilot" }, { status: 403 });
   }
 
-  const userLimit = evaluateRateLimit({
+  const userLimit = await evaluateRateLimit({
     key: `copilot-prompt:user:${userId}`,
     limit: 24,
     windowMs: 60_000,

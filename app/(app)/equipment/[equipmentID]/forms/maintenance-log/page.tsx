@@ -4,6 +4,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { loadEquipmentContext } from "@/lib/assetContext";
+import { syncEquipmentHoursForward } from "@/lib/assetReadings";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
@@ -600,30 +601,13 @@ export default function EquipmentMaintenanceLogPage() {
       }
     }
 
-    try {
-      const { data: equipmentRow, error: equipmentReadError } = await supabase
-        .from("equipment")
-        .select("current_hours")
-        .eq("id", equipmentId)
-        .maybeSingle();
-      if (equipmentReadError) {
-        console.error("Failed to read equipment hours:", equipmentReadError);
-      } else {
-        const existingHours = Number(equipmentRow?.current_hours ?? 0);
-        const nextHours =
-          Number.isFinite(existingHours) && existingHours > 0
-            ? Math.max(existingHours, h)
-            : h;
-        const { error: equipmentUpdateError } = await supabase
-          .from("equipment")
-          .update({ current_hours: nextHours })
-          .eq("id", equipmentId);
-        if (equipmentUpdateError) {
-          console.error("Failed to update equipment hours:", equipmentUpdateError);
-        }
-      }
-    } catch (equipmentHoursError) {
-      console.error("Unexpected equipment hours sync error:", equipmentHoursError);
+    const equipmentHoursSync = await syncEquipmentHoursForward({
+      supabase,
+      equipmentId,
+      hours: h,
+    });
+    if (!equipmentHoursSync.ok) {
+      console.error("Equipment hours sync error:", equipmentHoursSync.message);
     }
 
     if (partsUsed.length > 0) {

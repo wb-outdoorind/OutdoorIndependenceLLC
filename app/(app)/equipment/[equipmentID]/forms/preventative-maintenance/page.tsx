@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { syncEquipmentHoursForward as syncEquipmentHoursForwardShared } from "@/lib/assetReadings";
 import {
   confirmLeaveForm,
   getSignedInDisplayName,
@@ -566,31 +567,13 @@ export default function EquipmentPreventativeMaintenancePage() {
     nextHours: number | null
   ) {
     if (!Number.isFinite(Number(nextHours)) || (nextHours ?? 0) < 0) return;
-    try {
-      const { data: equipmentRow, error: equipmentReadError } = await supabase
-        .from("equipment")
-        .select("current_hours")
-        .eq("id", equipmentRef)
-        .maybeSingle();
-      if (equipmentReadError) {
-        console.error("Failed to read equipment hours:", equipmentReadError);
-        return;
-      }
-      const existingHours = Number(equipmentRow?.current_hours ?? 0);
-      const targetHours = Number(nextHours);
-      const syncedHours =
-        Number.isFinite(existingHours) && existingHours > 0
-          ? Math.max(existingHours, targetHours)
-          : targetHours;
-      const { error: equipmentUpdateError } = await supabase
-        .from("equipment")
-        .update({ current_hours: syncedHours })
-        .eq("id", equipmentRef);
-      if (equipmentUpdateError) {
-        console.error("Failed to update equipment hours:", equipmentUpdateError);
-      }
-    } catch (equipmentHoursError) {
-      console.error("Unexpected equipment hours sync error:", equipmentHoursError);
+    const syncResult = await syncEquipmentHoursForwardShared({
+      supabase,
+      equipmentId: equipmentRef,
+      hours: Number(nextHours),
+    });
+    if (!syncResult.ok) {
+      console.error("Equipment hours sync error:", syncResult.message);
     }
   }
 

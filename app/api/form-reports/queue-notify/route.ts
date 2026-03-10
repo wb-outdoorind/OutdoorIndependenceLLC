@@ -21,7 +21,7 @@ function rolesForResolve() {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `queue-notify:ip:${ip}`,
     limit: 50,
     windowMs: 60_000,
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   const session = await getCurrentUserProfileStrict();
   const actorId = session?.user?.id;
   if (!actorId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `queue-notify:user:${actorId}`,
     limit: 120,
     windowMs: 60_000,

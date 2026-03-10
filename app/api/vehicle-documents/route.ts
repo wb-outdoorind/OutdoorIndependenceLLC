@@ -38,7 +38,7 @@ function isPdfUpload(file: File) {
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `vehicle-documents:get:ip:${ip}`,
     limit: 120,
     windowMs: 60_000,
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `vehicle-documents:get:user:${session.user.id}`,
     limit: 240,
     windowMs: 60_000,
@@ -77,7 +77,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `vehicle-documents:post:ip:${ip}`,
     limit: 30,
     windowMs: 60_000,
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `vehicle-documents:post:user:${session.user.id}`,
     limit: 60,
     windowMs: 60_000,

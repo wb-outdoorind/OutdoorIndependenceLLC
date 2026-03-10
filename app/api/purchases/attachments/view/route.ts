@@ -12,7 +12,7 @@ function asString(value: unknown) {
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `purchases-attachments:view:ip:${ip}`,
     limit: 160,
     windowMs: 60_000,
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!canAccessPurchases(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `purchases-attachments:view:user:${userId}`,
     limit: 240,
     windowMs: 60_000,

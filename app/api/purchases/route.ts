@@ -683,7 +683,7 @@ async function notifyRoles(
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `purchases:get:ip:${ip}`,
     limit: 120,
     windowMs: 60_000,
@@ -696,7 +696,7 @@ export async function GET(req: Request) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!canAccessPurchases(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `purchases:get:user:${userId}`,
     limit: 240,
     windowMs: 60_000,
@@ -853,7 +853,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `purchases:post:ip:${ip}`,
     limit: 50,
     windowMs: 60_000,
@@ -866,7 +866,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!canCreatePurchaseRequest(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `purchases:post:user:${userId}`,
     limit: 120,
     windowMs: 60_000,
@@ -1055,7 +1055,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `purchases:patch:ip:${ip}`,
     limit: 80,
     windowMs: 60_000,
@@ -1068,7 +1068,7 @@ export async function PATCH(req: Request) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!canAccessPurchases(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `purchases:patch:user:${userId}`,
     limit: 120,
     windowMs: 60_000,

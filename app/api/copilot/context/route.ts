@@ -36,7 +36,7 @@ function toPayload(value: unknown) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `copilot-context:ip:${ip}`,
     limit: 180,
     windowMs: 60_000,
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not authorized for copilot" }, { status: 403 });
   }
 
-  const userLimit = evaluateRateLimit({
+  const userLimit = await evaluateRateLimit({
     key: `copilot-context:user:${userId}`,
     limit: 180,
     windowMs: 60_000,

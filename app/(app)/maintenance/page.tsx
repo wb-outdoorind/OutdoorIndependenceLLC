@@ -10,6 +10,7 @@ import {
   type MaintenanceRequestStatus,
 } from "@/lib/maintenanceStatus";
 import { getMaintenanceRequestSla, type SlaLevel } from "@/lib/sla";
+import { isMechanicOrHigher } from "@/lib/roles";
 
 type Urgency = "Low" | "Medium" | "High" | "Urgent";
 type RequestStatus = MaintenanceRequestStatus;
@@ -269,9 +270,7 @@ export default function MaintenanceCenterPage() {
         readRoleViewOverride()
       ) as Role;
       setUserRole(role);
-      setCanViewOperations(
-        role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
-      );
+      setCanViewOperations(isMechanicOrHigher(role));
       setRoleResolved(true);
     })();
 

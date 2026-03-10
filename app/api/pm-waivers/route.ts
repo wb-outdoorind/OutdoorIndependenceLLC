@@ -3,6 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { writeServerAudit } from "@/lib/auditServer";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
+import { isMechanicOrHigher } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
@@ -17,18 +18,9 @@ function parseUnit(value: unknown): Unit | null {
   return value === "miles" || value === "hours" ? value : null;
 }
 
-function canWaivePm(role: string | null | undefined) {
-  return (
-    role === "owner" ||
-    role === "operations_manager" ||
-    role === "office_admin" ||
-    role === "mechanic"
-  );
-}
-
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `pm-waivers-post:ip:${ip}`,
     limit: 30,
     windowMs: 60_000,
@@ -39,9 +31,9 @@ export async function POST(req: Request) {
   const userId = session?.user?.id ?? null;
   const role = session?.profile?.role ?? null;
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  if (!canWaivePm(role)) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+  if (!isMechanicOrHigher(role)) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `pm-waivers-post:user:${userId}`,
     limit: 40,
     windowMs: 60_000,

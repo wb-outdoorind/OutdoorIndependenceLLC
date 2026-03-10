@@ -21,6 +21,7 @@ import {
   type PurchaseMethod,
   type PurchaseTimeline,
 } from "@/lib/purchases";
+import { asStickyTableHeader } from "@/lib/tableStyles";
 
 type PurchaseRequestRow = {
   id: string;
@@ -1411,7 +1412,7 @@ export default function PurchasesClient({
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontWeight: 900, marginBottom: 8 }}>Requested Items</div>
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                     <thead>
                       <tr>
                         <th style={thStyle}>Item</th>
@@ -1722,11 +1723,13 @@ export default function PurchasesClient({
 }
 
 const thStyle: React.CSSProperties = {
+  ...asStickyTableHeader({
   textAlign: "left",
   padding: "10px 8px",
   borderBottom: "1px solid rgba(255,255,255,0.15)",
   whiteSpace: "nowrap",
   fontSize: 13,
+}),
 };
 
 const tdStyle: React.CSSProperties = {

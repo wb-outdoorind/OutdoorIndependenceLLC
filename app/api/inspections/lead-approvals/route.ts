@@ -102,7 +102,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `lead-approvals-post:ip:${ip}`,
     limit: 30,
     windowMs: 60_000,
@@ -113,7 +113,7 @@ export async function POST(req: Request) {
   const userId = session?.user?.id ?? null;
   const role = session?.profile?.role ?? null;
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `lead-approvals-post:user:${userId}`,
     limit: 60,
     windowMs: 60_000,

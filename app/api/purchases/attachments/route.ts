@@ -40,7 +40,7 @@ function isAllowedUpload(file: File) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `purchases-attachments:post:ip:${ip}`,
     limit: 60,
     windowMs: 60_000,
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!canAccessPurchases(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `purchases-attachments:post:user:${userId}`,
     limit: 120,
     windowMs: 60_000,

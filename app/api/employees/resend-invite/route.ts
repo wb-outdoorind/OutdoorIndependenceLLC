@@ -10,7 +10,7 @@ const TEMP_PASSWORD = "Outdoor2026!";
 export async function POST(req: Request) {
   try {
     const ip = readClientIp(req);
-    const routeLimit = evaluateRateLimit({
+    const routeLimit = await evaluateRateLimit({
       key: `resend-invite:ip:${ip}`,
       limit: 15,
       windowMs: 60_000,
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
 
     const session = await getCurrentUserProfileStrict();
     const userId = session?.user?.id ?? "anonymous";
-    const actorLimit = evaluateRateLimit({
+    const actorLimit = await evaluateRateLimit({
       key: `resend-invite:user:${userId}`,
       limit: 30,
       windowMs: 60_000,

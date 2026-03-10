@@ -41,7 +41,7 @@ function parseNamePartsFromFullName(fullName: string) {
 export async function POST(req: Request) {
   try {
     const ip = readClientIp(req);
-    const routeLimit = evaluateRateLimit({
+    const routeLimit = await evaluateRateLimit({
       key: `invite:ip:${ip}`,
       limit: 10,
       windowMs: 60_000,
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
 
     const session = await getCurrentUserProfileStrict();
     const requesterId = session?.user?.id ?? "anonymous";
-    const actorLimit = evaluateRateLimit({
+    const actorLimit = await evaluateRateLimit({
       key: `invite:user:${requesterId}`,
       limit: 20,
       windowMs: 60_000,

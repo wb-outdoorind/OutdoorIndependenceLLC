@@ -11,6 +11,7 @@ import {
   useUnsavedChangesState,
 } from "@/lib/forms";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { syncVehicleMileageForward } from "@/lib/assetReadings";
 
 type PMChoice = "" | "pass" | "fail" | "na";
 type YesNo = "" | "yes" | "no";
@@ -429,29 +430,16 @@ export default function VehiclePreventativeMaintenanceForm() {
         return;
       }
 
-      const { data: vehicleRow, error: vehicleReadError } = await supabase
-        .from("vehicles")
-        .select("mileage")
-        .eq("id", vehicleId)
-        .maybeSingle();
-      if (vehicleReadError) {
-        console.error("Failed to read vehicle mileage:", vehicleReadError);
-      } else {
-        const existingMileage = Number(vehicleRow?.mileage ?? 0);
-        const nextMileage =
-          Number.isFinite(existingMileage) && existingMileage > 0
-            ? Math.max(existingMileage, m)
-            : m;
-        const { error: vehicleUpdateError } = await supabase
-          .from("vehicles")
-          .update({ mileage: nextMileage })
-          .eq("id", vehicleId);
-        if (vehicleUpdateError) {
-          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
-        }
+      const vehicleMileageSync = await syncVehicleMileageForward({
+        supabase,
+        vehicleId,
+        mileage: m,
+      });
+      if (!vehicleMileageSync.ok) {
+        console.error("Vehicle mileage sync error:", vehicleMileageSync.message);
       }
-    } catch (vehicleMileageError) {
-      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
+    } catch (pmSaveError) {
+      console.error("Unexpected vehicle PM save error:", pmSaveError);
     }
 
     requestFormDraftClear();

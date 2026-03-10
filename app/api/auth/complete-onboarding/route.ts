@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     const ip = readClientIp(req);
-    const routeLimit = evaluateRateLimit({
+    const routeLimit = await evaluateRateLimit({
       key: `complete-onboarding:ip:${ip}`,
       limit: 25,
       windowMs: 60_000,
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
-    const actorLimit = evaluateRateLimit({
+    const actorLimit = await evaluateRateLimit({
       key: `complete-onboarding:user:${userId}`,
       limit: 8,
       windowMs: 60_000,

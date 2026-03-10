@@ -4,6 +4,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { loadVehicleContext } from "@/lib/assetContext";
+import { syncVehicleMileageForward } from "@/lib/assetReadings";
 import { writeAudit } from "@/lib/audit";
 import {
   confirmLeaveForm,
@@ -824,31 +825,13 @@ export default function MaintenanceLogPage() {
       });
     }
 
-    // update vehicle mileage (only forward)
-    try {
-      const { data: vehicleRow, error: vehicleReadError } = await supabase
-        .from("vehicles")
-        .select("mileage")
-        .eq("id", vehicleId)
-        .maybeSingle();
-      if (vehicleReadError) {
-        console.error("Failed to read vehicle mileage:", vehicleReadError);
-      } else {
-        const existingMileage = Number(vehicleRow?.mileage ?? 0);
-        const nextMileage =
-          Number.isFinite(existingMileage) && existingMileage > 0
-            ? Math.max(existingMileage, m)
-            : m;
-        const { error: vehicleUpdateError } = await supabase
-          .from("vehicles")
-          .update({ mileage: nextMileage })
-          .eq("id", vehicleId);
-        if (vehicleUpdateError) {
-          console.error("Failed to update vehicle mileage:", vehicleUpdateError);
-        }
-      }
-    } catch (vehicleMileageError) {
-      console.error("Unexpected vehicle mileage sync error:", vehicleMileageError);
+    const vehicleMileageSync = await syncVehicleMileageForward({
+      supabase,
+      vehicleId,
+      mileage: m,
+    });
+    if (!vehicleMileageSync.ok) {
+      console.error("Vehicle mileage sync error:", vehicleMileageSync.message);
     }
 
     requestFormDraftClear();

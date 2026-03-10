@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { asStickyTableHeader } from "@/lib/tableStyles";
 
 type LedgerReason = "all" | "usage" | "restock" | "adjustment" | "transfer";
 type RefTypeFilter = "all" | "maintenance_log" | "vehicle" | "equipment" | "other";
@@ -404,15 +405,12 @@ const tableStyle: React.CSSProperties = {
 };
 
 const thStyle: React.CSSProperties = {
+  ...asStickyTableHeader({
   textAlign: "left",
   padding: "10px 8px",
   borderBottom: "1px solid rgba(255,255,255,0.18)",
   opacity: 0.8,
-  position: "sticky",
-  top: "var(--table-sticky-top)",
-  zIndex: 30,
-  background: "var(--topnav-bg)",
-  backdropFilter: "blur(2px)",
+}),
 };
 
 const tdStyle: React.CSSProperties = {

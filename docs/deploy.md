@@ -71,6 +71,10 @@ Project settings must contain:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET` (for cron-protected endpoints)
 
+Optional but recommended for production-stable API rate limits (shared across instances):
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
 ## 5) Database Migrations (when schema changed)
 
 If you added a migration under `supabase/migrations`:

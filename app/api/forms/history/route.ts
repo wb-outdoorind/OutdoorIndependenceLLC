@@ -215,7 +215,7 @@ function encodeFocus(type: string, id: string) {
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `forms-history:ip:${ip}`,
     limit: 120,
     windowMs: 60_000,
@@ -227,7 +227,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `forms-history:user:${session.user.id}`,
     limit: 300,
     windowMs: 60_000,

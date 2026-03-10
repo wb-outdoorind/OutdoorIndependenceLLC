@@ -38,7 +38,7 @@ function normalizeDepartment(value: string | null | undefined) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `employees-avatar-urls:post:ip:${ip}`,
     limit: 30,
     windowMs: 60_000,
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     typeof session?.profile?.department === "string" ? session.profile.department : null
   );
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `employees-avatar-urls:post:user:${userId}`,
     limit: 60,
     windowMs: 60_000,

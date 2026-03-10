@@ -1,24 +1,12 @@
-export type Role =
-  | "owner"
-  | "operations_manager"
-  | "office_admin"
-  | "mechanic"
-  | "apprentice"
-  | "employee"
-  | "team_lead_1"
-  | "team_lead_2"
-  | "team_member_1"
-  | "team_member_2";
+import type { AppRole } from "@/lib/roleView";
+import { isManagementRole, isMechanicOrHigher } from "@/lib/roles";
+
+export type Role = AppRole;
 
 export function canCreateMaintenanceLog(role: Role) {
-  return (
-    role === "owner" ||
-    role === "operations_manager" ||
-    role === "office_admin" ||
-    role === "mechanic"
-  );
+  return isMechanicOrHigher(role);
 }
 
 export function canManageEmployees(role: Role) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin";
+  return isManagementRole(role);
 }

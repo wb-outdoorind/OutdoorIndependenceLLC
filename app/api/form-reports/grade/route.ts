@@ -400,7 +400,7 @@ function gradeEquipmentMaintenanceRequest(row: {
 export async function POST(req: Request) {
   try {
     const ip = readClientIp(req);
-    const routeLimit = evaluateRateLimit({
+    const routeLimit = await evaluateRateLimit({
       key: `form-grades:ip:${ip}`,
       limit: 80,
       windowMs: 60_000,
@@ -411,7 +411,7 @@ export async function POST(req: Request) {
     if (!session?.user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
-    const actorLimit = evaluateRateLimit({
+    const actorLimit = await evaluateRateLimit({
       key: `form-grades:user:${session.user.id}`,
       limit: 240,
       windowMs: 60_000,

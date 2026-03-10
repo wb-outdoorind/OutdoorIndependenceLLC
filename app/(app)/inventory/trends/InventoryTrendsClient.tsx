@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { asStickyTableHeader } from "@/lib/tableStyles";
 
 type TrendsView = "overview" | "items" | "categories" | "reference" | "location";
 
@@ -122,15 +123,12 @@ const tableStyle: React.CSSProperties = {
 };
 
 const thStyle: React.CSSProperties = {
+  ...asStickyTableHeader({
   textAlign: "left",
   padding: "10px 8px",
   borderBottom: "1px solid rgba(255,255,255,0.18)",
   opacity: 0.8,
-  position: "sticky",
-  top: "var(--table-sticky-top)",
-  zIndex: 30,
-  background: "var(--topnav-bg)",
-  backdropFilter: "blur(2px)",
+}),
 };
 
 const tdStyle: React.CSSProperties = {

@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `equipment-documents:view:ip:${ip}`,
     limit: 120,
     windowMs: 60_000,
@@ -19,7 +19,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `equipment-documents:view:user:${session.user.id}`,
     limit: 240,
     windowMs: 60_000,

@@ -8,6 +8,7 @@ import {
   isMaintenanceClosedStatus,
 } from "@/lib/maintenanceStatus";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { asStickyTableHeader } from "@/lib/tableStyles";
 
 type OpsTab = "Overview" | "Preventative Maintenance Overview" | "Downtime" | "Failures" | "Performance";
 type PmBoardTab = "PM Due Board" | "PM Life Board";
@@ -2536,12 +2537,7 @@ const thStyle: React.CSSProperties = {
 };
 
 const thStickyStyle: React.CSSProperties = {
-  ...thStyle,
-  position: "sticky",
-  top: "var(--table-sticky-top)",
-  zIndex: 30,
-  background: "var(--topnav-bg)",
-  backdropFilter: "blur(2px)",
+  ...asStickyTableHeader(thStyle),
 };
 
 const tdStyle: React.CSSProperties = {

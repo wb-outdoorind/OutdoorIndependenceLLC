@@ -65,7 +65,7 @@ async function readCurrentPhotoPath(admin: ReturnType<typeof createSupabaseAdmin
 
 export async function GET(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `account-profile-photo:get:ip:${ip}`,
     limit: 120,
     windowMs: 60_000,
@@ -76,7 +76,7 @@ export async function GET(req: Request) {
   const userId = session?.user?.id ?? null;
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `account-profile-photo:get:user:${userId}`,
     limit: 240,
     windowMs: 60_000,
@@ -92,7 +92,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `account-profile-photo:post:ip:${ip}`,
     limit: 20,
     windowMs: 60_000,
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
   const userId = session?.user?.id ?? null;
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `account-profile-photo:post:user:${userId}`,
     limit: 40,
     windowMs: 60_000,
@@ -161,7 +161,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   const ip = readClientIp(req);
-  const routeLimit = evaluateRateLimit({
+  const routeLimit = await evaluateRateLimit({
     key: `account-profile-photo:delete:ip:${ip}`,
     limit: 20,
     windowMs: 60_000,
@@ -172,7 +172,7 @@ export async function DELETE(req: Request) {
   const userId = session?.user?.id ?? null;
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const actorLimit = evaluateRateLimit({
+  const actorLimit = await evaluateRateLimit({
     key: `account-profile-photo:delete:user:${userId}`,
     limit: 40,
     windowMs: 60_000,
