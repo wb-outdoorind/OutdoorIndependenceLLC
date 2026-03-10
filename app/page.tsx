@@ -479,9 +479,9 @@ export default async function Home() {
 
     if (canViewMaintenanceCenter) {
       const maintenanceTile = {
-        title: "Maintenance Center",
+        title: "Maintenance Operations Dashboard",
         href: "/maintenance",
-        desc: "Queue, PM planning, downtime, and maintenance operations",
+        desc: "Request queue, PM planning, downtime, and maintenance operations",
       };
       const notificationsIndex = tiles.findIndex((tile) => tile.title === "Notifications");
       tiles =
@@ -491,14 +491,16 @@ export default async function Home() {
     }
 
     if (canAccessRoute(role, "lead_approvals")) {
-      tiles = [
-        ...tiles,
-        {
-          title: "Form Audits",
-          href: "/approvals",
-          desc: "Review form sign-offs and pending lead approvals.",
-        },
-      ];
+      const auditsTile = {
+        title: "Audits",
+        href: "/approvals",
+        desc: "Review form sign-offs and pending lead approvals.",
+      };
+      const inventoryIndex = tiles.findIndex((tile) => tile.title === "Inventory");
+      tiles =
+        inventoryIndex >= 0
+          ? [...tiles.slice(0, inventoryIndex), auditsTile, ...tiles.slice(inventoryIndex)]
+          : [...tiles, auditsTile];
     }
 
     if (canAccessRoute(role, "audit_trail")) {
@@ -840,7 +842,7 @@ export default async function Home() {
           { label: "Accountability Flags", value: String(accountabilityFlags) },
         ],
         actions: [
-          { label: "Open Maintenance Center", href: "/maintenance" },
+          { label: "Open Maintenance Operations Dashboard", href: "/maintenance" },
           { label: "Create Blank PM", href: "/maintenance/pm/new" },
           { label: "Open Purchases", href: "/purchases" },
           { label: "Open Accountability Center", href: "/form-reports" },
@@ -876,7 +878,7 @@ export default async function Home() {
           { label: "Low Stock Parts", value: String(lowStockCount) },
         ],
         actions: [
-          { label: "Open Maintenance Center", href: "/maintenance" },
+          { label: "Open Maintenance Operations Dashboard", href: "/maintenance" },
           { label: "Create Blank PM", href: "/maintenance/pm/new" },
           { label: "Open Purchases", href: "/purchases" },
           { label: "Open Inventory", href: "/inventory" },
@@ -1078,7 +1080,7 @@ export default async function Home() {
                 >
                   {lowStockCount} Low
                 </div>
-              ) : role === "apprentice" && t.title === "Maintenance Center" ? (
+              ) : role === "apprentice" && t.title === "Maintenance Operations Dashboard" ? (
                 <div
                   style={{
                     fontSize: 12,
