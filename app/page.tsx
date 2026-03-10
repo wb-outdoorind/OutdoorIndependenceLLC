@@ -494,9 +494,9 @@ export default async function Home() {
       tiles = [
         ...tiles,
         {
-          title: "Approvals",
+          title: "Form Audits",
           href: "/approvals",
-          desc: "Review and sign off pending lead approvals.",
+          desc: "Review form sign-offs and pending lead approvals.",
         },
       ];
     }
@@ -505,7 +505,7 @@ export default async function Home() {
       tiles = [
         ...tiles,
         {
-          title: "Audit Trail",
+          title: "System Activity Log",
           href: "/audit",
           desc: "View system activity and change history.",
         },
@@ -974,6 +974,12 @@ export default async function Home() {
           { label: "Open Notifications", href: "/notifications" },
         ],
       };
+    }
+
+    const auditIndex = tiles.findIndex((tile) => tile.href === "/audit");
+    if (auditIndex >= 0 && auditIndex !== tiles.length - 1) {
+      const [auditTile] = tiles.splice(auditIndex, 1);
+      if (auditTile) tiles.push(auditTile);
     }
   } catch (error) {
     console.error("[dashboard] unexpected dashboard load error:", error);
