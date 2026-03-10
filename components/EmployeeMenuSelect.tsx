@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   employeeBadgeInitials,
   employeeBadgePrimary,
@@ -144,8 +144,10 @@ export default function EmployeeMenuSelect({
 }: EmployeeMenuSelectProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const queryInputRef = useRef<HTMLInputElement | null>(null);
+  const listboxId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
   const selected = useMemo(() => {
     const trimmed = value.trim();
@@ -159,15 +161,49 @@ export default function EmployeeMenuSelect({
     return options.filter((option) => employeeBadgeSearchText(option).includes(q));
   }, [options, query]);
 
+  const effectiveHighlightedIndex =
+    highlightedIndex >= 0 && highlightedIndex < filtered.length
+      ? highlightedIndex
+      : filtered.length > 0
+        ? 0
+        : -1;
+  const activeOptionId =
+    effectiveHighlightedIndex >= 0
+      ? `${listboxId}-opt-${filtered[effectiveHighlightedIndex]?.id}`
+      : undefined;
+
+  function closeMenu() {
+    setOpen(false);
+    setQuery("");
+    setHighlightedIndex(-1);
+  }
+
+  function openMenu(preferred: "selected" | "first" | "last" = "selected") {
+    if (disabled) return;
+    const list = options;
+    let nextIndex = -1;
+    if (preferred === "selected") {
+      const selectedIndex = list.findIndex((option) => option.id === value);
+      nextIndex = selectedIndex >= 0 ? selectedIndex : list.length > 0 ? 0 : -1;
+    } else if (preferred === "last") {
+      nextIndex = list.length - 1;
+    } else {
+      nextIndex = list.length > 0 ? 0 : -1;
+    }
+    setQuery("");
+    setHighlightedIndex(nextIndex);
+    setOpen(true);
+  }
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current) return;
       if (rootRef.current.contains(event.target as Node)) return;
-      setOpen(false);
+      closeMenu();
     };
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closeMenu();
     };
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onEscape);
@@ -188,9 +224,32 @@ export default function EmployeeMenuSelect({
       <button
         type="button"
         style={{ ...triggerBaseStyle, ...style }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
         onClick={() => {
+          if (open) {
+            closeMenu();
+            return;
+          }
+          openMenu("selected");
+        }}
+        onKeyDown={(event) => {
           if (disabled) return;
-          setOpen((prev) => !prev);
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            openMenu("first");
+            return;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            openMenu("last");
+            return;
+          }
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openMenu("selected");
+          }
         }}
         disabled={disabled}
       >
@@ -215,7 +274,52 @@ export default function EmployeeMenuSelect({
               ref={queryInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              aria-activedescendant={activeOptionId}
               placeholder="Search teammate..."
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeMenu();
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setHighlightedIndex((prev) => {
+                    const start = prev < 0 ? 0 : prev + 1;
+                    return Math.min(filtered.length - 1, start);
+                  });
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setHighlightedIndex((prev) => {
+                    if (prev < 0) return filtered.length - 1;
+                    return Math.max(0, prev - 1);
+                  });
+                  return;
+                }
+                if (event.key === "Home") {
+                  event.preventDefault();
+                  setHighlightedIndex(filtered.length > 0 ? 0 : -1);
+                  return;
+                }
+                if (event.key === "End") {
+                  event.preventDefault();
+                  setHighlightedIndex(filtered.length - 1);
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  const option = filtered[effectiveHighlightedIndex];
+                  if (!option) return;
+                  onChange(option.id);
+                  closeMenu();
+                }
+              }}
               style={{
                 width: "100%",
                 padding: "8px 10px",
@@ -226,34 +330,50 @@ export default function EmployeeMenuSelect({
               }}
             />
           </div>
-          <div style={{ maxHeight: 290, overflowY: "auto" }}>
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label={placeholder}
+            style={{ maxHeight: 290, overflowY: "auto" }}
+          >
             {allowClear ? (
-              <button
-                type="button"
+              <div
+                id={`${listboxId}-opt-clear`}
+                role="option"
+                aria-selected={!value}
                 style={optionButtonStyle}
+                onMouseEnter={() => setHighlightedIndex(-1)}
                 onClick={() => {
                   onChange("");
-                  setOpen(false);
+                  closeMenu();
                 }}
               >
                 <div style={{ opacity: 0.78 }}>{clearLabel}</div>
-              </button>
+              </div>
             ) : null}
-            {filtered.map((option) => (
-              <button
+            {filtered.map((option, index) => (
+              <div
                 key={option.id}
-                type="button"
+                id={`${listboxId}-opt-${option.id}`}
+                role="option"
+                aria-selected={value === option.id}
                 style={{
                   ...optionButtonStyle,
-                  background: value === option.id ? "rgba(120,180,255,0.15)" : "transparent",
+                  background:
+                    effectiveHighlightedIndex === index
+                      ? "rgba(120,180,255,0.2)"
+                      : value === option.id
+                        ? "rgba(120,180,255,0.15)"
+                        : "transparent",
                 }}
+                onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => {
                   onChange(option.id);
-                  setOpen(false);
+                  closeMenu();
                 }}
               >
                 <EmployeeBadgeRow option={option} avatarUrl={avatarUrlById?.[option.id]} />
-              </button>
+              </div>
             ))}
             {!filtered.length ? (
               <div style={{ padding: "10px 12px", opacity: 0.72 }}>No teammates found.</div>

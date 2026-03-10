@@ -5,11 +5,13 @@ import {
   rateLimitExceededResponse,
   readClientIp,
 } from "@/lib/apiRateLimit";
+import { normalizeRole } from "@/lib/roleView";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 const PROFILE_PHOTO_BUCKET = "profile_photos";
+const PRIVILEGED_ROLES = new Set(["owner", "operations_manager", "office_admin", "mechanic"]);
 
 function parseIds(input: unknown) {
   if (!Array.isArray(input)) return [] as string[];
@@ -24,6 +26,16 @@ type PreferenceRow = {
   profile_photo_path: string | null;
 };
 
+type ScopedProfileRow = {
+  id: string;
+  department: string | null;
+  status: string | null;
+};
+
+function normalizeDepartment(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export async function POST(req: Request) {
   const ip = readClientIp(req);
   const routeLimit = evaluateRateLimit({
@@ -36,6 +48,10 @@ export async function POST(req: Request) {
   const session = await getCurrentUserProfileStrict();
   const userId = session?.user?.id ?? null;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const requesterRole = normalizeRole(session?.profile?.role ?? null) ?? "employee";
+  const requesterDepartment = normalizeDepartment(
+    typeof session?.profile?.department === "string" ? session.profile.department : null
+  );
 
   const actorLimit = evaluateRateLimit({
     key: `employees-avatar-urls:post:user:${userId}`,
@@ -49,10 +65,28 @@ export async function POST(req: Request) {
   if (!ids.length) return NextResponse.json({ urls: {} });
 
   const admin = createSupabaseAdmin();
+  const { data: scopeRows, error: scopeError } = await admin
+    .from("profiles")
+    .select("id,department,status")
+    .in("id", ids);
+  if (scopeError) return NextResponse.json({ error: scopeError.message }, { status: 500 });
+
+  const canViewAll = PRIVILEGED_ROLES.has(requesterRole);
+  const scopedIds = ((scopeRows ?? []) as ScopedProfileRow[])
+    .filter((row) => {
+      if (row.id === userId) return true;
+      if (canViewAll) return true;
+      if ((row.status ?? "").trim().toLowerCase() !== "active") return false;
+      return Boolean(requesterDepartment) && normalizeDepartment(row.department) === requesterDepartment;
+    })
+    .map((row) => row.id);
+
+  if (!scopedIds.length) return NextResponse.json({ urls: {} });
+
   const { data, error } = await admin
     .from("user_ui_preferences")
     .select("user_id,profile_photo_path")
-    .in("user_id", ids);
+    .in("user_id", scopedIds);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const urls: Record<string, string> = {};

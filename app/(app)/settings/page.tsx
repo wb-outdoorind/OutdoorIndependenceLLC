@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import LogoutButton from "@/app/logout-button";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
@@ -129,23 +130,24 @@ export default function SettingsPage() {
           .select("theme,text_size,role_view_override,profile_photo_path")
           .eq("user_id", authData.user.id)
           .maybeSingle();
-        if (!active || !prefs) return;
+        if (!active) return;
+        if (prefs) {
+          const nextTheme = prefs.theme === "light" ? "light" : "dark";
+          const nextTextSize: AppTextSize =
+            prefs.text_size === "sm" || prefs.text_size === "md" || prefs.text_size === "lg"
+              ? prefs.text_size
+              : "md";
+          setTheme(nextTheme);
+          setTextSize(nextTextSize);
+          saveTheme(nextTheme);
+          saveTextSize(nextTextSize);
+          applyPreferences(nextTheme, nextTextSize);
 
-        const nextTheme = prefs.theme === "light" ? "light" : "dark";
-        const nextTextSize: AppTextSize =
-          prefs.text_size === "sm" || prefs.text_size === "md" || prefs.text_size === "lg"
-            ? prefs.text_size
-            : "md";
-        setTheme(nextTheme);
-        setTextSize(nextTextSize);
-        saveTheme(nextTheme);
-        saveTextSize(nextTextSize);
-        applyPreferences(nextTheme, nextTextSize);
-
-        const dbRoleView =
-          (prefs.role_view_override as AppRole | null | undefined) ?? null;
-        setViewAsRole(dbRoleView);
-        writeRoleViewOverride(dbRoleView);
+          const dbRoleView =
+            (prefs.role_view_override as AppRole | null | undefined) ?? null;
+          setViewAsRole(dbRoleView);
+          writeRoleViewOverride(dbRoleView);
+        }
 
         const { data: notificationPrefsRow } = await supabase
           .from("user_notification_prefs")
@@ -296,6 +298,7 @@ export default function SettingsPage() {
             style={{
               width: 120,
               height: 120,
+              position: "relative",
               borderRadius: 999,
               overflow: "hidden",
               border: "1px solid var(--surface-border)",
@@ -307,10 +310,13 @@ export default function SettingsPage() {
             }}
           >
             {profilePhotoUrl ? (
-              <img
+              <Image
                 src={profilePhotoUrl}
                 alt="Profile"
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                unoptimized
+                fill
+                sizes="120px"
+                style={{ objectFit: "cover" }}
               />
             ) : (
               <span>{deriveInitials(displayName || displayEmail || "U")}</span>
