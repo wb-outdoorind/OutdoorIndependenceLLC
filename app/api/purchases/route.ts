@@ -60,6 +60,17 @@ type PurchaseRequestRow = {
   ap_payment_method: string | null;
   ap_payment_method_other: string | null;
   ap_po_number: string | null;
+  detail_purchase_date: string | null;
+  detail_total_amount: number | string | null;
+  detail_purchase_method: string | null;
+  detail_purchase_method_other: string | null;
+  detail_purpose: string | null;
+  detail_reimbursable: boolean | null;
+  detail_receipt_attached: boolean | null;
+  detail_comments: string | null;
+  detail_manager_signature: string | null;
+  detail_manager_approved_date: string | null;
+  detail_submitted_at: string | null;
   overall_status: PurchaseOverallStatus;
   created_at: string;
   updated_at: string;
@@ -157,6 +168,9 @@ type MaintenanceLogLookupRow = {
   title: string | null;
   maintenance_request_id: string | null;
 };
+
+const PURCHASE_REQUEST_SELECT =
+  "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,detail_purchase_date,detail_total_amount,detail_purchase_method,detail_purchase_method_other,detail_purpose,detail_reimbursable,detail_receipt_attached,detail_comments,detail_manager_signature,detail_manager_approved_date,detail_submitted_at,overall_status,created_at,updated_at";
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -806,9 +820,7 @@ export async function GET(req: Request) {
   const admin = createSupabaseAdmin();
   let query = admin
     .from("purchase_requests")
-    .select(
-      "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-    )
+    .select(PURCHASE_REQUEST_SELECT)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -1068,9 +1080,7 @@ export async function POST(req: Request) {
   const { data: createdRequest, error: createError } = await admin
     .from("purchase_requests")
     .insert(payload)
-    .select(
-      "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-    )
+    .select(PURCHASE_REQUEST_SELECT)
     .single();
   if (createError || !createdRequest) {
     return NextResponse.json({ error: createError?.message || "Failed to create purchase request." }, { status: 500 });
@@ -1175,6 +1185,16 @@ export async function PATCH(req: Request) {
     paymentMethod?: string;
     paymentMethodOther?: string;
     poNumber?: string;
+    detailPurchaseDate?: string;
+    detailTotalAmount?: string | number;
+    detailPurchaseMethod?: string;
+    detailPurchaseMethodOther?: string;
+    detailPurpose?: string;
+    detailReimbursable?: boolean;
+    detailReceiptAttached?: boolean;
+    detailComments?: string;
+    detailManagerSignature?: string;
+    detailManagerApprovedDate?: string;
   };
 
   const id = asString(body.id);
@@ -1185,9 +1205,7 @@ export async function PATCH(req: Request) {
   const admin = createSupabaseAdmin();
   const { data: requestRowRaw, error: requestError } = await admin
     .from("purchase_requests")
-    .select(
-      "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-    )
+    .select(PURCHASE_REQUEST_SELECT)
     .eq("id", id)
     .maybeSingle();
   if (requestError) return NextResponse.json({ error: requestError.message }, { status: 500 });
@@ -1265,9 +1283,7 @@ export async function PATCH(req: Request) {
         overall_status: nextOverall,
       })
       .eq("id", requestRow.id)
-      .select(
-        "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-      )
+      .select(PURCHASE_REQUEST_SELECT)
       .single();
     if (updateRequestError || !updatedRequest) {
       return NextResponse.json({ error: updateRequestError?.message || "Failed to update request." }, { status: 500 });
@@ -1395,9 +1411,7 @@ export async function PATCH(req: Request) {
       .from("purchase_requests")
       .update(updatePayload)
       .eq("id", requestRow.id)
-      .select(
-        "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-      )
+      .select(PURCHASE_REQUEST_SELECT)
       .single();
     if (updateRequestError || !updatedRequest) {
       return NextResponse.json({ error: updateRequestError?.message || "Failed to update request." }, { status: 500 });
@@ -1453,13 +1467,78 @@ export async function PATCH(req: Request) {
       );
     }
 
+    const detailPurchaseDate = asDateOrNull(body.detailPurchaseDate);
+    if (!detailPurchaseDate) {
+      return NextResponse.json({ error: "Date of purchase is required." }, { status: 400 });
+    }
+
+    const detailTotalAmountRaw = body.detailTotalAmount;
+    const detailTotalAmountNumber = Number(detailTotalAmountRaw);
+    if (!Number.isFinite(detailTotalAmountNumber) || detailTotalAmountNumber < 0) {
+      return NextResponse.json({ error: "Total purchase amount must be a valid non-negative number." }, { status: 400 });
+    }
+    const detailTotalAmount = Number(detailTotalAmountNumber.toFixed(2));
+
+    const detailPurchaseMethod = asNullableString(body.detailPurchaseMethod);
+    if (!detailPurchaseMethod || !isPurchaseMethod(detailPurchaseMethod)) {
+      return NextResponse.json({ error: "Method of purchase is required." }, { status: 400 });
+    }
+    const detailPurchaseMethodOther =
+      detailPurchaseMethod === "Other" ? asNullableString(body.detailPurchaseMethodOther) : null;
+    if (detailPurchaseMethod === "Other" && !detailPurchaseMethodOther) {
+      return NextResponse.json({ error: "Please specify the Other purchase method." }, { status: 400 });
+    }
+
+    const detailPurpose = asNullableString(body.detailPurpose);
+    if (!detailPurpose) {
+      return NextResponse.json({ error: "Purpose of purchase is required." }, { status: 400 });
+    }
+
+    if (typeof body.detailReimbursable !== "boolean") {
+      return NextResponse.json({ error: "Please select if this is reimbursable." }, { status: 400 });
+    }
+    const detailReimbursable = body.detailReimbursable;
+
+    if (typeof body.detailReceiptAttached !== "boolean") {
+      return NextResponse.json({ error: "Please select whether a receipt is attached." }, { status: 400 });
+    }
+    const detailReceiptAttached = body.detailReceiptAttached;
+
+    const detailManagerSignature = asNullableString(body.detailManagerSignature);
+    const detailManagerApprovedDate = asDateOrNull(body.detailManagerApprovedDate);
+    if (detailReimbursable) {
+      if (!detailManagerSignature) {
+        return NextResponse.json(
+          { error: "Manager signature is required for reimbursable purchases." },
+          { status: 400 }
+        );
+      }
+      if (!detailManagerApprovedDate) {
+        return NextResponse.json(
+          { error: "Manager approval date is required for reimbursable purchases." },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: updatedRequest, error: updateError } = await admin
       .from("purchase_requests")
-      .update({ overall_status: "past_purchases" })
+      .update({
+        overall_status: "past_purchases",
+        detail_purchase_date: detailPurchaseDate,
+        detail_total_amount: detailTotalAmount,
+        detail_purchase_method: detailPurchaseMethod,
+        detail_purchase_method_other: detailPurchaseMethodOther,
+        detail_purpose: detailPurpose,
+        detail_reimbursable: detailReimbursable,
+        detail_receipt_attached: detailReceiptAttached,
+        detail_comments: asNullableString(body.detailComments),
+        detail_manager_signature: detailReimbursable ? detailManagerSignature : null,
+        detail_manager_approved_date: detailReimbursable ? detailManagerApprovedDate : null,
+        detail_submitted_at: new Date().toISOString(),
+      })
       .eq("id", requestRow.id)
-      .select(
-        "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
-      )
+      .select(PURCHASE_REQUEST_SELECT)
       .single();
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
@@ -1476,6 +1555,11 @@ export async function PATCH(req: Request) {
       afterData: updatedRequest,
       meta: {
         stage,
+        detailPurchaseDate,
+        detailTotalAmount,
+        detailPurchaseMethod,
+        detailReimbursable,
+        detailReceiptAttached,
       },
     });
 

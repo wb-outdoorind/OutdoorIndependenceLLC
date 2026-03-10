@@ -57,6 +57,17 @@ type PurchaseRequestRow = {
   ap_payment_method: string | null;
   ap_payment_method_other: string | null;
   ap_po_number: string | null;
+  detail_purchase_date: string | null;
+  detail_total_amount: number | string | null;
+  detail_purchase_method: string | null;
+  detail_purchase_method_other: string | null;
+  detail_purpose: string | null;
+  detail_reimbursable: boolean | null;
+  detail_receipt_attached: boolean | null;
+  detail_comments: string | null;
+  detail_manager_signature: string | null;
+  detail_manager_approved_date: string | null;
+  detail_submitted_at: string | null;
   overall_status:
     | "waiting_operations_manager_approval"
     | "waiting_ap_department_approval"
@@ -379,6 +390,17 @@ export default function PurchasesClient({
   const [apPoNumber, setApPoNumber] = useState("");
   const [apDecisions, setApDecisions] = useState<Record<string, ApDecisionDraft>>({});
 
+  const [detailPurchaseDate, setDetailPurchaseDate] = useState("");
+  const [detailTotalAmount, setDetailTotalAmount] = useState("");
+  const [detailPurchaseMethod, setDetailPurchaseMethod] = useState("");
+  const [detailPurchaseMethodOther, setDetailPurchaseMethodOther] = useState("");
+  const [detailPurpose, setDetailPurpose] = useState("");
+  const [detailReimbursable, setDetailReimbursable] = useState<boolean | null>(null);
+  const [detailReceiptAttached, setDetailReceiptAttached] = useState<boolean | null>(null);
+  const [detailComments, setDetailComments] = useState("");
+  const [detailManagerSignature, setDetailManagerSignature] = useState("");
+  const [detailManagerApprovedDate, setDetailManagerApprovedDate] = useState("");
+
   const createQuoteCaptureRef = useRef<HTMLInputElement | null>(null);
   const createQuoteFileRef = useRef<HTMLInputElement | null>(null);
   const detailQuoteCaptureRef = useRef<HTMLInputElement | null>(null);
@@ -549,7 +571,52 @@ export default function PurchasesClient({
     setApPaymentMethod(selectedRequest.ap_payment_method ?? "");
     setApPaymentMethodOther(selectedRequest.ap_payment_method_other ?? "");
     setApPoNumber(selectedRequest.ap_po_number ?? "");
+
+    const initialMethod =
+      selectedRequest.detail_purchase_method ??
+      selectedRequest.ap_payment_method ??
+      selectedRequest.purchase_method_requested ??
+      "";
+    setDetailPurchaseDate(
+      selectedRequest.detail_purchase_date ??
+        selectedRequest.request_date ??
+        new Date().toISOString().slice(0, 10)
+    );
+    setDetailTotalAmount(
+      selectedRequest.detail_total_amount != null
+        ? String(selectedRequest.detail_total_amount)
+        : selectedRequest.estimated_total != null
+          ? String(selectedRequest.estimated_total)
+          : ""
+    );
+    setDetailPurchaseMethod(initialMethod);
+    setDetailPurchaseMethodOther(
+      selectedRequest.detail_purchase_method_other ??
+        selectedRequest.ap_payment_method_other ??
+        ""
+    );
+    setDetailPurpose(selectedRequest.detail_purpose ?? selectedRequest.reason ?? "");
+    setDetailReimbursable(
+      typeof selectedRequest.detail_reimbursable === "boolean"
+        ? selectedRequest.detail_reimbursable
+        : selectedRequest.reimbursable
+    );
+    setDetailReceiptAttached(
+      typeof selectedRequest.detail_receipt_attached === "boolean"
+        ? selectedRequest.detail_receipt_attached
+        : null
+    );
+    setDetailComments(selectedRequest.detail_comments ?? "");
+    setDetailManagerSignature(selectedRequest.detail_manager_signature ?? "");
+    setDetailManagerApprovedDate(selectedRequest.detail_manager_approved_date ?? "");
   }, [selectedItems, selectedRequest]);
+
+  useEffect(() => {
+    if (detailReceiptAttached !== null) return;
+    if (selectedReceipts.length > 0) {
+      setDetailReceiptAttached(true);
+    }
+  }, [detailReceiptAttached, selectedReceipts.length]);
 
   const activeTeammates = useMemo(
     () =>
@@ -900,6 +967,40 @@ export default function PurchasesClient({
 
   async function submitMaintenanceDetail() {
     if (!selectedRequest) return;
+    if (!detailPurchaseDate) {
+      setInlineMessage("Date of purchase is required.");
+      return;
+    }
+    const parsedTotal = Number(detailTotalAmount);
+    if (!Number.isFinite(parsedTotal) || parsedTotal < 0) {
+      setInlineMessage("Total purchase amount must be a valid non-negative number.");
+      return;
+    }
+    if (!detailPurchaseMethod || !PURCHASE_METHOD_OPTIONS.includes(detailPurchaseMethod as PurchaseMethod)) {
+      setInlineMessage("Method of purchase is required.");
+      return;
+    }
+    if (detailPurchaseMethod === "Other" && !detailPurchaseMethodOther.trim()) {
+      setInlineMessage("Please specify the Other purchase method.");
+      return;
+    }
+    if (!detailPurpose.trim()) {
+      setInlineMessage("Purpose of purchase is required.");
+      return;
+    }
+    if (detailReimbursable === null) {
+      setInlineMessage("Please select if this is for a reimbursable expense.");
+      return;
+    }
+    if (detailReceiptAttached === null) {
+      setInlineMessage("Please select whether a receipt is attached.");
+      return;
+    }
+    if (detailReimbursable && (!detailManagerSignature.trim() || !detailManagerApprovedDate)) {
+      setInlineMessage("Manager signature and date are required for reimbursable purchases.");
+      return;
+    }
+
     setSaving(true);
     setInlineMessage(null);
     const res = await fetch("/api/purchases", {
@@ -908,16 +1009,27 @@ export default function PurchasesClient({
       body: JSON.stringify({
         id: selectedRequest.id,
         stage: "detail",
+        detailPurchaseDate,
+        detailTotalAmount: parsedTotal,
+        detailPurchaseMethod,
+        detailPurchaseMethodOther:
+          detailPurchaseMethod === "Other" ? detailPurchaseMethodOther.trim() : "",
+        detailPurpose: detailPurpose.trim(),
+        detailReimbursable,
+        detailReceiptAttached,
+        detailComments: detailComments.trim(),
+        detailManagerSignature: detailReimbursable ? detailManagerSignature.trim() : "",
+        detailManagerApprovedDate: detailReimbursable ? detailManagerApprovedDate : "",
       }),
     });
     const json = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
-      setInlineMessage(json.error || "Failed to submit maintenance detail.");
+      setInlineMessage(json.error || "Failed to submit purchase detail.");
       setSaving(false);
       return;
     }
     await loadData(selectedRequest.id);
-    setInlineMessage("Maintenance detail submitted. Purchase moved to Past Purchases.");
+    setInlineMessage("Purchase detail submitted. Request moved to Past Purchases.");
     setSaving(false);
   }
 
@@ -932,6 +1044,7 @@ export default function PurchasesClient({
     setInlineMessage(null);
     try {
       await uploadAttachments(selectedRequest.id, "receipt", Array.from(files));
+      setDetailReceiptAttached(true);
       await loadData(selectedRequest.id);
       setInlineMessage("Receipt uploaded.");
     } catch (err) {
@@ -1415,9 +1528,12 @@ export default function PurchasesClient({
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={statusBadgeStyle(selectedRequest.overall_status)}>{purchaseOverallStatusLabel(selectedRequest.overall_status)}</span>
-                  {selectedRequest.overall_status === "approved_purchases" ? (
+                  {(selectedRequest.overall_status === "approved_purchases" ||
+                    selectedRequest.overall_status === "past_purchases") ? (
                     <button type="button" onClick={submitMaintenanceDetail} style={buttonStyle()} disabled={saving}>
-                      Submit Maintenance Detail
+                      {selectedRequest.overall_status === "approved_purchases"
+                        ? "Submit Purchase Detail"
+                        : "Update Purchase Detail"}
                     </button>
                   ) : null}
                 </div>
@@ -1447,6 +1563,167 @@ export default function PurchasesClient({
                     : ""}
                 </div>
                 <div><strong>Reason:</strong> {selectedRequest.reason}</div>
+              </div>
+
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>Outdoor Independence LLC - Purchase Detail Form</div>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))" }}>
+                  <div><strong>Teammate Name:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
+                  <div><strong>Department/Team:</strong> {selectedRequest.department || "-"}</div>
+                  <div><strong>Vendor/Store Name:</strong> {selectedVendors.length ? selectedVendors.join(", ") : "-"}</div>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Date of Purchase *</span>
+                    <input
+                      type="date"
+                      value={detailPurchaseDate}
+                      onChange={(e) => setDetailPurchaseDate(e.target.value)}
+                      style={inputStyle()}
+                      disabled={saving}
+                    />
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Total Purchase Amount *</span>
+                    <input
+                      value={detailTotalAmount}
+                      onChange={(e) => setDetailTotalAmount(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="$0.00"
+                      style={inputStyle()}
+                      disabled={saving}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>Method of Purchase *</div>
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                    {PURCHASE_METHOD_OPTIONS.map((option) => (
+                      <label key={option} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="radio"
+                          name="detailPurchaseMethod"
+                          checked={detailPurchaseMethod === option}
+                          onChange={() => setDetailPurchaseMethod(option)}
+                          disabled={saving}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {detailPurchaseMethod === "Other" ? (
+                    <label style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                      <span>Other Method *</span>
+                      <input
+                        value={detailPurchaseMethodOther}
+                        onChange={(e) => setDetailPurchaseMethodOther(e.target.value)}
+                        style={inputStyle()}
+                        disabled={saving}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <label style={{ display: "grid", gap: 6, marginTop: 12 }}>
+                  <span>Purpose of Purchase *</span>
+                  <textarea
+                    value={detailPurpose}
+                    onChange={(e) => setDetailPurpose(e.target.value)}
+                    rows={3}
+                    style={{ ...inputStyle(), resize: "vertical" }}
+                    placeholder="Please be specific – tools, materials, office supplies, etc."
+                    disabled={saving}
+                  />
+                </label>
+
+                <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>Is this purchase for a reimbursable expense? *</div>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginRight: 12 }}>
+                      <input
+                        type="radio"
+                        name="detailReimbursable"
+                        checked={detailReimbursable === true}
+                        onChange={() => setDetailReimbursable(true)}
+                        disabled={saving}
+                      />
+                      <span>Yes</span>
+                    </label>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="radio"
+                        name="detailReimbursable"
+                        checked={detailReimbursable === false}
+                        onChange={() => setDetailReimbursable(false)}
+                        disabled={saving}
+                      />
+                      <span>No</span>
+                    </label>
+                  </div>
+
+                  <div>
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>Receipt Attached? *</div>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginRight: 12 }}>
+                      <input
+                        type="radio"
+                        name="detailReceiptAttached"
+                        checked={detailReceiptAttached === true}
+                        onChange={() => setDetailReceiptAttached(true)}
+                        disabled={saving}
+                      />
+                      <span>Yes</span>
+                    </label>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="radio"
+                        name="detailReceiptAttached"
+                        checked={detailReceiptAttached === false}
+                        onChange={() => setDetailReceiptAttached(false)}
+                        disabled={saving}
+                      />
+                      <span>No</span>
+                    </label>
+                  </div>
+                </div>
+
+                <label style={{ display: "grid", gap: 6, marginTop: 12 }}>
+                  <span>Additional Comments or Notes</span>
+                  <textarea
+                    value={detailComments}
+                    onChange={(e) => setDetailComments(e.target.value)}
+                    rows={2}
+                    style={{ ...inputStyle(), resize: "vertical" }}
+                    disabled={saving}
+                  />
+                </label>
+
+                <div style={{ marginTop: 12, ...cardStyle(), padding: 10 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>
+                    Manager Approval (Required for any reimbursement)
+                  </div>
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Signature {detailReimbursable ? "*" : "(optional)"}</span>
+                      <input
+                        value={detailManagerSignature}
+                        onChange={(e) => setDetailManagerSignature(e.target.value)}
+                        style={inputStyle()}
+                        disabled={saving}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Date {detailReimbursable ? "*" : "(optional)"}</span>
+                      <input
+                        type="date"
+                        value={detailManagerApprovedDate}
+                        onChange={(e) => setDetailManagerApprovedDate(e.target.value)}
+                        style={inputStyle()}
+                        disabled={saving}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <div style={{ marginTop: 10, ...cardStyle(), padding: 12 }}>
