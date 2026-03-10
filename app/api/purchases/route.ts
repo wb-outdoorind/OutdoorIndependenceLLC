@@ -20,6 +20,7 @@ import {
   type PurchaseOverallStatus,
   type PurchaseTimeline,
 } from "@/lib/purchases";
+import { isMaintenanceClosedStatus } from "@/lib/maintenanceStatus";
 
 export const runtime = "nodejs";
 
@@ -640,6 +641,91 @@ async function syncLinkedMaintenanceLogStatus(
     .eq("id", request.maintenance_log_id);
 }
 
+async function reconcilePastPurchasesWithMaintenanceLog(
+  admin: ReturnType<typeof createSupabaseAdmin>,
+  requests: PurchaseRequestRow[]
+) {
+  const pendingClose = requests.filter(
+    (row) =>
+      row.overall_status === "past_purchases" &&
+      row.maintenance_log_type != null &&
+      Boolean(row.maintenance_log_id)
+  );
+  if (!pendingClose.length) return requests;
+
+  const vehicleLogIds = Array.from(
+    new Set(
+      pendingClose
+        .filter((row) => row.maintenance_log_type === "vehicle" && row.maintenance_log_id)
+        .map((row) => row.maintenance_log_id as string)
+    )
+  );
+  const equipmentLogIds = Array.from(
+    new Set(
+      pendingClose
+        .filter((row) => row.maintenance_log_type === "equipment" && row.maintenance_log_id)
+        .map((row) => row.maintenance_log_id as string)
+    )
+  );
+
+  const [vehicleLogsRes, equipmentLogsRes] = await Promise.all([
+    vehicleLogIds.length
+      ? admin
+          .from("maintenance_logs")
+          .select("id,status_update")
+          .in("id", vehicleLogIds)
+      : Promise.resolve({ data: [], error: null }),
+    equipmentLogIds.length
+      ? admin
+          .from("equipment_maintenance_logs")
+          .select("id,status_update")
+          .in("id", equipmentLogIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (vehicleLogsRes.error || equipmentLogsRes.error) {
+    console.error("Failed to reconcile past purchase statuses:", {
+      vehicleError: vehicleLogsRes.error?.message ?? null,
+      equipmentError: equipmentLogsRes.error?.message ?? null,
+    });
+    return requests;
+  }
+
+  const closedLogKeys = new Set<string>();
+  for (const row of (vehicleLogsRes.data ?? []) as Array<{ id: string; status_update: string | null }>) {
+    if (isMaintenanceClosedStatus(row.status_update)) {
+      closedLogKeys.add(`vehicle:${row.id}`);
+    }
+  }
+  for (const row of (equipmentLogsRes.data ?? []) as Array<{ id: string; status_update: string | null }>) {
+    if (isMaintenanceClosedStatus(row.status_update)) {
+      closedLogKeys.add(`equipment:${row.id}`);
+    }
+  }
+
+  const closedRequestIds = pendingClose
+    .filter((row) => closedLogKeys.has(`${row.maintenance_log_type}:${row.maintenance_log_id}`))
+    .map((row) => row.id);
+  if (!closedRequestIds.length) return requests;
+
+  const { error: closeUpdateError } = await admin
+    .from("purchase_requests")
+    .update({ overall_status: "completed" })
+    .eq("overall_status", "past_purchases")
+    .in("id", closedRequestIds);
+  if (closeUpdateError) {
+    console.error("Failed to finalize closed past purchases:", closeUpdateError);
+    return requests;
+  }
+
+  const closedIds = new Set(closedRequestIds);
+  return requests.map((row) =>
+    closedIds.has(row.id)
+      ? { ...row, overall_status: "completed" as PurchaseOverallStatus }
+      : row
+  );
+}
+
 async function notifyRoles(
   admin: ReturnType<typeof createSupabaseAdmin>,
   roles: string[],
@@ -745,7 +831,8 @@ export async function GET(req: Request) {
   const { data: requestRows, error: requestError } = await query;
   if (requestError) return NextResponse.json({ error: requestError.message }, { status: 500 });
 
-  const requests = (requestRows ?? []) as PurchaseRequestRow[];
+  let requests = (requestRows ?? []) as PurchaseRequestRow[];
+  requests = await reconcilePastPurchasesWithMaintenanceLog(admin, requests);
   const requestIds = requests.map((row) => row.id);
 
   let items: PurchaseRequestItemRow[] = [];
@@ -974,7 +1061,7 @@ export async function POST(req: Request) {
     asset_id: assetId,
     manager_status: "pending",
     ap_status: "pending",
-    overall_status: "pending_manager_approval" as PurchaseOverallStatus,
+    overall_status: "waiting_operations_manager_approval" as PurchaseOverallStatus,
     updated_at: nowIso,
   };
 
@@ -1024,7 +1111,7 @@ export async function POST(req: Request) {
   const vendorSummary =
     normalizedVendors.length > 1 ? `${vendorName} (+${normalizedVendors.length - 1} more)` : vendorName;
   await notifyRoles(admin, ["owner", "operations_manager", "office_admin"], {
-    title: "Purchase Request Pending Manager Approval",
+    title: "Purchase Request Waiting for Operations Manager Approval",
     body: `${actorLabel} submitted a purchase request for ${vendorSummary}.`,
     severity: "warning",
     kind: "purchase_request_pending_manager",
@@ -1077,7 +1164,7 @@ export async function PATCH(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as {
     id?: string;
-    stage?: "manager" | "ap" | "complete";
+    stage?: "manager" | "ap" | "detail" | "complete";
     managerSignature?: string;
     managerNote?: string;
     managerDecisions?: DecisionInput[];
@@ -1122,6 +1209,12 @@ export async function PATCH(req: Request) {
   if (stage === "manager") {
     if (!canManagerApprovePurchase(role)) {
       return NextResponse.json({ error: "Only management roles can submit manager approval." }, { status: 403 });
+    }
+    if (requestRow.overall_status !== "waiting_operations_manager_approval") {
+      return NextResponse.json(
+        { error: "Manager approval can only be submitted from the waiting manager bucket." },
+        { status: 400 }
+      );
     }
 
     const managerDecisions = parseDecisionRows(body.managerDecisions);
@@ -1180,10 +1273,10 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: updateRequestError?.message || "Failed to update request." }, { status: 500 });
     }
 
-    if (nextOverall === "pending_ap_approval") {
+    if (nextOverall === "waiting_ap_department_approval") {
       const actorLabel = asString(session?.profile?.full_name) || asString(session?.profile?.email) || userId;
       await notifyRoles(admin, ["owner", "operations_manager", "office_admin"], {
-        title: "Purchase Request Pending Accounts Payable",
+        title: "Purchase Request Waiting for AP Department Approval",
         body: `${actorLabel} completed manager approval for purchase request ${requestRow.id}.`,
         severity: "warning",
         kind: "purchase_request_pending_ap",
@@ -1215,6 +1308,12 @@ export async function PATCH(req: Request) {
   if (stage === "ap") {
     if (!canApApprovePurchase(role)) {
       return NextResponse.json({ error: "Only AP-capable roles can submit AP approval." }, { status: 403 });
+    }
+    if (requestRow.overall_status !== "waiting_ap_department_approval") {
+      return NextResponse.json(
+        { error: "AP approval can only be submitted from the waiting AP bucket." },
+        { status: 400 }
+      );
     }
 
     const apDecisions = parseApDecisionRows(body.apDecisions);
@@ -1305,8 +1404,18 @@ export async function PATCH(req: Request) {
     }
 
     const updatedRow = updatedRequest as PurchaseRequestRow;
-    if (nextOverall === "approved" || nextOverall === "partially_approved") {
+    if (nextOverall === "approved_purchases") {
       await syncLinkedMaintenanceLogStatus(admin, updatedRow, "Purchase Request Approved");
+      const actorLabel = asString(session?.profile?.full_name) || asString(session?.profile?.email) || userId;
+      await notifyRoles(admin, ["mechanic", "owner", "operations_manager", "office_admin"], {
+        title: "Purchase Request Approved",
+        body: `${actorLabel} approved purchase request ${requestRow.id}. Maintenance detail can now be submitted.`,
+        severity: "info",
+        kind: "purchase_request_approved",
+        entityType: "purchase_request",
+        entityId: requestRow.id,
+        dedupeKey: `purchase:approved:${requestRow.id}`,
+      });
     }
 
     await writeServerAudit(admin, {
@@ -1330,19 +1439,46 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ request: updatedRequest });
   }
 
-  if (stage === "complete") {
+  if (stage === "detail" || stage === "complete") {
     if (!canAccessPurchases(role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    if (
+      requestRow.overall_status !== "approved_purchases" &&
+      requestRow.overall_status !== "past_purchases"
+    ) {
+      return NextResponse.json(
+        { error: "Purchase detail can only be submitted from Approved Purchases." },
+        { status: 400 }
+      );
+    }
+
     const { data: updatedRequest, error: updateError } = await admin
       .from("purchase_requests")
-      .update({ overall_status: "completed" })
+      .update({ overall_status: "past_purchases" })
       .eq("id", requestRow.id)
       .select(
         "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,overall_status,created_at,updated_at"
       )
       .single();
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+
+    await writeServerAudit(admin, {
+      actorId: userId,
+      actorRole: role,
+      action: "purchase_request_detail_submitted",
+      tableName: "purchase_requests",
+      recordId: requestRow.id,
+      eventType: "purchase_request_detail_submitted",
+      entityType: "purchase_request",
+      entityId: requestRow.id,
+      beforeData: requestRow,
+      afterData: updatedRequest,
+      meta: {
+        stage,
+      },
+    });
+
     return NextResponse.json({ request: updatedRequest });
   }
 

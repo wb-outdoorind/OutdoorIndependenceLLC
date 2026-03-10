@@ -41,11 +41,12 @@ export const PURCHASE_REVIEW_STATUS_OPTIONS = [
 export type PurchaseReviewStatus = (typeof PURCHASE_REVIEW_STATUS_OPTIONS)[number];
 
 export const PURCHASE_OVERALL_STATUS_OPTIONS = [
-  "pending_manager_approval",
-  "pending_ap_approval",
-  "approved",
-  "partially_approved",
+  "waiting_operations_manager_approval",
+  "waiting_ap_department_approval",
+  "approved_purchases",
+  "past_purchases",
   "denied",
+  // Auto-set when linked maintenance log is closed.
   "completed",
 ] as const;
 export type PurchaseOverallStatus = (typeof PURCHASE_OVERALL_STATUS_OPTIONS)[number];
@@ -115,14 +116,18 @@ export function timelineFromUrgency(value: unknown): PurchaseTimeline {
 
 export function purchaseOverallStatusLabel(status: string | null | undefined) {
   switch ((status ?? "").trim()) {
+    case "waiting_operations_manager_approval":
     case "pending_manager_approval":
-      return "Pending Manager Approval";
+      return "Waiting for Operations Manager Approval";
+    case "waiting_ap_department_approval":
     case "pending_ap_approval":
-      return "Pending Accounts Payable";
+      return "Waiting for AP Department Approval";
+    case "approved_purchases":
     case "approved":
-      return "Approved";
     case "partially_approved":
-      return "Partially Approved";
+      return "Approved Purchases";
+    case "past_purchases":
+      return "Past Purchases";
     case "denied":
       return "Denied";
     case "completed":
@@ -155,12 +160,11 @@ export function overallStatusFromReviews(
   managerStatus: PurchaseReviewStatus,
   apStatus: PurchaseReviewStatus
 ): PurchaseOverallStatus {
-  if (managerStatus === "pending") return "pending_manager_approval";
+  if (managerStatus === "pending") return "waiting_operations_manager_approval";
   if (managerStatus === "denied") return "denied";
-  if (apStatus === "pending") return "pending_ap_approval";
+  if (apStatus === "pending") return "waiting_ap_department_approval";
   if (apStatus === "denied") return "denied";
-  if (apStatus === "partially_approved") return "partially_approved";
-  return "approved";
+  return "approved_purchases";
 }
 
 export function isValidPurchaseOverallStatus(value: unknown): value is PurchaseOverallStatus {

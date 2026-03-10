@@ -58,10 +58,10 @@ type PurchaseRequestRow = {
   ap_payment_method_other: string | null;
   ap_po_number: string | null;
   overall_status:
-    | "pending_manager_approval"
-    | "pending_ap_approval"
-    | "approved"
-    | "partially_approved"
+    | "waiting_operations_manager_approval"
+    | "waiting_ap_department_approval"
+    | "approved_purchases"
+    | "past_purchases"
     | "denied"
     | "completed";
   created_at: string;
@@ -178,13 +178,25 @@ type ApDecisionDraft = {
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "pending_manager_approval", label: "Pending Manager" },
-  { value: "pending_ap_approval", label: "Pending AP" },
-  { value: "approved", label: "Approved" },
-  { value: "partially_approved", label: "Partially Approved" },
+  { value: "waiting_operations_manager_approval", label: "Waiting for Operations Manager Approval" },
+  { value: "waiting_ap_department_approval", label: "Waiting for AP Department Approval" },
+  { value: "approved_purchases", label: "Approved Purchases" },
+  { value: "past_purchases", label: "Past Purchases" },
   { value: "denied", label: "Denied" },
-  { value: "completed", label: "Completed" },
+  { value: "completed", label: "Completed (Linked Maintenance Closed)" },
 ] as const;
+
+const QUEUE_BUCKETS: Array<{
+  value: Exclude<(typeof FILTER_OPTIONS)[number]["value"], "all">;
+  label: string;
+}> = [
+  { value: "waiting_operations_manager_approval", label: "Waiting for Operations Manager Approval" },
+  { value: "waiting_ap_department_approval", label: "Waiting for AP Department Approval" },
+  { value: "approved_purchases", label: "Approved Purchases" },
+  { value: "past_purchases", label: "Past Purchases" },
+  { value: "denied", label: "Denied" },
+  { value: "completed", label: "Completed (Linked Maintenance Closed)" },
+];
 
 function asCurrency(value: number | string | null | undefined) {
   const n = Number(value);
@@ -230,10 +242,21 @@ function statusBadgeStyle(status: string): React.CSSProperties {
     fontWeight: 800,
     whiteSpace: "nowrap",
   };
-  if (status === "approved" || status === "completed") {
+  if (
+    status === "approved_purchases" ||
+    status === "approved" ||
+    status === "partially_approved" ||
+    status === "past_purchases" ||
+    status === "completed"
+  ) {
     return { ...base, borderColor: "rgba(70,220,120,0.45)", background: "rgba(70,220,120,0.16)" };
   }
-  if (status === "partially_approved") {
+  if (
+    status === "waiting_operations_manager_approval" ||
+    status === "pending_manager_approval" ||
+    status === "waiting_ap_department_approval" ||
+    status === "pending_ap_approval"
+  ) {
     return { ...base, borderColor: "rgba(245,200,90,0.45)", background: "rgba(245,200,90,0.16)" };
   }
   if (status === "denied") {
@@ -875,7 +898,7 @@ export default function PurchasesClient({
     setSaving(false);
   }
 
-  async function markCompleted() {
+  async function submitMaintenanceDetail() {
     if (!selectedRequest) return;
     setSaving(true);
     setInlineMessage(null);
@@ -884,17 +907,17 @@ export default function PurchasesClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: selectedRequest.id,
-        stage: "complete",
+        stage: "detail",
       }),
     });
     const json = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
-      setInlineMessage(json.error || "Failed to mark completed.");
+      setInlineMessage(json.error || "Failed to submit maintenance detail.");
       setSaving(false);
       return;
     }
     await loadData(selectedRequest.id);
-    setInlineMessage("Purchase request marked completed.");
+    setInlineMessage("Maintenance detail submitted. Purchase moved to Past Purchases.");
     setSaving(false);
   }
 
@@ -939,7 +962,7 @@ export default function PurchasesClient({
         <div>
           <h1 style={{ marginBottom: 6 }}>Purchases</h1>
           <div style={{ opacity: 0.78 }}>
-            Purchase requests linked to maintenance logs or created independently.
+            Workflow: Operations Manager approval to AP approval to Approved Purchases to Past Purchases.
           </div>
         </div>
         <Link href="/" style={buttonStyle()}>
@@ -1290,7 +1313,7 @@ export default function PurchasesClient({
 
             <section style={{ ...cardStyle(), order: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 900 }}>Purchase Queue</div>
+                <div style={{ fontWeight: 900 }}>Purchase Queue by Bucket</div>
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof FILTER_OPTIONS)[number]["value"])} style={{ ...inputStyle(), width: 220 }}>
                   {FILTER_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -1303,44 +1326,79 @@ export default function PurchasesClient({
                 {filteredRequests.length === 0 ? (
                   <div style={{ opacity: 0.75 }}>No purchase requests for this filter.</div>
                 ) : (
-                  filteredRequests.map((row) => {
-                    const itemCount = (itemsByRequestId[row.id] ?? []).length;
-                    const vendorNames = (vendorsByRequestId[row.id] ?? [])
-                      .map((vendor) => vendor.vendor_name)
-                      .filter(Boolean);
-                    const vendorLabel = summarizeVendors(
-                      vendorNames.length ? vendorNames : [row.vendor_name]
-                    );
-                    const selected = row.id === selectedRequestId;
+                  (statusFilter === "all"
+                    ? QUEUE_BUCKETS
+                    : QUEUE_BUCKETS.filter((bucket) => bucket.value === statusFilter)
+                  ).map((bucket) => {
+                    const bucketRows = filteredRequests.filter((row) => row.overall_status === bucket.value);
                     return (
-                      <button
-                        key={row.id}
-                        type="button"
-                        onClick={() => setSelectedRequestId(row.id)}
+                      <div
+                        key={bucket.value}
                         style={{
-                          textAlign: "left",
+                          border: "1px solid rgba(255,255,255,0.12)",
                           borderRadius: 12,
-                          border: selected ? "1px solid rgba(120,180,255,0.7)" : "1px solid rgba(255,255,255,0.14)",
-                          background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
-                          color: "inherit",
-                          padding: 12,
-                          cursor: "pointer",
+                          padding: 10,
                           display: "grid",
-                          gap: 6,
+                          gap: 8,
+                          background: "rgba(255,255,255,0.02)",
                         }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                          <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
-                          <span style={statusBadgeStyle(row.overall_status)}>{purchaseOverallStatusLabel(row.overall_status)}</span>
+                          <div style={{ fontWeight: 800 }}>{bucket.label}</div>
+                          <div style={{ opacity: 0.75, fontSize: 12 }}>
+                            {bucketRows.length} request{bucketRows.length === 1 ? "" : "s"}
+                          </div>
                         </div>
-                        <div style={{ fontSize: 13, opacity: 0.86 }}>
-                          {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
-                        </div>
-                        <div style={{ fontSize: 13, opacity: 0.75 }}>
-                          {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
-                        </div>
-                        <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
-                      </button>
+
+                        {bucketRows.length === 0 ? (
+                          <div style={{ opacity: 0.66, fontSize: 13 }}>No requests in this bucket.</div>
+                        ) : (
+                          bucketRows.map((row) => {
+                            const itemCount = (itemsByRequestId[row.id] ?? []).length;
+                            const vendorNames = (vendorsByRequestId[row.id] ?? [])
+                              .map((vendor) => vendor.vendor_name)
+                              .filter(Boolean);
+                            const vendorLabel = summarizeVendors(
+                              vendorNames.length ? vendorNames : [row.vendor_name]
+                            );
+                            const selected = row.id === selectedRequestId;
+                            return (
+                              <button
+                                key={row.id}
+                                type="button"
+                                onClick={() => setSelectedRequestId(row.id)}
+                                style={{
+                                  textAlign: "left",
+                                  borderRadius: 12,
+                                  border: selected
+                                    ? "1px solid rgba(120,180,255,0.7)"
+                                    : "1px solid rgba(255,255,255,0.14)",
+                                  background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
+                                  color: "inherit",
+                                  padding: 12,
+                                  cursor: "pointer",
+                                  display: "grid",
+                                  gap: 6,
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                                  <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
+                                  <span style={statusBadgeStyle(row.overall_status)}>
+                                    {purchaseOverallStatusLabel(row.overall_status)}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 13, opacity: 0.86 }}>
+                                  {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
+                                </div>
+                                <div style={{ fontSize: 13, opacity: 0.75 }}>
+                                  {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
+                                </div>
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
                     );
                   })
                 )}
@@ -1357,13 +1415,19 @@ export default function PurchasesClient({
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={statusBadgeStyle(selectedRequest.overall_status)}>{purchaseOverallStatusLabel(selectedRequest.overall_status)}</span>
-                  {(selectedRequest.overall_status === "approved" || selectedRequest.overall_status === "partially_approved") ? (
-                    <button type="button" onClick={markCompleted} style={buttonStyle()} disabled={saving}>
-                      Mark Completed
+                  {selectedRequest.overall_status === "approved_purchases" ? (
+                    <button type="button" onClick={submitMaintenanceDetail} style={buttonStyle()} disabled={saving}>
+                      Submit Maintenance Detail
                     </button>
                   ) : null}
                 </div>
               </div>
+
+              {selectedRequest.overall_status === "past_purchases" ? (
+                <div style={{ marginTop: 8, opacity: 0.75 }}>
+                  This stays in Past Purchases until the linked maintenance log is closed.
+                </div>
+              ) : null}
 
               <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
                 <div><strong>Teammate:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
@@ -1543,7 +1607,7 @@ export default function PurchasesClient({
                 </div>
               </div>
 
-              {canManagerApprove ? (
+              {canManagerApprove && selectedRequest.overall_status === "waiting_operations_manager_approval" ? (
                 <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>Manager Approval</div>
                   <div style={{ opacity: 0.75, marginBottom: 8 }}>
@@ -1609,7 +1673,7 @@ export default function PurchasesClient({
                 </div>
               ) : null}
 
-              {canApApprove ? (
+              {canApApprove && selectedRequest.overall_status === "waiting_ap_department_approval" ? (
                 <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
                   <div style={{ fontWeight: 900, marginBottom: 8 }}>Accounts Payable Approval</div>
                   <div style={{ opacity: 0.75, marginBottom: 8 }}>
