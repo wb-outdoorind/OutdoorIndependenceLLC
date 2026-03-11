@@ -4,17 +4,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  coerceMaintenanceRequestStatus,
   isMaintenanceActiveStatus,
   isMaintenanceClosedStatus,
+  type MaintenanceRequestStatus,
 } from "@/lib/maintenanceStatus";
+import { getMaintenanceRequestSla, type SlaLevel } from "@/lib/sla";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { asStickyTableHeader } from "@/lib/tableStyles";
 
-type OpsTab = "Overview" | "Preventative Maintenance Overview" | "Downtime" | "Failures" | "Performance";
+type OpsTab =
+  | "Overview"
+  | "Request Queue"
+  | "Preventative Maintenance Overview"
+  | "Downtime"
+  | "Failures"
+  | "Performance";
 type PmBoardTab = "PM Due Board" | "PM Life Board";
 type PmStatusFilter = "All" | "Due Soon" | "Overdue";
 type PmLifeStatusFilter = "All" | "On Track" | "Due Soon" | "Overdue";
 type AssetTypeFilter = "All" | "Vehicles" | "Equipment";
+type QueueStatusTab = "Open" | "In Progress" | "Closed";
+type QueueUrgency = "Low" | "Medium" | "High" | "Urgent";
+type QueueDrivability =
+  | "Yes – Drivable"
+  | "Limited – Operate with caution"
+  | "No – Out of Service";
 
 type VehicleRow = {
   id: string;
@@ -41,6 +56,8 @@ type RequestRow = {
   updated_at: string;
   closed_at?: string | null;
   status: string | null;
+  urgency?: string | null;
+  drivability?: string | null;
   description: string | null;
   system_affected?: string | null;
   vehicle_id?: string | null;
@@ -164,11 +181,92 @@ type AssetHealthRow = {
   detailHref: string;
 };
 
+type QueueRow = {
+  requestId: string;
+  assetType: "Vehicle" | "Equipment";
+  assetId: string;
+  assetName: string;
+  assetTypeDetail: string | null;
+  status: MaintenanceRequestStatus;
+  urgency: QueueUrgency;
+  drivability: QueueDrivability;
+  systemAffected: string;
+  title: string;
+  createdAt: string;
+  requestDate: string;
+  createLogHref: string;
+  openAssetHref: string;
+};
+
+type QueueAssetGroup = {
+  key: string;
+  assetType: "Vehicle" | "Equipment";
+  assetId: string;
+  assetName: string;
+  assetTypeDetail: string | null;
+  openCount: number;
+  requests: QueueRow[];
+  openAssetHref: string;
+};
+
 const VEHICLE_PM_INTERVAL_MILES = 5000;
 const SKID_LOADER_PM_INTERVAL_HOURS = 200;
 const EQUIPMENT_PM_INTERVAL_HOURS = 250;
 const VEHICLE_DUE_SOON_WINDOW_MILES = Math.max(100, Math.round(VEHICLE_PM_INTERVAL_MILES * 0.1));
 const EQUIPMENT_DUE_SOON_WINDOW_HOURS = Math.max(10, Math.round(EQUIPMENT_PM_INTERVAL_HOURS * 0.1));
+const QUEUE_OPEN_STATUSES: MaintenanceRequestStatus[] = ["Open", "Pending Approval", "Scheduled"];
+const QUEUE_IN_PROGRESS_STATUSES: MaintenanceRequestStatus[] = [
+  "In Progress",
+  "Waiting on Parts",
+  "External Repair",
+  "On Hold",
+];
+
+function queueUrgencyRank(value: QueueUrgency) {
+  switch (value) {
+    case "Urgent":
+      return 0;
+    case "High":
+      return 1;
+    case "Medium":
+      return 2;
+    case "Low":
+      return 3;
+    default:
+      return 9;
+  }
+}
+
+function asQueueStatus(value: string | null) {
+  return coerceMaintenanceRequestStatus(value, "Open");
+}
+
+function asQueueUrgency(value: string | null): QueueUrgency {
+  if (value === "Low" || value === "Medium" || value === "High" || value === "Urgent") return value;
+  return "Medium";
+}
+
+function asQueueDrivability(value: string | null): QueueDrivability {
+  if (
+    value === "Yes – Drivable" ||
+    value === "Limited – Operate with caution" ||
+    value === "No – Out of Service"
+  ) {
+    return value;
+  }
+  return "Yes – Drivable";
+}
+
+function extractQueueTitle(description: string | null, systemAffected: string | null) {
+  if (description) {
+    const firstLine = description.split("\n")[0]?.trim();
+    if (firstLine?.startsWith("Title:")) {
+      const parsed = firstLine.slice("Title:".length).trim();
+      if (parsed) return parsed;
+    }
+  }
+  return systemAffected?.trim() ? `${systemAffected} issue` : "Maintenance Request";
+}
 
 function normalizeVehicleType(value: string | null | undefined) {
   const type = (value ?? "").trim().toLowerCase();
@@ -316,6 +414,57 @@ function statusChipStyle(overdue: boolean): React.CSSProperties {
   };
 }
 
+function queueValueBadge(text: string) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "1px 8px",
+        borderRadius: 999,
+        border: "1px solid rgba(255,255,255,0.16)",
+        background: "rgba(255,255,255,0.05)",
+        marginLeft: 6,
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+function queueSlaBadge(level: SlaLevel, text: string) {
+  const style: React.CSSProperties =
+    level === "overdue"
+      ? {
+          border: "1px solid rgba(255,120,120,0.45)",
+          background: "rgba(120,20,20,0.35)",
+          color: "#ffd7d7",
+        }
+      : level === "due_soon"
+      ? {
+          border: "1px solid rgba(255,197,94,0.45)",
+          background: "rgba(120,82,12,0.35)",
+          color: "#ffe6b8",
+        }
+      : {
+          border: "1px solid rgba(126,255,167,0.4)",
+          background: "rgba(20,98,49,0.35)",
+          color: "#d6ffe2",
+        };
+  return (
+    <span
+      style={{
+        ...style,
+        borderRadius: 999,
+        padding: "2px 8px",
+        fontSize: 12,
+        fontWeight: 800,
+      }}
+    >
+      SLA: {text}
+    </span>
+  );
+}
+
 function inputStyle(): React.CSSProperties {
   return {
     width: "100%",
@@ -374,10 +523,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function OpsPage({
   embedded = false,
   title = "Maintenance Operations",
+  description = "Queue, analytics, PM planning, downtime, failure trends, and service performance in one place.",
   currentRole = null,
 }: {
   embedded?: boolean;
   title?: string;
+  description?: string;
   currentRole?: string | null;
 } = {}) {
   const [tab, setTab] = useState<OpsTab>("Overview");
@@ -403,6 +554,12 @@ export default function OpsPage({
   const [pmLifeStatusFilter, setPmLifeStatusFilter] = useState<PmLifeStatusFilter>("All");
   const [pmAssetTypeFilter, setPmAssetTypeFilter] = useState<AssetTypeFilter>("All");
   const [pmSearch, setPmSearch] = useState("");
+  const [queueTab, setQueueTab] = useState<QueueStatusTab>("Open");
+  const [queueAssetTypeFilter, setQueueAssetTypeFilter] = useState<AssetTypeFilter>("All");
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueOnlyOutOfService, setQueueOnlyOutOfService] = useState(false);
+  const [queueOnlyUrgentHigh, setQueueOnlyUrgentHigh] = useState(false);
+  const [expandedQueueAssetKey, setExpandedQueueAssetKey] = useState<string | null>(null);
   const [pmWaiveBusyKey, setPmWaiveBusyKey] = useState<string | null>(null);
   const [pmWaiveMessage, setPmWaiveMessage] = useState<string | null>(null);
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
@@ -460,13 +617,17 @@ export default function OpsPage({
         ) => {
           const withClosed = await supabase
             .from(table)
-            .select(`id,${assetKey},created_at,updated_at,closed_at,status,description,system_affected`);
+            .select(
+              `id,${assetKey},created_at,updated_at,closed_at,status,urgency,drivability,description,system_affected`
+            );
           if (!withClosed.error) return withClosed;
           const code = (withClosed.error as { code?: string }).code;
           if (code !== "42703") return withClosed;
           return supabase
             .from(table)
-            .select(`id,${assetKey},created_at,updated_at,status,description,system_affected`);
+            .select(
+              `id,${assetKey},created_at,updated_at,status,urgency,drivability,description,system_affected`
+            );
         };
 
         const [vehiclesRes, equipmentRes, vehicleReqRes, equipmentReqRes, lowInvRes, eqPmRes, vehiclePmRes, vehicleLogsRes, equipmentLogsRes, pmWaiversRes] = await Promise.all([
@@ -655,7 +816,14 @@ export default function OpsPage({
     return () => window.clearTimeout(timer);
   }, [router]);
 
-  const tabs: OpsTab[] = ["Overview", "Preventative Maintenance Overview", "Downtime", "Failures", "Performance"];
+  const tabs: OpsTab[] = [
+    "Overview",
+    "Request Queue",
+    "Preventative Maintenance Overview",
+    "Downtime",
+    "Failures",
+    "Performance",
+  ];
   const canWaivePm = useMemo(() => {
     const role = (currentRole ?? "").trim();
     return (
@@ -665,6 +833,7 @@ export default function OpsPage({
       role === "mechanic"
     );
   }, [currentRole]);
+  const canCreateLogs = (currentRole ?? "").trim() !== "apprentice";
 
   const overviewCards = useMemo(
     () => [
@@ -1090,58 +1259,149 @@ export default function OpsPage({
     [downtimeRows]
   );
 
-  const openRequestsByAsset = useMemo(() => {
-    const vehicleNameById = new Map(vehicles.map((v) => [v.id, v.name || v.id]));
-    const equipmentNameById = new Map(equipment.map((e) => [e.id, e.name || e.id]));
-
-    const grouped = new Map<
-      string,
-      {
-        assetType: "Vehicle" | "Equipment";
-        assetId: string;
-        assetName: string;
-        href: string;
-        count: number;
-      }
-    >();
+  const queueRows = useMemo(() => {
+    const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
+    const equipmentById = new Map(equipment.map((row) => [row.id, row]));
+    const rows: QueueRow[] = [];
 
     for (const row of allRequests) {
-      const status = (row.status ?? "").trim();
-      if (!isMaintenanceActiveStatus(status)) continue;
+      const status = asQueueStatus(row.status);
+      const urgency = asQueueUrgency(row.urgency ?? null);
+      const drivability = asQueueDrivability(row.drivability ?? null);
+      const systemAffected = (row.system_affected ?? "").trim() || "Other";
+      const title = extractQueueTitle(row.description ?? null, row.system_affected ?? null);
+      const requestDate = row.created_at.slice(0, 10);
 
       if (row.vehicle_id) {
-        const key = `Vehicle:${row.vehicle_id}`;
-        const existing = grouped.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          grouped.set(key, {
-            assetType: "Vehicle",
-            assetId: row.vehicle_id,
-            assetName: vehicleNameById.get(row.vehicle_id) ?? row.vehicle_id,
-            href: `/vehicles/${encodeURIComponent(row.vehicle_id)}`,
-            count: 1,
-          });
-        }
+        const vehicle = vehicleById.get(row.vehicle_id);
+        rows.push({
+          requestId: row.id,
+          assetType: "Vehicle",
+          assetId: row.vehicle_id,
+          assetName: vehicle?.name || row.vehicle_id,
+          assetTypeDetail: vehicle?.type ?? null,
+          status,
+          urgency,
+          drivability,
+          systemAffected,
+          title,
+          createdAt: row.created_at,
+          requestDate,
+          createLogHref: `/vehicles/${encodeURIComponent(row.vehicle_id)}/forms/maintenance-log?requestId=${encodeURIComponent(row.id)}`,
+          openAssetHref: `/vehicles/${encodeURIComponent(row.vehicle_id)}`,
+        });
       } else if (row.equipment_id) {
-        const key = `Equipment:${row.equipment_id}`;
-        const existing = grouped.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          grouped.set(key, {
-            assetType: "Equipment",
-            assetId: row.equipment_id,
-            assetName: equipmentNameById.get(row.equipment_id) ?? row.equipment_id,
-            href: `/equipment/${encodeURIComponent(row.equipment_id)}`,
-            count: 1,
-          });
-        }
+        const equipmentRow = equipmentById.get(row.equipment_id);
+        rows.push({
+          requestId: row.id,
+          assetType: "Equipment",
+          assetId: row.equipment_id,
+          assetName: equipmentRow?.name || row.equipment_id,
+          assetTypeDetail: null,
+          status,
+          urgency,
+          drivability,
+          systemAffected,
+          title,
+          createdAt: row.created_at,
+          requestDate,
+          createLogHref: `/equipment/${encodeURIComponent(row.equipment_id)}/forms/maintenance-log?requestId=${encodeURIComponent(row.id)}`,
+          openAssetHref: `/equipment/${encodeURIComponent(row.equipment_id)}`,
+        });
       }
     }
 
-    return Array.from(grouped.values()).sort((a, b) => b.count - a.count);
+    rows.sort((a, b) => {
+      const rankDiff = queueUrgencyRank(a.urgency) - queueUrgencyRank(b.urgency);
+      if (rankDiff !== 0) return rankDiff;
+      const aTime = Date.parse(a.createdAt) || 0;
+      const bTime = Date.parse(b.createdAt) || 0;
+      return aTime - bTime;
+    });
+    return rows;
   }, [allRequests, equipment, vehicles]);
+
+  const queueCounts = useMemo(
+    () => ({
+      open: queueRows.filter((row) => QUEUE_OPEN_STATUSES.includes(row.status)).length,
+      inProgress: queueRows.filter((row) => QUEUE_IN_PROGRESS_STATUSES.includes(row.status)).length,
+      closed: queueRows.filter((row) => row.status === "Closed").length,
+    }),
+    [queueRows]
+  );
+
+  const filteredQueueRows = useMemo(() => {
+    const query = queueSearch.trim().toLowerCase();
+    const visibleStatuses =
+      queueTab === "Open"
+        ? QUEUE_OPEN_STATUSES
+        : queueTab === "In Progress"
+          ? QUEUE_IN_PROGRESS_STATUSES
+          : (["Closed"] as MaintenanceRequestStatus[]);
+
+    return queueRows.filter((row) => {
+      if (!visibleStatuses.includes(row.status)) return false;
+      if (queueAssetTypeFilter === "Vehicles" && row.assetType !== "Vehicle") return false;
+      if (queueAssetTypeFilter === "Equipment" && row.assetType !== "Equipment") return false;
+      if (queueOnlyOutOfService && row.drivability !== "No – Out of Service") return false;
+      if (queueOnlyUrgentHigh && row.urgency !== "Urgent" && row.urgency !== "High") return false;
+      if (!query) return true;
+      const haystack = [
+        row.requestId,
+        row.assetName,
+        row.assetId,
+        row.assetType,
+        row.assetTypeDetail ?? "",
+        row.title,
+        row.systemAffected,
+        row.urgency,
+        row.drivability,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [
+    queueAssetTypeFilter,
+    queueOnlyOutOfService,
+    queueOnlyUrgentHigh,
+    queueRows,
+    queueSearch,
+    queueTab,
+  ]);
+
+  const queueAssetGroups = useMemo(() => {
+    const grouped = new Map<string, QueueAssetGroup>();
+    for (const row of queueRows) {
+      if (!isMaintenanceActiveStatus(row.status)) continue;
+      const key = `${row.assetType}:${row.assetId}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.openCount += 1;
+        existing.requests.push(row);
+      } else {
+        grouped.set(key, {
+          key,
+          assetType: row.assetType,
+          assetId: row.assetId,
+          assetName: row.assetName,
+          assetTypeDetail: row.assetTypeDetail,
+          openCount: 1,
+          requests: [row],
+          openAssetHref: row.openAssetHref,
+        });
+      }
+    }
+    return Array.from(grouped.values()).sort(
+      (a, b) => b.openCount - a.openCount || a.assetName.localeCompare(b.assetName)
+    );
+  }, [queueRows]);
+
+  useEffect(() => {
+    if (expandedQueueAssetKey && !queueAssetGroups.some((group) => group.key === expandedQueueAssetKey)) {
+      setExpandedQueueAssetKey(null);
+    }
+  }, [expandedQueueAssetKey, queueAssetGroups]);
 
   const assetHealthRows = useMemo(() => {
     const openRequestCountByAsset = new Map<string, number>();
@@ -1509,10 +1769,58 @@ export default function OpsPage({
       .sort((a, b) => b.avgQuality - a.avgQuality || b.count - a.count || a.display.localeCompare(b.display));
   }, [performanceLogsInRange, profileNameById]);
 
+  function renderQueueRequestCard(row: QueueRow) {
+    const requestSla = getMaintenanceRequestSla({
+      createdAt: row.createdAt,
+      status: row.status,
+      urgency: row.urgency,
+    });
+    const assetKindLabel = row.assetType === "Vehicle" ? "Vehicle" : "Equipment";
+    return (
+      <div
+        key={`queue:${row.assetType}:${row.requestId}`}
+        style={{
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 14,
+          padding: 14,
+          background: "rgba(255,255,255,0.02)",
+        }}
+      >
+        <div style={{ fontWeight: 900, marginBottom: 4 }}>{row.title}</div>
+        <div style={{ opacity: 0.84, fontSize: 13, lineHeight: 1.35 }}>
+          <strong>{assetKindLabel}: {row.assetName} • {row.assetId}</strong>
+          {row.assetTypeDetail ? <span> • Type: {row.assetTypeDetail}</span> : null}
+          <span> • {row.systemAffected}</span>
+          <span> • Urgency: {queueValueBadge(row.urgency)}</span>
+          <span> • Drivability: {queueValueBadge(row.drivability)}</span>
+        </div>
+        <div style={{ opacity: 0.68, fontSize: 12, marginTop: 6 }}>
+          Request Date: <strong>{row.requestDate}</strong> • Created:{" "}
+          <strong>{new Date(row.createdAt).toLocaleString()}</strong>
+        </div>
+        {requestSla ? <div style={{ marginTop: 6 }}>{queueSlaBadge(requestSla.level, requestSla.text)}</div> : null}
+        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {canCreateLogs ? (
+            <Link href={row.createLogHref} style={queuePrimaryActionStyle}>
+              Create Log
+            </Link>
+          ) : (
+            <span style={{ ...queueSecondaryActionStyle, opacity: 0.6, cursor: "not-allowed" }}>
+              Log Restricted
+            </span>
+          )}
+          <Link href={row.openAssetHref} style={queueSecondaryActionStyle}>
+            Open {assetKindLabel}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={embedded ? { paddingBottom: 32 } : { maxWidth: 1100, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>{title}</h1>
-      <div style={{ opacity: 0.75 }}>Maintenance operations overview and fleet service signals.</div>
+      <div style={{ opacity: 0.75 }}>{description}</div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
         {tabs.map((t) => (
@@ -1568,33 +1876,57 @@ export default function OpsPage({
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
             <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
-            {openRequestsByAsset.length === 0 ? (
+            {queueAssetGroups.length === 0 ? (
               <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
-                {openRequestsByAsset.map((row) => (
+                {queueAssetGroups.map((group) => (
                   <div
-                    key={`overview-open:${row.assetType}:${row.assetId}`}
+                    key={`overview-open:${group.assetType}:${group.assetId}`}
                     style={{
                       border: "1px solid rgba(255,255,255,0.12)",
                       borderRadius: 12,
                       padding: 10,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
+                      background:
+                        expandedQueueAssetKey === group.key
+                          ? "rgba(126,255,167,0.08)"
+                          : "rgba(255,255,255,0.01)",
                     }}
                   >
-                    <div>
-                      <Link href={row.href} style={{ color: "inherit", fontWeight: 800 }}>
-                        {row.assetName}
-                      </Link>
-                      <div style={{ opacity: 0.75, fontSize: 12 }}>
-                        {row.assetType} · {row.assetId}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedQueueAssetKey((prev) => (prev === group.key ? null : group.key))
+                      }
+                      style={queueAssetToggleButtonStyle}
+                    >
+                      <div style={{ textAlign: "left" }}>
+                        <div style={{ fontWeight: 800 }}>{group.assetName}</div>
+                        <div style={{ opacity: 0.75, fontSize: 12 }}>
+                          {group.assetType}
+                          {group.assetTypeDetail ? ` (${group.assetTypeDetail})` : ""} • {group.assetId}
+                        </div>
                       </div>
-                    </div>
-                    <div style={statusChipStyle(false)}>{row.count} open</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={statusChipStyle(false)}>{group.openCount} open</div>
+                        <div style={{ opacity: 0.66, fontSize: 12 }}>
+                          {expandedQueueAssetKey === group.key ? "Hide" : "View"}
+                        </div>
+                      </div>
+                    </button>
+                    {expandedQueueAssetKey === group.key ? (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          paddingTop: 10,
+                          borderTop: "1px solid rgba(255,255,255,0.12)",
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        {group.requests.map((row) => renderQueueRequestCard(row))}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1756,6 +2088,102 @@ export default function OpsPage({
             </div>
           </div>
         </>
+      ) : null}
+
+      {!loading && !errorMessage && isAuthenticated && tab === "Request Queue" ? (
+        <div style={{ marginTop: 16, ...cardStyle() }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              placeholder="Search unit, title, urgency, etc."
+              style={{ ...inputStyle(), width: 320, maxWidth: "100%" }}
+            />
+
+            <select
+              value={queueAssetTypeFilter}
+              onChange={(e) => setQueueAssetTypeFilter(e.target.value as AssetTypeFilter)}
+              style={{ ...inputStyle(), width: 170 }}
+            >
+              <option value="All">All</option>
+              <option value="Vehicles">Vehicles</option>
+              <option value="Equipment">Equipment</option>
+            </select>
+
+            <label style={{ display: "flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+              <input
+                type="checkbox"
+                checked={queueOnlyOutOfService}
+                onChange={(e) => setQueueOnlyOutOfService(e.target.checked)}
+              />
+              Out of Service only
+            </label>
+
+            <label style={{ display: "flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+              <input
+                type="checkbox"
+                checked={queueOnlyUrgentHigh}
+                onChange={(e) => setQueueOnlyUrgentHigh(e.target.checked)}
+              />
+              Urgent/High only
+            </label>
+          </div>
+
+          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setQueueTab("Open")}
+              style={{
+                ...queueTabButtonStyle,
+                background: queueTab === "Open" ? "rgba(255,255,255,0.10)" : "transparent",
+                opacity: queueTab === "Open" ? 1 : 0.85,
+                fontWeight: queueTab === "Open" ? 900 : 800,
+              }}
+            >
+              Open / Approval ({queueCounts.open})
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueueTab("In Progress")}
+              style={{
+                ...queueTabButtonStyle,
+                background: queueTab === "In Progress" ? "rgba(255,255,255,0.10)" : "transparent",
+                opacity: queueTab === "In Progress" ? 1 : 0.85,
+                fontWeight: queueTab === "In Progress" ? 900 : 800,
+              }}
+            >
+              Active Work ({queueCounts.inProgress})
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueueTab("Closed")}
+              style={{
+                ...queueTabButtonStyle,
+                background: queueTab === "Closed" ? "rgba(255,255,255,0.10)" : "transparent",
+                opacity: queueTab === "Closed" ? 1 : 0.85,
+                fontWeight: queueTab === "Closed" ? 900 : 800,
+              }}
+            >
+              Closed ({queueCounts.closed})
+            </button>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {filteredQueueRows.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No requests found for this view.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {filteredQueueRows.map((row) => renderQueueRequestCard(row))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 12, opacity: 0.65 }}>
+            Tip: Work top-to-bottom by urgency for faster turnaround.
+          </div>
+        </div>
       ) : null}
 
       {!loading && !errorMessage && isAuthenticated && tab === "Preventative Maintenance Overview" ? (
@@ -2522,7 +2950,15 @@ export default function OpsPage({
         </div>
       ) : null}
 
-      {!loading && !errorMessage && isAuthenticated && tab !== "Overview" && tab !== "Preventative Maintenance Overview" && tab !== "Downtime" && tab !== "Failures" && tab !== "Performance" ? (
+      {!loading &&
+      !errorMessage &&
+      isAuthenticated &&
+      tab !== "Overview" &&
+      tab !== "Request Queue" &&
+      tab !== "Preventative Maintenance Overview" &&
+      tab !== "Downtime" &&
+      tab !== "Failures" &&
+      tab !== "Performance" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900 }}>{tab}</div>
           <div style={{ marginTop: 8, opacity: 0.75 }}>
@@ -2569,5 +3005,51 @@ const actionButtonStyle: React.CSSProperties = {
   color: "inherit",
   fontWeight: 700,
   fontSize: 12,
+  cursor: "pointer",
+};
+
+const queuePrimaryActionStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+  color: "inherit",
+  fontWeight: 900,
+  textDecoration: "none",
+};
+
+const queueSecondaryActionStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "transparent",
+  color: "inherit",
+  fontWeight: 800,
+  opacity: 0.9,
+  textDecoration: "none",
+};
+
+const queueAssetToggleButtonStyle: React.CSSProperties = {
+  width: "100%",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+};
+
+const queueTabButtonStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "transparent",
+  color: "inherit",
+  fontWeight: 800,
+  opacity: 0.9,
   cursor: "pointer",
 };
