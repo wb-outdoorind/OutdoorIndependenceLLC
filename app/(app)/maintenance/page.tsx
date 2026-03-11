@@ -522,7 +522,7 @@ export default function MaintenanceCenterPage() {
     <main style={{ maxWidth: 1100, margin: "0 auto", paddingBottom: 40 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ marginBottom: 6 }}>Maintenance Center</h1>
+          <h1 style={{ marginBottom: 6 }}>Maintenance Operations Dashboard</h1>
           <div style={{ opacity: 0.75 }}>
             Queue, analytics, PM planning, downtime, and service performance in one place.
           </div>
@@ -588,17 +588,6 @@ export default function MaintenanceCenterPage() {
             <div style={cardStyle}>Loading operations access...</div>
           ) : canViewOperations ? (
             <>
-              <div style={{ ...cardStyle, marginBottom: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 900, fontSize: 16 }}>PM Quick Start</div>
-                  <div style={{ opacity: 0.8, fontSize: 13, marginTop: 4 }}>
-                    Create a blank PM from any vehicle or equipment, choose PM type, and begin.
-                  </div>
-                </div>
-                <Link href="/maintenance/pm/new" style={buttonStyle}>
-                  Create Blank PM
-                </Link>
-              </div>
               <OpsClient embedded title="Maintenance Operations Dashboard" currentRole={userRole} />
               <div style={{ marginTop: 12 }}>
                 <TeammateOperationsDashboard

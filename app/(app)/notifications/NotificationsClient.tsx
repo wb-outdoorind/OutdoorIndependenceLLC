@@ -386,7 +386,7 @@ function notificationActions(row: NotificationRow, canViewMaintenanceCenter: boo
   }
 
   if (row.kind === "vehicle_maintenance_request_created" && canViewMaintenanceCenter) {
-    actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
+    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance?section=queue" });
     const vehicleId = parseVehicleIdFromBody(row.body);
     if (vehicleId) {
       actions.push({
@@ -397,7 +397,7 @@ function notificationActions(row: NotificationRow, canViewMaintenanceCenter: boo
   }
 
   if (row.kind === "equipment_maintenance_request_created" && canViewMaintenanceCenter) {
-    actions.push({ label: "Open Maintenance Center", href: "/maintenance?section=queue" });
+    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance?section=queue" });
     const equipmentId = parseEquipmentIdFromBody(row.body);
     if (equipmentId) {
       actions.push({

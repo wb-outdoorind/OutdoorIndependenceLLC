@@ -1204,7 +1204,7 @@ export default function MaintenanceLogPage() {
           >Discard & Return</button>
 
           <a href="/maintenance" style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-            Maintenance Center
+            Maintenance Operations Dashboard
           </a>
         </div>
       </form>

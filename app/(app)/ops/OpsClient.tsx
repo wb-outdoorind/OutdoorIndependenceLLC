@@ -1567,6 +1567,41 @@ export default function OpsPage({
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
+            {openRequestsByAsset.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {openRequestsByAsset.map((row) => (
+                  <div
+                    key={`overview-open:${row.assetType}:${row.assetId}`}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 12,
+                      padding: 10,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <Link href={row.href} style={{ color: "inherit", fontWeight: 800 }}>
+                        {row.assetName}
+                      </Link>
+                      <div style={{ opacity: 0.75, fontSize: 12 }}>
+                        {row.assetType} · {row.assetId}
+                      </div>
+                    </div>
+                    <div style={statusChipStyle(false)}>{row.count} open</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 16, ...cardStyle() }}>
             <div style={{ fontWeight: 900, marginBottom: 10 }}>Asset Health Blend</div>
             <div style={{ opacity: 0.75, marginBottom: 10 }}>
               Health score blends operational status (80%) and blended mechanic score (20%).
@@ -1646,41 +1681,6 @@ export default function OpsPage({
                       </div>
                     </div>
                     <div style={statusChipStyle(row.status === "Red Tagged")}>{row.daysDown} days out</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginTop: 16, ...cardStyle() }}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>Open Maintenance Requests</div>
-            {openRequestsByAsset.length === 0 ? (
-              <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {openRequestsByAsset.map((row) => (
-                  <div
-                    key={`overview-open:${row.assetType}:${row.assetId}`}
-                    style={{
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 12,
-                      padding: 10,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <Link href={row.href} style={{ color: "inherit", fontWeight: 800 }}>
-                        {row.assetName}
-                      </Link>
-                      <div style={{ opacity: 0.75, fontSize: 12 }}>
-                        {row.assetType} · {row.assetId}
-                      </div>
-                    </div>
-                    <div style={statusChipStyle(false)}>{row.count} open</div>
                   </div>
                 ))}
               </div>
@@ -1777,6 +1777,11 @@ export default function OpsPage({
                 {board}
               </button>
             ))}
+            {canWaivePm ? (
+              <Link href="/maintenance/pm/new" style={actionLinkStyle}>
+                Create Blank PM
+              </Link>
+            ) : null}
           </div>
 
           <div

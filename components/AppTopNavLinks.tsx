@@ -205,7 +205,7 @@ export default function AppTopNavLinks() {
     navLinks.push({ href: "/purchases", label: "Purchases" });
   }
   if (canViewMaintenanceCenter) {
-    navLinks.push({ href: "/maintenance", label: "Maintenance Center" });
+    navLinks.push({ href: "/maintenance", label: "Maintenance Operations Dashboard" });
   }
   navLinks.push({ href: "/academy", label: "OI Academy" });
   navLinks.push({ href: "/employees", label: "Teammates" });
