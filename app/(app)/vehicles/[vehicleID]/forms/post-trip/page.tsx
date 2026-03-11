@@ -29,7 +29,7 @@ If any unsafe condition, damage, or mechanical issue is identified:
         { key: "tires_ok", label: "Tires operational and correct PSI" },
         { key: "lights_ok", label: "All lights operational" },
         { key: "dashboard_operational", label: "Dashboard Operational" },
-        { key: "no_body_damage", label: "No new body damage" },
+        { key: "no_body_damage", label: "New observed body damage present? (Fail if yes)" },
         { key: "hitch_ball_pin", label: "Hitch, ball (2-5/16”), and pin secured" },
         { key: "safety_equipment", label: "Required safety equipment present" },
         { key: "trash_removed", label: "Trash/debris removed from cab and bed" },
@@ -45,7 +45,7 @@ If any unsafe condition, damage, or mechanical issue is identified:
       applicableLabel: "Skid/Loader Inspection Applicable",
       vehicleTypes: ["skidsteer", "loader"], // 🚫 car does NOT see skid/loader
       items: [
-        { key: "no_new_damage", label: "No new damage to machine or attachment" },
+        { key: "no_new_damage", label: "New observed damage to machine or attachment present? (Fail if yes)" },
         { key: "no_leaks", label: "No oil, hydraulic, or fuel leaks" },
         { key: "no_hydraulic_issues", label: "No hydraulic performance issues" },
         { key: "no_steering_brake_issues", label: "No steering or brake issues (if applicable)" },

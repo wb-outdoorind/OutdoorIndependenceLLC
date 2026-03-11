@@ -33,7 +33,7 @@ const sections: InspectionSection[] = [
       { key: "wipers", label: "Wiper blades operational" },
       { key: "windows", label: "Windows operational" },
       { key: "dashboard_operational", label: "Dashboard Operational" },
-      { key: "body_damage", label: "No new body damage" },
+      { key: "body_damage", label: "New observed body damage present? (Fail if yes)" },
       { key: "fuel_cap", label: "Fuel cap properly attached" },
       { key: "rear_tires", label: "Rear tires PSI & condition acceptable" },
       { key: "rear_lights", label: "Rear taillights & turn signals operational" },
