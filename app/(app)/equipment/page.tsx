@@ -27,7 +27,8 @@ function buildEquipmentDisplayIds(rows: EquipmentRow[]) {
     if (!existing) continue;
     const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
     if (simpleMatch) {
-      const prefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+      const rawPrefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+      const prefix = rawPrefix === "Trailer" ? "Truck" : rawPrefix;
       const seq = Number(simpleMatch[2]);
       if (Number.isInteger(seq)) {
         maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
@@ -47,7 +48,12 @@ function buildEquipmentDisplayIds(rows: EquipmentRow[]) {
   for (const row of rows) {
     const existing = (row.external_id ?? "").trim();
     if (existing) {
-      map[row.id] = existing;
+      const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
+      if (simpleMatch) {
+        map[row.id] = `Truck_${Number(simpleMatch[2])}`;
+      } else {
+        map[row.id] = existing;
+      }
       continue;
     }
     const prefix = buildEquipmentAssetIdPrefix({
@@ -59,10 +65,7 @@ function buildEquipmentDisplayIds(rows: EquipmentRow[]) {
     });
     const seq = (maxByPrefix[prefix] ?? 0) + 1;
     maxByPrefix[prefix] = seq;
-    map[row.id] =
-      prefix === "Truck" || prefix === "Trailer"
-        ? `${prefix}_${seq}`
-        : `${prefix}-${seq}`;
+    map[row.id] = prefix === "Truck" ? `Truck_${seq}` : `${prefix}-${seq}`;
   }
   return map;
 }

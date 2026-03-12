@@ -43,7 +43,7 @@ function seasonCode(season: AssetSeason) {
 
 function simpleAssetPrefixForEquipmentType(value: string | null | undefined) {
   const hay = (value ?? "").toLowerCase();
-  if (hay.includes("trailer") || hay.includes("trlr")) return "Trailer";
+  if (hay.includes("trailer") || hay.includes("trlr")) return "Truck";
   if (hay.includes("truck")) return "Truck";
   return null;
 }
@@ -51,7 +51,7 @@ function simpleAssetPrefixForEquipmentType(value: string | null | undefined) {
 function simpleAssetPrefixForVehicleType(value: string | null | undefined) {
   const type = (value ?? "").trim().toLowerCase();
   if (type === "truck") return "Truck";
-  if (type === "trailer") return "Trailer";
+  if (type === "trailer") return "Truck";
   return null;
 }
 
@@ -99,7 +99,9 @@ function escapeRegex(value: string) {
 }
 
 function nextAssetIdForSimplePrefix(prefix: string, existingValues: Array<string | null | undefined>) {
-  const matcher = new RegExp(`^${escapeRegex(prefix)}_(\\d+)$`);
+  const matcher = new RegExp(
+    prefix === "Truck" ? "^(?:Truck|Trailer)_(\\d+)$" : `^${escapeRegex(prefix)}_(\\d+)$`
+  );
   let maxSeq = 0;
   for (const value of existingValues) {
     const text = (value ?? "").trim();

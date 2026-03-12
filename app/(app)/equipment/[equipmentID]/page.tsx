@@ -175,6 +175,13 @@ function trendDirection(points: number[]) {
   return "Stable";
 }
 
+function normalizeTruckAssetId(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  const simple = /^(Truck|Trailer)_(\d+)$/i.exec(raw);
+  if (simple) return `Truck_${Number(simple[2])}`;
+  return raw;
+}
+
 function cardStyle(): React.CSSProperties {
   return {
     border: "1px solid rgba(255,255,255,0.14)",
@@ -524,6 +531,7 @@ export default function EquipmentDetailPage() {
   const canViewScoreTrends = canViewMechanicScore;
   const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canViewMechanicScore;
+  const displayAssetId = normalizeTruckAssetId(equipment?.external_id) || "-";
 
   function updateDraft<K extends keyof EquipmentEditDraft>(key: K, value: EquipmentEditDraft[K]) {
     setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -940,7 +948,7 @@ export default function EquipmentDetailPage() {
               <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
                 <input
-                  value={editDraft.external_id}
+                  value={canEditAssetId ? editDraft.external_id : normalizeTruckAssetId(editDraft.external_id)}
                   onChange={(e) => updateDraft("external_id", e.target.value)}
                   style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
                   disabled={!canEditAssetId}
@@ -980,7 +988,7 @@ export default function EquipmentDetailPage() {
                   : "-"
               }
             />
-            <Spec label="Asset ID" value={equipment?.external_id ?? "-"} />
+            <Spec label="Asset ID" value={displayAssetId} />
           </div>
         )}
       </div>

@@ -81,7 +81,8 @@ export default function VehiclesListClient({
       if (!existing) continue;
       const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
       if (simpleMatch) {
-        const prefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+        const rawPrefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+        const prefix = rawPrefix === "Trailer" ? "Truck" : rawPrefix;
         const seq = Number(simpleMatch[2]);
         if (Number.isInteger(seq)) {
           maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
@@ -101,7 +102,12 @@ export default function VehiclesListClient({
     for (const row of vehicles) {
       const existing = (row.asset ?? "").trim();
       if (existing) {
-        map[row.id] = existing;
+        const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
+        if (simpleMatch) {
+          map[row.id] = `Truck_${Number(simpleMatch[2])}`;
+        } else {
+          map[row.id] = existing;
+        }
         continue;
       }
       const prefix = buildVehicleAssetIdPrefix({
@@ -110,10 +116,7 @@ export default function VehiclesListClient({
       });
       const seq = (maxByPrefix[prefix] ?? 0) + 1;
       maxByPrefix[prefix] = seq;
-      map[row.id] =
-        prefix === "Truck" || prefix === "Trailer"
-          ? `${prefix}_${seq}`
-          : `${prefix}-${seq}`;
+      map[row.id] = prefix === "Truck" ? `Truck_${seq}` : `${prefix}-${seq}`;
     }
     return map;
   }, [vehicles]);

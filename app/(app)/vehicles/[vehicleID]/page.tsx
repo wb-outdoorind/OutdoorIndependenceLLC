@@ -206,6 +206,13 @@ function trendDirection(points: number[]) {
   return "Stable";
 }
 
+function normalizeTruckAssetId(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  const simple = /^(Truck|Trailer)_(\d+)$/i.exec(raw);
+  if (simple) return `Truck_${Number(simple[2])}`;
+  return raw;
+}
+
 function parseTitleAndDescription(raw: string | null) {
   if (!raw) return { title: "", description: "" };
   const lines = raw.split("\n");
@@ -660,6 +667,7 @@ export default function VehicleDetailPage() {
   const displayFuel = vehicle?.fuel ?? "—";
   const displayOilType = vehicle?.oil_type ?? "—";
   const displayStatus = vehicle?.status ?? "—";
+  const displayAssetId = normalizeTruckAssetId(vehicle?.asset) || "—";
   const normalizedVehicleType = normalizeVehicleType(vehicle?.type ?? null);
   const readingLabel = isHoursBasedVehicleType(normalizedVehicleType) ? "Hours" : "Mileage";
   const readingUnit = isHoursBasedVehicleType(normalizedVehicleType) ? "hrs" : "mi";
@@ -1160,7 +1168,7 @@ export default function VehicleDetailPage() {
               <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
                 <input
-                  value={editDraft.asset}
+                  value={canEditAssetId ? editDraft.asset : normalizeTruckAssetId(editDraft.asset)}
                   onChange={(e) => updateDraft("asset", e.target.value)}
                   style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
                   disabled={!canEditAssetId}
@@ -1223,7 +1231,7 @@ export default function VehicleDetailPage() {
             </div>
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
-              <div style={{ fontWeight: 900 }}>{vehicle?.asset ?? "—"}</div>
+              <div style={{ fontWeight: 900 }}>{displayAssetId}</div>
             </div>
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>DOT #</div>
