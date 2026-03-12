@@ -462,7 +462,21 @@ export default async function Home() {
     const isMechanic = role === "mechanic";
     const isTeammateOpsRole = isTeammateRole(role);
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
+    const canViewFertilizingOperations = canAccessRoute(role, "fertilizing_operations");
     const canViewPurchases = canAccessRoute(role, "purchases");
+
+    if (canViewFertilizingOperations) {
+      const fertilizingTile = {
+        title: "Fertilizing Operations",
+        href: "/fertilizing",
+        desc: "Client properties, product planning, and chemical tracking workflows",
+      };
+      const inventoryIndex = tiles.findIndex((tile) => tile.title === "Inventory");
+      tiles =
+        inventoryIndex >= 0
+          ? [...tiles.slice(0, inventoryIndex + 1), fertilizingTile, ...tiles.slice(inventoryIndex + 1)]
+          : [...tiles, fertilizingTile];
+    }
 
     if (canViewPurchases) {
       const purchasesTile = {

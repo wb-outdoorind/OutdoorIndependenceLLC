@@ -10,6 +10,7 @@ const PROTECTED_PREFIXES = [
   "/ops",
   "/scan",
   "/maintenance",
+  "/fertilizing",
 ];
 
 function isProtected(pathname: string) {

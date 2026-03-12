@@ -189,6 +189,7 @@ export default function AppTopNavLinks() {
   const canViewAudit = isMechanicOrHigher(actualRole);
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
+  const canViewFertilizingOperations = canAccessRoute(effectiveNavRole, "fertilizing_operations");
   const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");
   const canViewAccountability = canAccessRoute(effectiveNavRole, "accountability_center");
   const canViewApprovals = canAccessRoute(effectiveNavRole, "lead_approvals");
@@ -201,6 +202,9 @@ export default function AppTopNavLinks() {
     { href: "/forms", label: "Forms" },
     { href: "/inventory", label: "Inventory" },
   ];
+  if (canViewFertilizingOperations) {
+    navLinks.push({ href: "/fertilizing", label: "Fertilizing Ops" });
+  }
   if (canViewPurchases) {
     navLinks.push({ href: "/purchases", label: "Purchases" });
   }
