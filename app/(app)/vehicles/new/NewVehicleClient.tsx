@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { buildNextVehicleAssetId, buildVehicleAssetIdPrefix, nextAssetIdForPrefix } from "@/lib/assetIdFormat";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
 type VehicleStatus = "Active" | "Inactive" | "Out of Service" | "Retired";
+type Role = AppRole;
 
 export default function NewVehicleClient() {
   const router = useRouter();
@@ -23,8 +26,42 @@ export default function NewVehicleClient() {
   const [fuel, setFuel] = useState("");
   const [mileage, setMileage] = useState("");
   const [asset, setAsset] = useState("");
+  const [canEditAssetId, setCanEditAssetId] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const assetIdPrefix = useMemo(
+    () =>
+      buildVehicleAssetIdPrefix({
+        vehicleType: type,
+        make,
+      }),
+    [type, make]
+  );
+  const assetIdPreview = useMemo(() => nextAssetIdForPrefix(assetIdPrefix, []), [assetIdPrefix]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!alive || !authData.user) return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (!alive) return;
+      const role = resolveEffectiveRole(
+        (profile?.role as Role | undefined) ?? "employee",
+        readRoleViewOverride()
+      ) as Role;
+      setCanEditAssetId(role === "owner" || role === "operations_manager");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +86,22 @@ export default function NewVehicleClient() {
 
     setSubmitting(true);
     const supabase = createSupabaseBrowser();
+    let resolvedAssetId = asset.trim();
+    if (!canEditAssetId || !resolvedAssetId) {
+      const { data: existingRows, error: sequenceError } = await supabase
+        .from("vehicles")
+        .select("asset");
+      if (sequenceError) {
+        setSubmitting(false);
+        setSubmitError(sequenceError.message);
+        return;
+      }
+      resolvedAssetId = buildNextVehicleAssetId({
+        vehicleType: type,
+        make: make.trim(),
+        existingValues: (existingRows ?? []).map((row) => row.asset as string | null),
+      });
+    }
     const { error } = await supabase.from("vehicles").insert({
       id: trimmedId,
       name: trimmedName,
@@ -61,7 +114,7 @@ export default function NewVehicleClient() {
       vin: vin.trim() || null,
       fuel: fuel.trim() || null,
       mileage: parsedMileage,
-      asset: asset.trim() || null,
+      asset: resolvedAssetId || null,
     });
 
     setSubmitting(false);
@@ -145,8 +198,18 @@ export default function NewVehicleClient() {
             <Field label="Mileage">
               <input value={mileage} onChange={(e) => setMileage(e.target.value)} inputMode="numeric" style={inputStyle} />
             </Field>
-            <Field label="Asset Tag / QR">
-              <input value={asset} onChange={(e) => setAsset(e.target.value)} style={inputStyle} />
+            <Field label="Asset ID">
+              <input
+                value={canEditAssetId ? asset : asset || assetIdPreview}
+                onChange={(e) => setAsset(e.target.value)}
+                style={{ ...inputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
+                disabled={!canEditAssetId}
+              />
+              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.65 }}>
+                {canEditAssetId
+                  ? "Owner and Operations Manager can override this value."
+                  : "Auto-generated. Only Owner and Operations Manager can edit Asset ID."}
+              </div>
             </Field>
           </div>
         </section>

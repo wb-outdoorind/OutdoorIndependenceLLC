@@ -2,10 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import {
+  EQUIPMENT_SEASONS,
+  inferEquipmentSeason,
+  normalizeEquipmentSeason,
+  type EquipmentSeason,
+} from "@/lib/equipmentSeason";
+import { buildEquipmentAssetIdPrefix, buildNextEquipmentAssetId, nextAssetIdForPrefix } from "@/lib/assetIdFormat";
+import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type EquipmentStatus = "Active" | "Inactive" | "Out of Service" | "Retired" | "Red Tagged";
+type Role = AppRole;
 
 export default function NewEquipmentClient() {
   const router = useRouter();
@@ -14,6 +23,8 @@ export default function NewEquipmentClient() {
   const [name, setName] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
   const [status, setStatus] = useState<EquipmentStatus | "">("");
+  const [season, setSeason] = useState<EquipmentSeason>("Summer");
+  const [seasonManuallySet, setSeasonManuallySet] = useState(false);
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [year, setYear] = useState("");
@@ -23,8 +34,45 @@ export default function NewEquipmentClient() {
   const [currentHours, setCurrentHours] = useState("");
   const [externalId, setExternalId] = useState("");
   const [assetQr, setAssetQr] = useState("");
+  const [canEditAssetId, setCanEditAssetId] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const assetIdPrefix = useMemo(
+    () =>
+      buildEquipmentAssetIdPrefix({
+        season,
+        equipmentType,
+        make,
+        name,
+        id,
+      }),
+    [season, equipmentType, make, name, id]
+  );
+  const assetIdPreview = useMemo(() => nextAssetIdForPrefix(assetIdPrefix, []), [assetIdPrefix]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: authData } = await supabase.auth.getUser();
+      if (!alive || !authData.user) return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+      if (!alive) return;
+      const role = resolveEffectiveRole(
+        (profile?.role as Role | undefined) ?? "employee",
+        readRoleViewOverride()
+      ) as Role;
+      setCanEditAssetId(role === "owner" || role === "operations_manager");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,14 +95,37 @@ export default function NewEquipmentClient() {
     if (currentHours.trim() && (!Number.isFinite(parsedHours) || (parsedHours ?? 0) < 0)) {
       return setSubmitError("Current hours must be a valid non-negative number.");
     }
+    const resolvedSeason =
+      normalizeEquipmentSeason(season) ??
+      inferEquipmentSeason(trimmedType, trimmedName, trimmedId);
 
     setSubmitting(true);
     const supabase = createSupabaseBrowser();
+    let resolvedAssetId = externalId.trim();
+    if (!canEditAssetId || !resolvedAssetId) {
+      const { data: existingRows, error: sequenceError } = await supabase
+        .from("equipment")
+        .select("external_id");
+      if (sequenceError) {
+        setSubmitting(false);
+        setSubmitError(sequenceError.message);
+        return;
+      }
+      resolvedAssetId = buildNextEquipmentAssetId({
+        season: resolvedSeason,
+        equipmentType: trimmedType,
+        make: make.trim(),
+        name: trimmedName,
+        id: trimmedId,
+        existingValues: (existingRows ?? []).map((row) => row.external_id as string | null),
+      });
+    }
     const { error } = await supabase.from("equipment").insert({
       id: trimmedId,
       name: trimmedName,
       equipment_type: trimmedType,
       status,
+      season: resolvedSeason,
       make: make.trim() || null,
       model: model.trim() || null,
       year: parsedYear,
@@ -62,7 +133,7 @@ export default function NewEquipmentClient() {
       license_plate: licensePlate.trim() || null,
       fuel_type: fuelType.trim() || null,
       current_hours: parsedHours,
-      external_id: externalId.trim() || null,
+      external_id: resolvedAssetId || null,
       asset_qr: assetQr.trim() || null,
     });
     setSubmitting(false);
@@ -96,13 +167,65 @@ export default function NewEquipmentClient() {
           <div style={{ fontWeight: 900, marginBottom: 12 }}>Required</div>
           <div style={gridStyle}>
             <Field label="Equipment ID *">
-              <input value={id} onChange={(e) => setId(e.target.value)} style={inputStyle} required />
+              <input
+                value={id}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setId(next);
+                  if (!seasonManuallySet) {
+                    setSeason(inferEquipmentSeason(equipmentType, name, next));
+                  }
+                }}
+                style={inputStyle}
+                required
+              />
             </Field>
             <Field label="Equipment Name *">
-              <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} required />
+              <input
+                value={name}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setName(next);
+                  if (!seasonManuallySet) {
+                    setSeason(inferEquipmentSeason(equipmentType, next, id));
+                  }
+                }}
+                style={inputStyle}
+                required
+              />
             </Field>
             <Field label="Equipment Type *">
-              <input value={equipmentType} onChange={(e) => setEquipmentType(e.target.value)} style={inputStyle} required />
+              <input
+                value={equipmentType}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setEquipmentType(next);
+                  if (!seasonManuallySet) {
+                    setSeason(inferEquipmentSeason(next, name, id));
+                  }
+                }}
+                style={inputStyle}
+                required
+              />
+            </Field>
+            <Field label="Season *">
+              <select
+                value={season}
+                onChange={(e) => {
+                  const next = normalizeEquipmentSeason(e.target.value);
+                  if (!next) return;
+                  setSeason(next);
+                  setSeasonManuallySet(true);
+                }}
+                style={inputStyle}
+                required
+              >
+                {EQUIPMENT_SEASONS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Status *">
               <select value={status} onChange={(e) => setStatus(e.target.value as EquipmentStatus)} style={inputStyle} required>
@@ -141,8 +264,18 @@ export default function NewEquipmentClient() {
             <Field label="Current Hours">
               <input value={currentHours} onChange={(e) => setCurrentHours(e.target.value)} inputMode="numeric" style={inputStyle} />
             </Field>
-            <Field label="External ID">
-              <input value={externalId} onChange={(e) => setExternalId(e.target.value)} style={inputStyle} />
+            <Field label="Asset ID">
+              <input
+                value={canEditAssetId ? externalId : externalId || assetIdPreview}
+                onChange={(e) => setExternalId(e.target.value)}
+                style={{ ...inputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
+                disabled={!canEditAssetId}
+              />
+              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.65 }}>
+                {canEditAssetId
+                  ? "Owner and Operations Manager can override this value."
+                  : "Auto-generated. Only Owner and Operations Manager can edit Asset ID."}
+              </div>
             </Field>
             <Field label="Asset QR / Tag">
               <input value={assetQr} onChange={(e) => setAssetQr(e.target.value)} style={inputStyle} />

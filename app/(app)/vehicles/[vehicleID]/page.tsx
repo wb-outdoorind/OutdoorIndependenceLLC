@@ -790,6 +790,7 @@ export default function VehicleDetailPage() {
   const canShowVehiclePmButton = canManageVehicleMaintenance;
   const isTruck = normalizedVehicleType === "truck";
   const canEditVehicle = canManageVehicleMaintenance;
+  const canEditAssetId = hasRole(userRole, ["owner", "operations_manager"]);
   const canEditVehicleMileage = canManageVehicleMaintenance;
   const canViewMechanicScore = hasRole(userRole, ["mechanic"]);
   const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
@@ -946,7 +947,7 @@ export default function VehicleDetailPage() {
           oil_type: editDraft.oil_type.trim() || null,
           mileage: parsedMileage,
           status: nextStatus,
-          asset: editDraft.asset.trim() || null,
+          asset: canEditAssetId ? editDraft.asset.trim() || null : vehicle.asset ?? null,
         },
       }),
     });
@@ -1157,8 +1158,13 @@ export default function VehicleDetailPage() {
                 />
               </div>
               <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Asset Tag / QR</div>
-                <input value={editDraft.asset} onChange={(e) => updateDraft("asset", e.target.value)} style={detailInputStyle} />
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
+                <input
+                  value={editDraft.asset}
+                  onChange={(e) => updateDraft("asset", e.target.value)}
+                  style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
+                  disabled={!canEditAssetId}
+                />
               </div>
               <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>DOT #</div>
@@ -1214,6 +1220,10 @@ export default function VehicleDetailPage() {
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
               <div style={{ fontWeight: 900 }}>{displayOilType}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
+              <div style={{ fontWeight: 900 }}>{vehicle?.asset ?? "—"}</div>
             </div>
             <div>
               <div style={{ opacity: 0.7, fontSize: 12 }}>DOT #</div>

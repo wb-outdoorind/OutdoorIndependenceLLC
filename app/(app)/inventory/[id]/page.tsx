@@ -84,6 +84,17 @@ export default function InventoryItemDetailPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [detailsSubmitting, setDetailsSubmitting] = useState(false);
+  const [deletingItem, setDeletingItem] = useState(false);
+
+  const [editExternalId, setEditExternalId] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editMinimumQuantity, setEditMinimumQuantity] = useState("");
+  const [editLocationId, setEditLocationId] = useState("");
+  const [editSupplier, setEditSupplier] = useState("");
+  const [editSupplierLink, setEditSupplierLink] = useState("");
+  const [editNotes, setEditNotes] = useState("");
 
   const [changeQty, setChangeQty] = useState("");
   const [reason, setReason] = useState("adjustment");
@@ -159,6 +170,15 @@ export default function InventoryItemDetailPage() {
     setItem(itemRes.data as InventoryItemRow);
     setLocations((locationsRes.data ?? []) as InventoryLocationRow[]);
     setTransactions((txRes.data ?? []) as InventoryTransactionRow[]);
+    const itemData = itemRes.data as InventoryItemRow;
+    setEditExternalId(itemData.external_id ?? "");
+    setEditName(itemData.name ?? "");
+    setEditCategory(itemData.category ?? "");
+    setEditMinimumQuantity(String(itemData.minimum_quantity ?? 0));
+    setEditLocationId(itemData.location_id ?? "");
+    setEditSupplier(itemData.supplier ?? "");
+    setEditSupplierLink(itemData.supplier_link ?? "");
+    setEditNotes(itemData.notes ?? "");
     setLoading(false);
   }
 
@@ -219,6 +239,94 @@ export default function InventoryItemDetailPage() {
     await loadData();
   }
 
+  async function onSaveDetails(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitError(null);
+
+    if (!canManageInventory(role)) {
+      setSubmitError("You do not have permission to edit inventory items.");
+      return;
+    }
+
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      alert("Name is required.");
+      return;
+    }
+
+    const parsedMinimum = Number(editMinimumQuantity);
+    if (!Number.isFinite(parsedMinimum) || parsedMinimum < 0) {
+      alert("Minimum quantity must be 0 or greater.");
+      return;
+    }
+
+    setDetailsSubmitting(true);
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from("inventory_items")
+      .update({
+        external_id: editExternalId.trim() || null,
+        name: trimmedName,
+        category: editCategory.trim() || null,
+        minimum_quantity: Math.trunc(parsedMinimum),
+        location_id: editLocationId || null,
+        supplier: editSupplier.trim() || null,
+        supplier_link: editSupplierLink.trim() || null,
+        notes: editNotes.trim() || null,
+      })
+      .eq("id", itemId);
+
+    if (error) {
+      console.error("[inventory-detail] update item error:", error);
+      setSubmitError(error.message);
+      setDetailsSubmitting(false);
+      return;
+    }
+
+    setDetailsSubmitting(false);
+    await loadData();
+  }
+
+  async function onDeleteItem() {
+    setSubmitError(null);
+
+    if (!canManageInventory(role)) {
+      setSubmitError("You do not have permission to delete inventory items.");
+      return;
+    }
+
+    if (!window.confirm("Delete this inventory item? It will no longer appear in active inventory.")) {
+      return;
+    }
+
+    setDeletingItem(true);
+    const supabase = createSupabaseBrowser();
+
+    const deleteRes = await supabase.from("inventory_items").delete().eq("id", itemId);
+    if (!deleteRes.error) {
+      setDeletingItem(false);
+      window.location.assign("/inventory");
+      return;
+    }
+
+    const archiveRes = await supabase
+      .from("inventory_items")
+      .update({ is_active: false })
+      .eq("id", itemId);
+    if (archiveRes.error) {
+      console.error("[inventory-detail] delete/archive item error:", {
+        deleteError: deleteRes.error,
+        archiveError: archiveRes.error,
+      });
+      setSubmitError(archiveRes.error.message || deleteRes.error.message);
+      setDeletingItem(false);
+      return;
+    }
+
+    setDeletingItem(false);
+    window.location.assign("/inventory");
+  }
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -252,31 +360,114 @@ export default function InventoryItemDetailPage() {
         <>
           <div style={{ marginTop: 16, ...cardStyle() }}>
             <div style={{ fontWeight: 900, marginBottom: 12 }}>Details</div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <Spec label="Name" value={item.name} />
-              <Spec label="External ID" value={item.external_id ?? "-"} />
-              <Spec label="Category" value={item.category ?? "-"} />
-              <Spec label="Current Quantity" value={String(item.quantity)} />
-              <Spec label="Minimum Quantity" value={String(item.minimum_quantity)} />
-              <Spec label="Location" value={item.location_id ? locationNameById[item.location_id] ?? "-" : "-"} />
-              <Spec label="Supplier" value={item.supplier ?? "-"} />
-              <Spec label="Supplier Link" value={item.supplier_link ?? "-"} />
-              <Spec label="Status" value={item.is_active ? "Active" : "Inactive"} />
-              <Spec label="Updated" value={formatDateTime(item.updated_at)} />
-            </div>
+            {!canManageInventory(role) ? (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 12,
+                  }}
+                >
+                  <Spec label="Name" value={item.name} />
+                  <Spec label="External ID" value={item.external_id ?? "-"} />
+                  <Spec label="Category" value={item.category ?? "-"} />
+                  <Spec label="Current Quantity" value={String(item.quantity)} />
+                  <Spec label="Minimum Quantity" value={String(item.minimum_quantity)} />
+                  <Spec label="Location" value={item.location_id ? locationNameById[item.location_id] ?? "-" : "-"} />
+                  <Spec label="Supplier" value={item.supplier ?? "-"} />
+                  <Spec label="Supplier Link" value={item.supplier_link ?? "-"} />
+                  <Spec label="Status" value={item.is_active ? "Active" : "Inactive"} />
+                  <Spec label="Updated" value={formatDateTime(item.updated_at)} />
+                </div>
 
-            {item.notes ? (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>Notes</div>
-                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{item.notes}</div>
-              </div>
-            ) : null}
+                {item.notes ? (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ opacity: 0.72, fontSize: 12 }}>Notes</div>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{item.notes}</div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <form onSubmit={onSaveDetails}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 12,
+                  }}
+                >
+                  <Field label="Name *">
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} style={inputStyle()} required />
+                  </Field>
+                  <Field label="External ID (optional)">
+                    <input value={editExternalId} onChange={(e) => setEditExternalId(e.target.value)} style={inputStyle()} />
+                  </Field>
+                  <Field label="Category (optional)">
+                    <input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={inputStyle()} />
+                  </Field>
+                  <Field label="Current Quantity">
+                    <input value={String(item.quantity)} readOnly style={{ ...inputStyle(), opacity: 0.78 }} />
+                  </Field>
+                  <Field label="Minimum Quantity *">
+                    <input
+                      value={editMinimumQuantity}
+                      onChange={(e) => setEditMinimumQuantity(e.target.value)}
+                      inputMode="numeric"
+                      style={inputStyle()}
+                      required
+                    />
+                  </Field>
+                  <Field label="Location">
+                    <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} style={inputStyle()}>
+                      <option value="">None</option>
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Supplier (optional)">
+                    <input value={editSupplier} onChange={(e) => setEditSupplier(e.target.value)} style={inputStyle()} />
+                  </Field>
+                  <Field label="Supplier Link (optional)">
+                    <input value={editSupplierLink} onChange={(e) => setEditSupplierLink(e.target.value)} style={inputStyle()} />
+                  </Field>
+                  <Field label="Status">
+                    <input value={item.is_active ? "Active" : "Inactive"} readOnly style={{ ...inputStyle(), opacity: 0.78 }} />
+                  </Field>
+                  <Field label="Updated">
+                    <input value={formatDateTime(item.updated_at)} readOnly style={{ ...inputStyle(), opacity: 0.78 }} />
+                  </Field>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <Field label="Notes (optional)">
+                    <textarea
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      rows={3}
+                      style={{ ...inputStyle(), resize: "vertical" }}
+                    />
+                  </Field>
+                </div>
+
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="submit" style={buttonStyle} disabled={detailsSubmitting}>
+                    {detailsSubmitting ? "Saving..." : "Save Item Changes"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onDeleteItem()}
+                    style={{ ...secondaryButtonStyle, borderColor: "rgba(255,120,120,0.5)", color: "#ffb3b3" }}
+                    disabled={deletingItem}
+                  >
+                    {deletingItem ? "Deleting..." : "Delete Item"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>

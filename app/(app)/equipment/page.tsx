@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import { buildEquipmentAssetIdPrefix } from "@/lib/assetIdFormat";
 
 type EquipmentRow = {
   id: string;
   name: string;
   equipment_type: string | null;
+  season: string | null;
+  external_id: string | null;
   status: string | null;
   current_hours: number | null;
   make: string | null;
@@ -17,69 +20,51 @@ type EquipmentRow = {
 };
 type Role = AppRole;
 
-function pickCategory(typeValue: string, nameValue: string, idValue: string) {
-  const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
-  if (hay.includes("backpack blower")) return "BackpackBlower";
-  if (hay.includes("hand blower") || hay.includes("blower hand")) return "HandBlower";
-  if (hay.includes("truck")) return "Truck";
-  if (hay.includes("trailer")) return "Trailer";
-  if (hay.includes("mower")) return "Mower";
-  if (hay.includes("applicator") || hay.includes("sprayer")) return "Applicator";
-  if (hay.includes("skid")) return "SkidSteer";
-  if (hay.includes("blower")) return "Blower";
-  return "Equipment";
-}
-
-function toPascalToken(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/[^a-zA-Z0-9 ]+/g, " ")
-    .split(" ")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join("");
-}
-
-function withoutDuplicatePrefix(category: string, typeToken: string) {
-  const lowerCategory = category.toLowerCase();
-  const lowerType = typeToken.toLowerCase();
-  if (lowerType === lowerCategory) return "Unit";
-  if (lowerType.startsWith(lowerCategory)) {
-    const trimmed = typeToken.slice(category.length);
-    return trimmed || "Unit";
-  }
-  return typeToken;
-}
-
-function chooseSubtypeToken(typeValue: string, nameValue: string, idValue: string, category: string) {
-  const hay = `${typeValue} ${nameValue} ${idValue}`.toLowerCase();
-
-  if (category === "BackpackBlower") return "BackpackBlower";
-  if (category === "HandBlower") return "HandBlower";
-  if (category === "Blower") {
-    if (hay.includes("backpack")) return "BackpackBlower";
-    if (hay.includes("hand")) return "HandBlower";
-    return "Blower";
+function buildEquipmentDisplayIds(rows: EquipmentRow[]) {
+  const maxByPrefix: Record<string, number> = {};
+  for (const row of rows) {
+    const existing = (row.external_id ?? "").trim();
+    if (!existing) continue;
+    const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
+    if (simpleMatch) {
+      const prefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+      const seq = Number(simpleMatch[2]);
+      if (Number.isInteger(seq)) {
+        maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
+      }
+      continue;
+    }
+    const structuredMatch = /^(.*)-(\d+)$/.exec(existing);
+    if (!structuredMatch) continue;
+    const prefix = structuredMatch[1];
+    const seq = Number(structuredMatch[2]);
+    if (Number.isInteger(seq) && prefix) {
+      maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
+    }
   }
 
-  const base = toPascalToken(typeValue || nameValue || idValue) || "Unit";
-  return withoutDuplicatePrefix(category, base);
-}
-
-function buildConciseEquipmentId(row: EquipmentRow, indexByGroup: Record<string, number>) {
-  const category = pickCategory(row.equipment_type ?? "", row.name ?? "", row.id);
-  const subtype = chooseSubtypeToken(
-    row.equipment_type ?? "",
-    row.name ?? "",
-    row.id,
-    category
-  );
-  const groupKey = `${category}|${subtype}`;
-  indexByGroup[groupKey] = (indexByGroup[groupKey] ?? 0) + 1;
-  if (subtype === "Unit") return `${category}_${indexByGroup[groupKey]}`;
-  if (subtype === category) return `${category}_${indexByGroup[groupKey]}`;
-  return `${category}_${subtype}_${indexByGroup[groupKey]}`;
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    const existing = (row.external_id ?? "").trim();
+    if (existing) {
+      map[row.id] = existing;
+      continue;
+    }
+    const prefix = buildEquipmentAssetIdPrefix({
+      season: row.season,
+      equipmentType: row.equipment_type,
+      make: row.make,
+      name: row.name,
+      id: row.id,
+    });
+    const seq = (maxByPrefix[prefix] ?? 0) + 1;
+    maxByPrefix[prefix] = seq;
+    map[row.id] =
+      prefix === "Truck" || prefix === "Trailer"
+        ? `${prefix}_${seq}`
+        : `${prefix}-${seq}`;
+  }
+  return map;
 }
 
 function cardStyle(): React.CSSProperties {
@@ -120,7 +105,7 @@ export default function EquipmentListPage() {
       const supabase = createSupabaseBrowser();
       const { data, error } = await supabase
         .from("equipment")
-        .select("id,name,equipment_type,status,current_hours,make,model,year")
+        .select("id,name,equipment_type,season,external_id,status,current_hours,make,model,year")
         .order("name", { ascending: true });
 
       if (!alive) return;
@@ -191,7 +176,9 @@ export default function EquipmentListPage() {
         r.id,
         r.name,
         r.equipment_type ?? "",
+        r.external_id ?? "",
         r.status ?? "",
+        r.season ?? "",
         typeof r.current_hours === "number" ? String(r.current_hours) : "",
         r.make ?? "",
         r.model ?? "",
@@ -204,14 +191,7 @@ export default function EquipmentListPage() {
     });
   }, [rows, search, statusFilter]);
 
-  const conciseIdByEquipmentId = useMemo(() => {
-    const map: Record<string, string> = {};
-    const indexByGroup: Record<string, number> = {};
-    for (const row of rows) {
-      map[row.id] = buildConciseEquipmentId(row, indexByGroup);
-    }
-    return map;
-  }, [rows]);
+  const displayAssetIdByEquipmentId = useMemo(() => buildEquipmentDisplayIds(rows), [rows]);
 
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
@@ -292,11 +272,11 @@ export default function EquipmentListPage() {
                   >
                     <div>
                       <div style={{ fontWeight: 900, fontSize: 16 }}>
-                        {conciseIdByEquipmentId[r.id] ?? r.id} - {r.name}
+                        {displayAssetIdByEquipmentId[r.id] ?? r.id} - {r.name}
                       </div>
                       <div style={{ marginTop: 3, opacity: 0.6, fontSize: 12 }}>Original ID: {r.id}</div>
                       <div style={{ marginTop: 4, opacity: 0.8, fontSize: 13 }}>
-                        Type: {r.equipment_type ?? "-"} • Status: {r.status ?? "-"}
+                        Type: {r.equipment_type ?? "-"} • Season: {r.season ?? "-"} • Status: {r.status ?? "-"}
                       </div>
                       <div style={{ marginTop: 4, opacity: 0.7, fontSize: 12 }}>
                         {r.make ?? "-"} • {r.model ?? "-"} • {typeof r.year === "number" ? r.year : "-"}

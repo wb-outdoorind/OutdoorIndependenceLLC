@@ -3,6 +3,7 @@ import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { isMechanicOrHigher } from "@/lib/roles";
+import { normalizeEquipmentSeason } from "@/lib/equipmentSeason";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,7 @@ type MutableEquipmentPatch = {
   license_plate?: string | null;
   fuel_type?: string | null;
   oil_type?: string | null;
+  season?: "All" | "Summer" | "Winter";
   current_hours?: number | null;
   status?: string | null;
   external_id?: string | null;
@@ -174,6 +176,15 @@ function normalizeEquipmentPatch(value: unknown): { patch: MutableEquipmentPatch
   if (oilType !== undefined) patch.oil_type = oilType;
   else if ("oil_type" in raw) invalid.push("oil_type");
 
+  const seasonRaw = parseTextField(raw.season, { maxLen: 20, allowNull: false });
+  if (seasonRaw !== undefined) {
+    const season = normalizeEquipmentSeason(seasonRaw);
+    if (!season) invalid.push("season");
+    else patch.season = season;
+  } else if ("season" in raw) {
+    invalid.push("season");
+  }
+
   const currentHours = parseNumberField(raw.current_hours, { min: 0 });
   if (currentHours !== undefined) patch.current_hours = currentHours;
   else if ("current_hours" in raw) invalid.push("current_hours");
@@ -240,6 +251,12 @@ export async function POST(req: Request) {
     if (!Object.keys(patch).length) {
       return NextResponse.json({ error: "No valid vehicle fields to update" }, { status: 400 });
     }
+    if (!(role === "owner" || role === "operations_manager")) {
+      delete patch.asset;
+      if (!Object.keys(patch).length) {
+        return NextResponse.json({ error: "No editable fields for this role" }, { status: 403 });
+      }
+    }
 
     const { data, error } = await admin
       .from("vehicles")
@@ -263,12 +280,18 @@ export async function POST(req: Request) {
     if (!Object.keys(patch).length) {
       return NextResponse.json({ error: "No valid equipment fields to update" }, { status: 400 });
     }
+    if (!(role === "owner" || role === "operations_manager")) {
+      delete patch.external_id;
+      if (!Object.keys(patch).length) {
+        return NextResponse.json({ error: "No editable fields for this role" }, { status: 403 });
+      }
+    }
 
     const { data, error } = await admin
       .from("equipment")
       .update(patch)
       .eq("id", id)
-      .select("id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,current_hours,status,external_id")
+      .select("id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,season,current_hours,status,external_id")
       .maybeSingle();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!data) return NextResponse.json({ error: "Equipment not found" }, { status: 404 });

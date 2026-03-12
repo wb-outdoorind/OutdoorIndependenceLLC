@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { buildVehicleAssetIdPrefix } from "@/lib/assetIdFormat";
 
 /* ======================
    Supabase setup
@@ -24,6 +25,7 @@ type VehicleRecord = {
   status: string | null;
   type: string | null;
   mileage: number | null;
+  asset: string | null;
 };
 
 /* ======================
@@ -72,6 +74,50 @@ export default function VehiclesListClient({
   const isDev = process.env.NODE_ENV === "development";
   const [showDebug, setShowDebug] = useState(false);
 
+  const displayAssetIdByVehicleId = useMemo(() => {
+    const maxByPrefix: Record<string, number> = {};
+    for (const row of vehicles) {
+      const existing = (row.asset ?? "").trim();
+      if (!existing) continue;
+      const simpleMatch = /^(Truck|Trailer)_(\d+)$/i.exec(existing);
+      if (simpleMatch) {
+        const prefix = simpleMatch[1][0].toUpperCase() + simpleMatch[1].slice(1).toLowerCase();
+        const seq = Number(simpleMatch[2]);
+        if (Number.isInteger(seq)) {
+          maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
+        }
+        continue;
+      }
+      const structuredMatch = /^(.*)-(\d+)$/.exec(existing);
+      if (!structuredMatch) continue;
+      const prefix = structuredMatch[1];
+      const seq = Number(structuredMatch[2]);
+      if (Number.isInteger(seq) && prefix) {
+        maxByPrefix[prefix] = Math.max(maxByPrefix[prefix] ?? 0, seq);
+      }
+    }
+
+    const map: Record<string, string> = {};
+    for (const row of vehicles) {
+      const existing = (row.asset ?? "").trim();
+      if (existing) {
+        map[row.id] = existing;
+        continue;
+      }
+      const prefix = buildVehicleAssetIdPrefix({
+        vehicleType: row.type,
+        make: row.make,
+      });
+      const seq = (maxByPrefix[prefix] ?? 0) + 1;
+      maxByPrefix[prefix] = seq;
+      map[row.id] =
+        prefix === "Truck" || prefix === "Trailer"
+          ? `${prefix}_${seq}`
+          : `${prefix}-${seq}`;
+    }
+    return map;
+  }, [vehicles]);
+
   useEffect(() => {
     let alive = true;
 
@@ -85,7 +131,7 @@ export default function VehiclesListClient({
 
         const res = await supabase
           .from("vehicles")
-          .select("id,name,make,model,year,status,type,mileage")
+          .select("id,name,make,model,year,status,type,mileage,asset")
           .order("id", { ascending: true });
 
         if (!alive) return;
@@ -129,6 +175,7 @@ export default function VehiclesListClient({
         typeof v.year === "number" ? String(v.year) : "",
         v.status ?? "",
         v.type ?? "",
+        v.asset ?? "",
       ]
         .join(" ")
         .toLowerCase();
@@ -276,7 +323,7 @@ export default function VehiclesListClient({
                       >
                         <div>
                           <div style={{ fontWeight: 900, fontSize: 16 }}>
-                            {v.id} — {v.name}
+                            {displayAssetIdByVehicleId[v.id] ?? v.id} — {v.name}
                           </div>
                           <div
                             style={{

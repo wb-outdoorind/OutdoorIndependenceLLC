@@ -10,6 +10,12 @@ import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 import EquipmentDocumentsSection from "@/components/assets/EquipmentDocumentsSection";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
+import {
+  EQUIPMENT_SEASONS,
+  inferEquipmentSeason,
+  normalizeEquipmentSeason,
+  type EquipmentSeason,
+} from "@/lib/equipmentSeason";
 
 type EquipmentRow = {
   id: string;
@@ -22,6 +28,7 @@ type EquipmentRow = {
   license_plate: string | null;
   fuel_type: string | null;
   oil_type: string | null;
+  season: string | null;
   current_hours: number | null;
   status: string | null;
   external_id: string | null;
@@ -37,6 +44,7 @@ type EquipmentEditDraft = {
   license_plate: string;
   fuel_type: string;
   oil_type: string;
+  season: EquipmentSeason;
   current_hours: string;
   status: string;
   external_id: string;
@@ -299,7 +307,7 @@ export default function EquipmentDetailPage() {
       const { data, error } = await supabase
         .from("equipment")
         .select(
-          "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,current_hours,status,external_id"
+          "id,name,equipment_type,make,model,year,serial_number,license_plate,fuel_type,oil_type,season,current_hours,status,external_id"
         )
         .eq("id", equipmentIdFromRoute)
         .maybeSingle();
@@ -332,6 +340,9 @@ export default function EquipmentDetailPage() {
         license_plate: row.license_plate ?? "",
         fuel_type: row.fuel_type ?? "",
         oil_type: row.oil_type ?? "",
+        season:
+          normalizeEquipmentSeason(row.season) ??
+          inferEquipmentSeason(row.equipment_type, row.name, row.id),
         current_hours: typeof row.current_hours === "number" ? String(row.current_hours) : "",
         status: row.status ?? "",
         external_id: row.external_id ?? "",
@@ -507,6 +518,7 @@ export default function EquipmentDetailPage() {
     (isTrailerEquipment || isMowerEquipment || isApplicatorEquipment || hasPmTemplate);
   const canEditEquipment =
     canManageEquipmentMaintenance;
+  const canEditAssetId = hasRole(userRole, ["owner", "operations_manager"]);
   const canViewMechanicScore = hasRole(userRole, ["mechanic"]);
   const canEditMechanicScore = hasRole(userRole, ["mechanic"]);
   const canViewScoreTrends = canViewMechanicScore;
@@ -529,6 +541,9 @@ export default function EquipmentDetailPage() {
       license_plate: equipment.license_plate ?? "",
       fuel_type: equipment.fuel_type ?? "",
       oil_type: equipment.oil_type ?? "",
+      season:
+        normalizeEquipmentSeason(equipment.season) ??
+        inferEquipmentSeason(equipment.equipment_type, equipment.name, equipment.id),
       current_hours: typeof equipment.current_hours === "number" ? String(equipment.current_hours) : "",
       status: equipment.status ?? "",
       external_id: equipment.external_id ?? "",
@@ -581,9 +596,14 @@ export default function EquipmentDetailPage() {
           license_plate: editDraft.license_plate.trim() || null,
           fuel_type: editDraft.fuel_type.trim() || null,
           oil_type: editDraft.oil_type.trim() || null,
+          season:
+            normalizeEquipmentSeason(editDraft.season) ??
+            inferEquipmentSeason(nextType, nextName, equipment.id),
           current_hours: parsedHours,
           status: nextStatus,
-          external_id: editDraft.external_id.trim() || null,
+          external_id: canEditAssetId
+            ? editDraft.external_id.trim() || null
+            : equipment.external_id ?? null,
         },
       }),
     });
@@ -615,6 +635,9 @@ export default function EquipmentDetailPage() {
       license_plate: updated.license_plate ?? "",
       fuel_type: updated.fuel_type ?? "",
       oil_type: updated.oil_type ?? "",
+      season:
+        normalizeEquipmentSeason(updated.season) ??
+        inferEquipmentSeason(updated.equipment_type, updated.name, updated.id),
       current_hours: typeof updated.current_hours === "number" ? String(updated.current_hours) : "",
       status: updated.status ?? "",
       external_id: updated.external_id ?? "",
@@ -901,12 +924,27 @@ export default function EquipmentDetailPage() {
                 <input value={editDraft.oil_type} onChange={(e) => updateDraft("oil_type", e.target.value)} style={detailInputStyle} />
               </div>
               <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Season</div>
+                <select value={editDraft.season} onChange={(e) => updateDraft("season", e.target.value as EquipmentSeason)} style={detailInputStyle}>
+                  {EQUIPMENT_SEASONS.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <div style={{ opacity: 0.7, fontSize: 12 }}>Current Hours</div>
                 <input value={editDraft.current_hours} onChange={(e) => updateDraft("current_hours", e.target.value)} style={detailInputStyle} inputMode="decimal" />
               </div>
               <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>External ID</div>
-                <input value={editDraft.external_id} onChange={(e) => updateDraft("external_id", e.target.value)} style={detailInputStyle} />
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
+                <input
+                  value={editDraft.external_id}
+                  onChange={(e) => updateDraft("external_id", e.target.value)}
+                  style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
+                  disabled={!canEditAssetId}
+                />
               </div>
             </div>
           </>
@@ -928,6 +966,13 @@ export default function EquipmentDetailPage() {
             <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
             <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
             <Spec
+              label="Season"
+              value={
+                normalizeEquipmentSeason(equipment?.season) ??
+                inferEquipmentSeason(equipment?.equipment_type, equipment?.name, equipment?.id)
+              }
+            />
+            <Spec
               label="Current Hours"
               value={
                 typeof equipment?.current_hours === "number"
@@ -935,7 +980,7 @@ export default function EquipmentDetailPage() {
                   : "-"
               }
             />
-            <Spec label="External ID" value={equipment?.external_id ?? "-"} />
+            <Spec label="Asset ID" value={equipment?.external_id ?? "-"} />
           </div>
         )}
       </div>
