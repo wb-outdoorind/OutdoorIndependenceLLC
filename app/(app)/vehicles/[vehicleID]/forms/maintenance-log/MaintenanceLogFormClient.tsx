@@ -76,6 +76,13 @@ type MaintenanceRequestRow = {
   description: string | null;
 };
 
+type VehicleRequestOption = {
+  id: string;
+  created_at: string;
+  status: string | null;
+  description: string | null;
+};
+
 type PurchaseLinkedSummary = {
   id: string;
   overall_status: string;
@@ -259,12 +266,16 @@ export default function MaintenanceLogPage() {
   const [partsUsed, setPartsUsed] = useState<PartUsed[]>([]);
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [useQuickLogOverride, setUseQuickLogOverride] = useState(false);
-  const [linkedRequestId, setLinkedRequestId] = useState(queryRequestId);
+  const [requestOptions, setRequestOptions] = useState<VehicleRequestOption[]>([]);
+  const [linkedRequestIds, setLinkedRequestIds] = useState<string[]>(queryRequestId ? [queryRequestId] : []);
+  const [requestLoadError, setRequestLoadError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
   const [linkedPurchases, setLinkedPurchases] = useState<PurchaseLinkedSummary[]>([]);
   const [linkedPurchaseItems, setLinkedPurchaseItems] = useState<Record<string, PurchaseLinkedItem[]>>({});
   const [linkedPurchasesLoading, setLinkedPurchasesLoading] = useState(false);
   const [linkedPurchasesError, setLinkedPurchasesError] = useState<string | null>(null);
+  const linkedRequestId = linkedRequestIds[0] ?? "";
 
   const [linkedRequest, setLinkedRequest] = useState<MaintenanceRequestRecord | null>(null);
   const [currentVehicleMileage, setCurrentVehicleMileage] = useState<number | null>(null);
@@ -320,14 +331,37 @@ export default function MaintenanceLogPage() {
         }
       }
 
+      const requestListRes = await supabase
+        .from("maintenance_requests")
+        .select("id,created_at,status,description")
+        .eq("vehicle_id", vehicleId)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (!active) return;
+      if (requestListRes.error) {
+        setRequestLoadError(requestListRes.error.message || "Failed loading maintenance requests.");
+        setRequestOptions([]);
+      } else {
+        setRequestLoadError(null);
+        setRequestOptions((requestListRes.data ?? []) as VehicleRequestOption[]);
+      }
+
       if (isEditMode) {
-        const { data: logRow, error: logError } = await supabase
-          .from("maintenance_logs")
-          .select("id,created_at,vehicle_id,request_id,mileage,status_update,mechanic_self_score,notes")
-          .eq("id", editId)
-          .eq("vehicle_id", vehicleId)
-          .maybeSingle();
+        const [logRes, linkRes] = await Promise.all([
+          supabase
+            .from("maintenance_logs")
+            .select("id,created_at,vehicle_id,request_id,mileage,status_update,mechanic_self_score,notes")
+            .eq("id", editId)
+            .eq("vehicle_id", vehicleId)
+            .maybeSingle(),
+          supabase
+            .from("maintenance_log_request_links")
+            .select("request_id")
+            .eq("maintenance_log_id", editId),
+        ]);
         if (!active) return;
+        const logRow = logRes.data;
+        const logError = logRes.error;
         if (logError || !logRow) {
           console.error("Failed loading maintenance log for edit:", logError);
           return;
@@ -339,7 +373,17 @@ export default function MaintenanceLogPage() {
         const parsedNextDueHours = parseFieldValue(logRow.notes, "Next Due Hours");
         const parsedResetOilLife = parseFieldValue(logRow.notes, "Reset Oil Life");
 
-        setLinkedRequestId(logRow.request_id ?? "");
+        const linkErrorCode = (linkRes.error as { code?: string } | null)?.code;
+        const linkedFromTable =
+          linkRes.error && linkErrorCode !== "42P01"
+            ? []
+            : ((linkRes.data ?? []) as Array<{ request_id: string | null }>)
+                .map((row) => row.request_id)
+                .filter((id): id is string => typeof id === "string" && id.length > 0);
+        const uniqueLinked = Array.from(
+          new Set([...(logRow.request_id ? [logRow.request_id] : []), ...linkedFromTable])
+        );
+        setLinkedRequestIds(uniqueLinked);
         setTitle(parsedTitle || "Maintenance Log");
         setMileage(Number.isFinite(Number(logRow.mileage)) ? String(logRow.mileage) : "");
         setStatus(coerceMaintenanceLogStatus(logRow.status_update, "In Progress"));
@@ -399,6 +443,7 @@ export default function MaintenanceLogPage() {
           router.replace(`/vehicles/${encodeURIComponent(vehicleId)}`);
           return;
         }
+        setLinkedRequestIds((prev) => (prev.length ? prev : [queryRequestId]));
 
         if (req) {
           setTitle((prev) => (prev.trim() ? prev : req.title));
@@ -639,6 +684,54 @@ export default function MaintenanceLogPage() {
     );
   }
 
+  function toggleLinkedRequest(requestId: string) {
+    const id = requestId.trim();
+    if (!id) return;
+    setLinkedRequestIds((prev) => {
+      if (prev.includes(id)) return prev.filter((value) => value !== id);
+      return [...prev, id];
+    });
+  }
+
+  function setPrimaryLinkedRequest(requestId: string) {
+    const id = requestId.trim();
+    if (!id) return;
+    setLinkedRequestIds((prev) => {
+      const remaining = prev.filter((value) => value !== id);
+      return [id, ...remaining];
+    });
+  }
+
+  async function onDeleteLog() {
+    if (!isEditMode || deleteBusy) return;
+    if (!window.confirm("Delete this maintenance log? This cannot be undone.")) return;
+    setDeleteBusy(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/maintenance/logs/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          assetType: "vehicle",
+          logId: editId,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setSubmitError(json.error || "Failed to delete maintenance log.");
+        setDeleteBusy(false);
+        return;
+      }
+      requestFormDraftClear();
+      router.replace(returnTo || `/vehicles/${encodeURIComponent(vehicleId)}`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Failed to delete maintenance log.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -655,7 +748,10 @@ export default function MaintenanceLogPage() {
     }
 
     const m = Number(mileage);
-    const effectiveRequestId = linkedRequestId.trim();
+    const selectedRequestIds = Array.from(
+      new Set(linkedRequestIds.map((id) => id.trim()).filter((id) => id.length > 0))
+    );
+    const effectiveRequestId = selectedRequestIds[0] ?? "";
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(m) || m <= 0) return alert(`Please enter valid ${readingLabel.toLowerCase()}.`);
     if (!status) return alert("Please select a status.");
@@ -743,18 +839,34 @@ export default function MaintenanceLogPage() {
       return;
     }
 
-    if (effectiveRequestId) {
+    if (selectedRequestIds.length) {
       const linkedRequestStatus = mapLogStatusToRequestStatus(status);
       const { error: requestUpdateError } = await supabase
         .from("maintenance_requests")
         .update({
           status: linkedRequestStatus,
         })
-        .eq("id", effectiveRequestId);
+        .in("id", selectedRequestIds);
 
       if (requestUpdateError) {
         console.error("Maintenance request status update failed:", requestUpdateError);
       }
+    }
+
+    const linkRes = await fetch("/api/maintenance/logs/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "link_requests",
+        assetType: "vehicle",
+        logId: savedLogId,
+        requestIds: selectedRequestIds,
+      }),
+    });
+    if (!linkRes.ok) {
+      const linkJson = (await linkRes.json().catch(() => ({}))) as { error?: string };
+      setSubmitError(linkJson.error || "Maintenance log saved, but request linking failed.");
+      return;
     }
 
     if (partsUsed.length > 0) {
@@ -862,10 +974,11 @@ export default function MaintenanceLogPage() {
       <h1 style={{ marginBottom: 6 }}>{isEditMode ? "Edit Maintenance Log" : "Maintenance Log"}</h1>
       <div style={{ opacity: 0.75, lineHeight: 1.4 }}>
         Vehicle ID: <strong>{vehicleId || "(missing)"}</strong>
-        {linkedRequestId ? (
+        {linkedRequestIds.length ? (
           <>
             {" "}
-            • Linked Request: <strong>{linkedRequestId}</strong>
+            • Linked Request{linkedRequestIds.length > 1 ? "s" : ""}:{" "}
+            <strong>{linkedRequestIds.join(", ")}</strong>
           </>
         ) : null}
       </div>
@@ -961,6 +1074,67 @@ export default function MaintenanceLogPage() {
                 />
               </Field>
             ) : null}
+
+            <Field label="Linked Request(s) (optional)">
+              <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.7 }}>
+                Required unless Quick Maintenance Log Override is enabled.
+              </div>
+              {requestLoadError ? (
+                <div style={{ marginBottom: 6, color: "#ff9d9d", fontSize: 12 }}>
+                  {requestLoadError}
+                </div>
+              ) : null}
+              <div
+                style={{
+                  maxHeight: 160,
+                  overflowY: "auto",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 12,
+                  padding: 8,
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                {requestOptions.length ? (
+                  requestOptions.map((request) => (
+                    <label
+                      key={request.id}
+                      style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={linkedRequestIds.includes(request.id)}
+                        onChange={() => toggleLinkedRequest(request.id)}
+                      />
+                      <span>
+                        {parseTitleFromDescription(request.description) || "Request"} •{" "}
+                        {new Date(request.created_at).toLocaleDateString()} •{" "}
+                        {coerceMaintenanceRequestStatus(request.status, "Open")}
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.72 }}>No requests found for this vehicle.</div>
+                )}
+              </div>
+              {linkedRequestIds.length > 1 ? (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 4 }}>
+                    Primary linked request (used for purchase linking)
+                  </div>
+                  <select
+                    value={linkedRequestId}
+                    onChange={(e) => setPrimaryLinkedRequest(e.target.value)}
+                    style={inputStyle}
+                  >
+                    {linkedRequestIds.map((requestId) => (
+                      <option key={requestId} value={requestId}>
+                        {requestId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </Field>
 
             <Field label="Reset Oil Life?">
               <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -1193,6 +1367,17 @@ export default function MaintenanceLogPage() {
           <button type="submit" style={buttonStyle}>
             {isEditMode ? "Save Changes" : "Save Maintenance Log"}
           </button>
+
+          {isEditMode ? (
+            <button
+              type="button"
+              onClick={() => void onDeleteLog()}
+              style={{ ...secondaryButtonStyle, borderColor: "rgba(255,120,120,0.5)", color: "#ffb3b3" }}
+              disabled={deleteBusy}
+            >
+              {deleteBusy ? "Deleting..." : "Delete Log"}
+            </button>
+          ) : null}
 
           <button
             type="button"

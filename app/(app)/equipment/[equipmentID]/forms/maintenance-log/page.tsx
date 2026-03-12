@@ -173,7 +173,7 @@ export default function EquipmentMaintenanceLogPage() {
   const [nextDueHours, setNextDueHours] = useState("");
 
   const [requestOptions, setRequestOptions] = useState<EquipmentRequestOption[]>([]);
-  const [selectedRequestId, setSelectedRequestId] = useState("");
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>(queryRequestId ? [queryRequestId] : []);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<Role | null>(null);
@@ -191,6 +191,8 @@ export default function EquipmentMaintenanceLogPage() {
   const [linkedPurchaseItems, setLinkedPurchaseItems] = useState<Record<string, PurchaseLinkedItem[]>>({});
   const [linkedPurchasesLoading, setLinkedPurchasesLoading] = useState(false);
   const [linkedPurchasesError, setLinkedPurchasesError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const selectedRequestId = selectedRequestIds[0] ?? "";
   const canSubmitPartsUsage = canManagePartsUsage(userRole);
   const canUseQuickOverride = canQuickLogOverride(userRole);
   const canEditExistingManagedForms = canEditManagedForms(userRole);
@@ -275,7 +277,7 @@ export default function EquipmentMaintenanceLogPage() {
           ? queryRequestId
           : "";
       if (!isEditMode) {
-        setSelectedRequestId(linked);
+        setSelectedRequestIds(linked ? [linked] : []);
       }
       if (!isEditMode && linked) {
         const req = options.find((r) => r.id === linked);
@@ -320,14 +322,22 @@ export default function EquipmentMaintenanceLogPage() {
 
     void (async () => {
       const supabase = createSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("equipment_maintenance_logs")
-        .select("id,created_at,equipment_id,request_id,hours,notes,status_update,mechanic_self_score")
-        .eq("id", editId)
-        .eq("equipment_id", equipmentId)
-        .maybeSingle();
+      const [logRes, linkRes] = await Promise.all([
+        supabase
+          .from("equipment_maintenance_logs")
+          .select("id,created_at,equipment_id,request_id,hours,notes,status_update,mechanic_self_score")
+          .eq("id", editId)
+          .eq("equipment_id", equipmentId)
+          .maybeSingle(),
+        supabase
+          .from("equipment_maintenance_log_request_links")
+          .select("request_id")
+          .eq("maintenance_log_id", editId),
+      ]);
       if (!active) return;
 
+      const data = logRes.data;
+      const error = logRes.error;
       if (error || !data) {
         console.error("[equipment-maintenance-log] failed to load maintenance log for edit:", error);
         setSubmitError(error?.message || "Failed to load maintenance log.");
@@ -337,7 +347,16 @@ export default function EquipmentMaintenanceLogPage() {
       const parsedServiceDate = parseFieldValue(data.notes, "Service Date");
       const parsedNextDueHours = parseFieldValue(data.notes, "Next Due Hours");
 
-      setSelectedRequestId(data.request_id ?? "");
+      const linkErrorCode = (linkRes.error as { code?: string } | null)?.code;
+      const linkedFromTable =
+        linkRes.error && linkErrorCode !== "42P01"
+          ? []
+          : ((linkRes.data ?? []) as Array<{ request_id: string | null }>)
+              .map((row) => row.request_id)
+              .filter((id): id is string => typeof id === "string" && id.length > 0);
+      setSelectedRequestIds(
+        Array.from(new Set([...(data.request_id ? [data.request_id] : []), ...linkedFromTable]))
+      );
       setTitle(parseFieldValue(data.notes, "Title") || "Maintenance Log");
       setHours(Number.isFinite(Number(data.hours)) ? String(data.hours) : "");
       setStatus(coerceMaintenanceLogStatus(data.status_update, "In Progress"));
@@ -490,6 +509,54 @@ export default function EquipmentMaintenanceLogPage() {
     );
   }
 
+  function toggleSelectedRequest(requestId: string) {
+    const id = requestId.trim();
+    if (!id) return;
+    setSelectedRequestIds((prev) => {
+      if (prev.includes(id)) return prev.filter((value) => value !== id);
+      return [...prev, id];
+    });
+  }
+
+  function setPrimarySelectedRequest(requestId: string) {
+    const id = requestId.trim();
+    if (!id) return;
+    setSelectedRequestIds((prev) => {
+      const remaining = prev.filter((value) => value !== id);
+      return [id, ...remaining];
+    });
+  }
+
+  async function onDeleteLog() {
+    if (!isEditMode || deleteBusy) return;
+    if (!window.confirm("Delete this maintenance log? This cannot be undone.")) return;
+    setDeleteBusy(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/maintenance/logs/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          assetType: "equipment",
+          logId: editId,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setSubmitError(json.error || "Failed to delete maintenance log.");
+        setDeleteBusy(false);
+        return;
+      }
+      requestFormDraftClear();
+      router.replace(returnTo || `/equipment/${encodeURIComponent(equipmentId)}`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Failed to delete maintenance log.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
@@ -506,13 +573,17 @@ export default function EquipmentMaintenanceLogPage() {
     }
 
     const h = Number(hours);
+    const linkedRequestIds = Array.from(
+      new Set(selectedRequestIds.map((id) => id.trim()).filter((id) => id.length > 0))
+    );
+    const primaryRequestId = linkedRequestIds[0] ?? "";
     if (!title.trim()) return alert("Please enter a title (what was done).");
     if (!Number.isFinite(h) || h < 0) return alert("Please enter valid hours.");
     if (!status) return alert("Please select a status.");
-    if (!isEditMode && !selectedRequestId && !useQuickLogOverride) {
+    if (!isEditMode && !primaryRequestId && !useQuickLogOverride) {
       return alert("Link this log to a maintenance request, or enable Quick Maintenance Log Override.");
     }
-    if (!isEditMode && !selectedRequestId && useQuickLogOverride && !canUseQuickOverride) {
+    if (!isEditMode && !primaryRequestId && useQuickLogOverride && !canUseQuickOverride) {
       return alert("You do not have permission to create a quick maintenance log.");
     }
 
@@ -554,7 +625,7 @@ export default function EquipmentMaintenanceLogPage() {
       const { data: updatedLog, error: updateError } = await supabase
         .from("equipment_maintenance_logs")
         .update({
-          request_id: selectedRequestId || null,
+          request_id: primaryRequestId || null,
           ...mechanicSelfScorePatch,
           hours: h,
           notes: notesValue,
@@ -572,7 +643,7 @@ export default function EquipmentMaintenanceLogPage() {
         .insert({
           equipment_id: equipmentId,
           submitted_by_user_id: currentUserId,
-          request_id: selectedRequestId || null,
+          request_id: primaryRequestId || null,
           ...mechanicSelfScorePatch,
           hours: h,
           notes: notesValue,
@@ -590,18 +661,34 @@ export default function EquipmentMaintenanceLogPage() {
       return;
     }
 
-    if (selectedRequestId) {
+    if (linkedRequestIds.length) {
       const linkedRequestStatus = mapLogStatusToRequestStatus(status);
       const { error: requestUpdateError } = await supabase
         .from("equipment_maintenance_requests")
         .update({
           status: linkedRequestStatus,
         })
-        .eq("id", selectedRequestId);
+        .in("id", linkedRequestIds);
 
       if (requestUpdateError) {
         console.error("Equipment maintenance request status update failed:", requestUpdateError);
       }
+    }
+
+    const linkRes = await fetch("/api/maintenance/logs/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "link_requests",
+        assetType: "equipment",
+        logId: savedLogId,
+        requestIds: linkedRequestIds,
+      }),
+    });
+    if (!linkRes.ok) {
+      const linkJson = (await linkRes.json().catch(() => ({}))) as { error?: string };
+      setSubmitError(linkJson.error || "Maintenance log saved, but request linking failed.");
+      return;
     }
 
     const equipmentHoursSync = await syncEquipmentHoursForward({
@@ -791,15 +878,55 @@ export default function EquipmentMaintenanceLogPage() {
               <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.7 }}>
                 Required unless Quick Maintenance Log Override is enabled.
               </div>
-              <select value={selectedRequestId} onChange={(e) => setSelectedRequestId(e.target.value)} style={inputStyle}>
-                <option value="">None</option>
-                {requestOptions.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {parseTitle(r.description)} • {new Date(r.created_at).toLocaleDateString()} •{" "}
-                    {coerceMaintenanceRequestStatus(r.status, "Open")}
-                  </option>
-                ))}
-              </select>
+              <div
+                style={{
+                  maxHeight: 160,
+                  overflowY: "auto",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 12,
+                  padding: 8,
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                {requestOptions.length ? (
+                  requestOptions.map((request) => (
+                    <label
+                      key={request.id}
+                      style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedRequestIds.includes(request.id)}
+                        onChange={() => toggleSelectedRequest(request.id)}
+                      />
+                      <span>
+                        {parseTitle(request.description)} • {new Date(request.created_at).toLocaleDateString()} •{" "}
+                        {coerceMaintenanceRequestStatus(request.status, "Open")}
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.72 }}>No requests found for this equipment.</div>
+                )}
+              </div>
+              {selectedRequestIds.length > 1 ? (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 4 }}>
+                    Primary linked request (used for purchase linking)
+                  </div>
+                  <select
+                    value={selectedRequestId}
+                    onChange={(e) => setPrimarySelectedRequest(e.target.value)}
+                    style={inputStyle}
+                  >
+                    {selectedRequestIds.map((requestId) => (
+                      <option key={requestId} value={requestId}>
+                        {requestId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
             </Field>
 
             <Field label="Next Due Hours (optional)">
@@ -1004,6 +1131,17 @@ export default function EquipmentMaintenanceLogPage() {
           <button type="submit" style={buttonStyle}>
             {isEditMode ? "Save Changes" : "Save Maintenance Log"}
           </button>
+
+          {isEditMode ? (
+            <button
+              type="button"
+              onClick={() => void onDeleteLog()}
+              style={{ ...secondaryButtonStyle, borderColor: "rgba(255,120,120,0.5)", color: "#ffb3b3" }}
+              disabled={deleteBusy}
+            >
+              {deleteBusy ? "Deleting..." : "Delete Log"}
+            </button>
+          ) : null}
 
           <button
             type="button"

@@ -560,6 +560,9 @@ export default function OpsPage({
   const [queueOnlyOutOfService, setQueueOnlyOutOfService] = useState(false);
   const [queueOnlyUrgentHigh, setQueueOnlyUrgentHigh] = useState(false);
   const [expandedQueueAssetKey, setExpandedQueueAssetKey] = useState<string | null>(null);
+  const [selectedQueueRequestIds, setSelectedQueueRequestIds] = useState<string[]>([]);
+  const [queueActionBusy, setQueueActionBusy] = useState(false);
+  const [queueActionMessage, setQueueActionMessage] = useState<string | null>(null);
   const [pmWaiveBusyKey, setPmWaiveBusyKey] = useState<string | null>(null);
   const [pmWaiveMessage, setPmWaiveMessage] = useState<string | null>(null);
   const [downtimeStatusFilter, setDowntimeStatusFilter] = useState<"All" | DowntimeStatus>("All");
@@ -581,6 +584,7 @@ export default function OpsPage({
   const [performanceEndDate, setPerformanceEndDate] = useState(() => toDateInputValue(new Date()));
   const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const router = useRouter();
 
@@ -814,7 +818,7 @@ export default function OpsPage({
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [router]);
+  }, [reloadTick, router]);
 
   const tabs: OpsTab[] = [
     "Overview",
@@ -833,6 +837,7 @@ export default function OpsPage({
       role === "mechanic"
     );
   }, [currentRole]);
+  const canManageRequests = canWaivePm;
   const canCreateLogs = (currentRole ?? "").trim() !== "apprentice";
 
   const overviewCards = useMemo(
@@ -1403,6 +1408,124 @@ export default function OpsPage({
     }
   }, [expandedQueueAssetKey, queueAssetGroups]);
 
+  const queueRowById = useMemo(() => {
+    return new Map(queueRows.map((row) => [row.requestId, row] as const));
+  }, [queueRows]);
+
+  const selectedQueueRows = useMemo(() => {
+    return selectedQueueRequestIds
+      .map((id) => queueRowById.get(id))
+      .filter((row): row is QueueRow => Boolean(row));
+  }, [queueRowById, selectedQueueRequestIds]);
+
+  const queueSelectionAssetKey = useMemo(() => {
+    if (!selectedQueueRows.length) return null;
+    const keys = new Set(selectedQueueRows.map((row) => `${row.assetType}:${row.assetId}`));
+    return keys.size === 1 ? Array.from(keys)[0] : null;
+  }, [selectedQueueRows]);
+
+  const queueCanMergeSelected = selectedQueueRows.length >= 2 && Boolean(queueSelectionAssetKey);
+  const queueCanDeleteSelected = selectedQueueRows.length >= 1;
+
+  useEffect(() => {
+    setSelectedQueueRequestIds((prev) => prev.filter((id) => queueRowById.has(id)));
+  }, [queueRowById]);
+
+  function toggleQueueRequestSelection(requestId: string) {
+    setSelectedQueueRequestIds((prev) =>
+      prev.includes(requestId) ? prev.filter((id) => id !== requestId) : [...prev, requestId]
+    );
+  }
+
+  async function runQueueRequestAction(action: "merge" | "delete") {
+    if (!queueCanDeleteSelected || queueActionBusy) return;
+    const selectedRowsSnapshot = selectedQueueRows;
+    const selectedIdsSnapshot = selectedQueueRequestIds;
+    if (selectedRowsSnapshot.length === 0 || selectedIdsSnapshot.length === 0) return;
+
+    const firstRow = selectedRowsSnapshot[0];
+    const sameAsset = selectedRowsSnapshot.every(
+      (row) => row.assetType === firstRow.assetType && row.assetId === firstRow.assetId
+    );
+    if (action === "merge" && (!sameAsset || selectedRowsSnapshot.length < 2)) {
+      setQueueActionMessage("Select at least two requests from the same asset to link.");
+      return;
+    }
+
+    const confirmText =
+      action === "merge"
+        ? `Link ${selectedRowsSnapshot.length} requests into one combined request and delete the originals?`
+        : `Delete ${selectedRowsSnapshot.length} selected request(s)? This cannot be undone.`;
+    if (!window.confirm(confirmText)) return;
+
+    setQueueActionBusy(true);
+    setQueueActionMessage(null);
+    try {
+      if (action === "delete") {
+        const vehicleIds = selectedRowsSnapshot
+          .filter((row) => row.assetType === "Vehicle")
+          .map((row) => row.requestId);
+        const equipmentIds = selectedRowsSnapshot
+          .filter((row) => row.assetType === "Equipment")
+          .map((row) => row.requestId);
+
+        const batches: Array<{ assetType: "vehicle" | "equipment"; requestIds: string[] }> = [];
+        if (vehicleIds.length) batches.push({ assetType: "vehicle", requestIds: vehicleIds });
+        if (equipmentIds.length) batches.push({ assetType: "equipment", requestIds: equipmentIds });
+
+        for (const batch of batches) {
+          const res = await fetch("/api/maintenance/requests/actions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "delete",
+              assetType: batch.assetType,
+              requestIds: batch.requestIds,
+            }),
+          });
+          const json = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!res.ok) {
+            setQueueActionMessage(json.error || "Request deletion failed.");
+            setQueueActionBusy(false);
+            return;
+          }
+        }
+        setSelectedQueueRequestIds([]);
+        setQueueActionMessage("Requests deleted successfully.");
+        setReloadTick((prev) => prev + 1);
+      } else {
+        const assetType = firstRow.assetType === "Vehicle" ? "vehicle" : "equipment";
+        const res = await fetch("/api/maintenance/requests/actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "merge",
+            assetType,
+            requestIds: selectedIdsSnapshot,
+          }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          mergedRequestId?: string;
+        };
+        if (!res.ok) {
+          setQueueActionMessage(json.error || "Request action failed.");
+          setQueueActionBusy(false);
+          return;
+        }
+        setSelectedQueueRequestIds([]);
+        setQueueActionMessage(
+          `Requests linked successfully. New request ID: ${json.mergedRequestId ?? "created"}`
+        );
+        setReloadTick((prev) => prev + 1);
+      }
+    } catch (error) {
+      setQueueActionMessage(error instanceof Error ? error.message : "Request action failed.");
+    } finally {
+      setQueueActionBusy(false);
+    }
+  }
+
   const assetHealthRows = useMemo(() => {
     const openRequestCountByAsset = new Map<string, number>();
     for (const req of allRequests) {
@@ -1786,6 +1909,19 @@ export default function OpsPage({
           background: "rgba(255,255,255,0.02)",
         }}
       >
+        {canManageRequests ? (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 12, opacity: 0.9 }}>
+              <input
+                type="checkbox"
+                checked={selectedQueueRequestIds.includes(row.requestId)}
+                onChange={() => toggleQueueRequestSelection(row.requestId)}
+                disabled={queueActionBusy}
+              />
+              Select
+            </label>
+          </div>
+        ) : null}
         <div style={{ fontWeight: 900, marginBottom: 4 }}>{row.title}</div>
         <div style={{ opacity: 0.84, fontSize: 13, lineHeight: 1.35 }}>
           <strong>{assetKindLabel}: {row.assetName} • {row.assetId}</strong>
@@ -1875,11 +2011,45 @@ export default function OpsPage({
           </div>
 
           <div style={{ marginTop: 16, ...cardStyle() }}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
-            {queueAssetGroups.length === 0 ? (
-              <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
+          {canManageRequests ? (
+            <div
+              style={{
+                marginBottom: 10,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => void runQueueRequestAction("merge")}
+                disabled={!queueCanMergeSelected || queueActionBusy}
+                style={{ ...actionButtonStyle, opacity: !queueCanMergeSelected || queueActionBusy ? 0.55 : 1 }}
+              >
+                {queueActionBusy ? "Working..." : "Link Selected Requests"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runQueueRequestAction("delete")}
+                disabled={!queueCanDeleteSelected || queueActionBusy}
+                style={{ ...actionButtonStyle, opacity: !queueCanDeleteSelected || queueActionBusy ? 0.55 : 1 }}
+              >
+                {queueActionBusy ? "Working..." : "Delete Selected"}
+              </button>
+              <div style={{ fontSize: 12, opacity: 0.72 }}>
+                Selected: {selectedQueueRequestIds.length}
+              </div>
+            </div>
+          ) : null}
+          {queueActionMessage ? (
+            <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.85 }}>{queueActionMessage}</div>
+          ) : null}
+          {queueAssetGroups.length === 0 ? (
+            <div style={{ opacity: 0.75 }}>No open or in-progress maintenance requests.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
                 {queueAssetGroups.map((group) => (
                   <div
                     key={`overview-open:${group.assetType}:${group.assetId}`}
@@ -2093,6 +2263,40 @@ export default function OpsPage({
       {!loading && !errorMessage && isAuthenticated && tab === "Request Queue" ? (
         <div style={{ marginTop: 16, ...cardStyle() }}>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>Request Queue</div>
+          {canManageRequests ? (
+            <div
+              style={{
+                marginBottom: 10,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => void runQueueRequestAction("merge")}
+                disabled={!queueCanMergeSelected || queueActionBusy}
+                style={{ ...actionButtonStyle, opacity: !queueCanMergeSelected || queueActionBusy ? 0.55 : 1 }}
+              >
+                {queueActionBusy ? "Working..." : "Link Selected Requests"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runQueueRequestAction("delete")}
+                disabled={!queueCanDeleteSelected || queueActionBusy}
+                style={{ ...actionButtonStyle, opacity: !queueCanDeleteSelected || queueActionBusy ? 0.55 : 1 }}
+              >
+                {queueActionBusy ? "Working..." : "Delete Selected"}
+              </button>
+              <div style={{ fontSize: 12, opacity: 0.72 }}>
+                Selected: {selectedQueueRequestIds.length}
+              </div>
+            </div>
+          ) : null}
+          {queueActionMessage ? (
+            <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.85 }}>{queueActionMessage}</div>
+          ) : null}
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
