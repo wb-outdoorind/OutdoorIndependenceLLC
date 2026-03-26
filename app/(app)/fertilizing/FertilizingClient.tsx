@@ -192,6 +192,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [properties, setProperties] = useState<FertProperty[]>([]);
   const [products, setProducts] = useState<FertProduct[]>([]);
   const [serviceRecords, setServiceRecords] = useState<FertServiceRecord[]>([]);
+  const [selectedPropertyDetailsId, setSelectedPropertyDetailsId] = useState("");
 
   const [search, setSearch] = useState("");
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<"all" | "Residential" | "Commercial">("all");
@@ -201,6 +202,13 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [clientLastName, setClientLastName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [clientEmail, setClientEmail] = useState("");
+
+  const [productName, setProductName] = useState("");
+  const [productDefaultUnit, setProductDefaultUnit] = useState("LBS");
+  const [productTargetPest, setProductTargetPest] = useState("");
+  const [productApplicationRate, setProductApplicationRate] = useState("");
+  const [productEpaNumber, setProductEpaNumber] = useState("");
+  const [productPpeNotes, setProductPpeNotes] = useState("");
 
   const [propertyClientId, setPropertyClientId] = useState("");
   const [propertyName, setPropertyName] = useState("");
@@ -312,6 +320,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       const defaultPropertyId = ((propertiesRes.data ?? []) as FertProperty[])[0]?.id ?? "";
       if (defaultPropertyId) {
         setServicePropertyId((prev) => prev || defaultPropertyId);
+        setSelectedPropertyDetailsId((prev) => prev || defaultPropertyId);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load fertilizing data.");
@@ -596,6 +605,43 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     }
   }
 
+  async function addProductTemplate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const name = productName.trim();
+      const unit = productDefaultUnit.trim();
+      if (!name) throw new Error("Product name is required.");
+      if (!unit) throw new Error("Default unit is required.");
+
+      const { error: insertError } = await supabase.from("fert_products").insert({
+        name,
+        default_unit: unit,
+        default_target_pest: asNullable(productTargetPest),
+        default_application_rate: asNullable(productApplicationRate),
+        epa_registration_number: asNullable(productEpaNumber),
+        default_reentry_interval_ppe_notes: asNullable(productPpeNotes),
+        active: true,
+      });
+      if (insertError) throw insertError;
+
+      setProductName("");
+      setProductDefaultUnit("LBS");
+      setProductTargetPest("");
+      setProductApplicationRate("");
+      setProductEpaNumber("");
+      setProductPpeNotes("");
+      setSuccess("Product template added.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add product template.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function updateChemical(index: number, patch: Partial<ChemicalDraft>) {
     setChemicals((prev) =>
       prev.map((row, i) => {
@@ -834,6 +880,15 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   }, [clients, properties, serviceRecords]);
 
   const selectedServiceProperty = servicePropertyId ? propertyById.get(servicePropertyId) ?? null : null;
+  const selectedPropertyDetails = selectedPropertyDetailsId
+    ? propertyById.get(selectedPropertyDetailsId) ?? null
+    : null;
+  const selectedPropertyDetailsClient = selectedPropertyDetails
+    ? clientById.get(selectedPropertyDetails.client_id) ?? null
+    : null;
+  const selectedPropertyServiceHistory = selectedPropertyDetails
+    ? serviceRecords.filter((row) => row.property_id === selectedPropertyDetails.id)
+    : [];
   const selectedServicePropertyId = selectedServiceProperty?.id ?? "";
   const activeServiceProperty = activeServicePropertyId
     ? propertyById.get(activeServicePropertyId) ?? null
@@ -873,14 +928,16 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     });
   }
 
-  function startServiceTimer() {
-    if (!servicePropertyId) {
+  function startServiceTimer(overridePropertyId?: string) {
+    const propertyIdToStart = (overridePropertyId ?? servicePropertyId).trim();
+    if (!propertyIdToStart) {
       setError("Select a property before starting service.");
       return;
     }
     setError(null);
     const startedAt = new Date().toISOString();
-    setActiveServicePropertyId(servicePropertyId);
+    setServicePropertyId(propertyIdToStart);
+    setActiveServicePropertyId(propertyIdToStart);
     setActiveServiceStartedAt(startedAt);
     setServiceDate(toLocalDateInput(startedAt));
     setStartTime(toLocalTimeInput(startedAt));
@@ -1098,6 +1155,26 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
                           Gate: {property.gate_present ? "Yes" : "No"} · Locked: {property.locked_gate ? "Yes" : "No"} · Pets:{" "}
                           {property.pets_present ? "Yes" : "No"}
                         </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                          <button
+                            type="button"
+                            style={buttonGhostStyle}
+                            onClick={() => setSelectedPropertyDetailsId(property.id)}
+                          >
+                            View Property Details
+                          </button>
+                          <button
+                            type="button"
+                            style={buttonGhostStyle}
+                            onClick={() => {
+                              setServicePropertyId(property.id);
+                              setSelectedPropertyDetailsId(property.id);
+                              setSuccess(`Selected ${property.property_name} for service form.`);
+                            }}
+                          >
+                            Use for Service Form
+                          </button>
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -1114,6 +1191,169 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       </section>
 
       <section style={cardStyle}>
+        <h2 style={h2Style}>Property Detail</h2>
+        {selectedPropertyDetails ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>
+              {selectedPropertyDetails.property_name} · {selectedPropertyDetails.property_type}
+            </div>
+            <div style={{ opacity: 0.84, fontSize: 13 }}>
+              Client:{" "}
+              {selectedPropertyDetailsClient ? fullName(selectedPropertyDetailsClient) : "Unknown client"}
+            </div>
+            <div style={{ opacity: 0.84, fontSize: 13 }}>
+              {selectedPropertyDetails.address_line_1}
+              {selectedPropertyDetails.address_line_2 ? `, ${selectedPropertyDetails.address_line_2}` : ""}
+              {`, ${selectedPropertyDetails.city}, ${selectedPropertyDetails.state} ${selectedPropertyDetails.postal_code}`}
+            </div>
+            <div style={{ opacity: 0.84, fontSize: 13 }}>
+              {Number(selectedPropertyDetails.lawn_sqft).toLocaleString()} sqft ·{" "}
+              {Number(selectedPropertyDetails.lawn_acres).toFixed(3)} acres · Gate:{" "}
+              {selectedPropertyDetails.gate_present ? "Yes" : "No"} · Locked:{" "}
+              {selectedPropertyDetails.locked_gate ? "Yes" : "No"} · Pets:{" "}
+              {selectedPropertyDetails.pets_present ? "Yes" : "No"}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                style={buttonPrimaryStyle}
+                onClick={() => {
+                  setServicePropertyId(selectedPropertyDetails.id);
+                  setSuccess(`Loaded ${selectedPropertyDetails.property_name} in service form.`);
+                }}
+              >
+                Load into Service Form
+              </button>
+              <button
+                type="button"
+                style={buttonGhostStyle}
+                onClick={() => {
+                  startServiceTimer(selectedPropertyDetails.id);
+                }}
+                disabled={Boolean(activeServiceStartedAt && activeServicePropertyId !== selectedPropertyDetails.id)}
+              >
+                Start Service for Property
+              </button>
+            </div>
+
+            <div style={{ marginTop: 6 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Recent Service History (Property)</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {selectedPropertyServiceHistory.length ? (
+                  selectedPropertyServiceHistory.map((record) => (
+                    <div key={record.id} style={recordItemStyle}>
+                      <div style={{ fontWeight: 700 }}>
+                        Service Date: {fmtDateOnly(record.service_date)} · Created: {fmtDate(record.created_at)}
+                      </div>
+                      <div style={{ opacity: 0.82, fontSize: 12 }}>
+                        Applicator: {record.applicator_name || "-"} · License:{" "}
+                        {record.applicator_license_number || "-"}
+                      </div>
+                      <div style={{ opacity: 0.82, fontSize: 12 }}>
+                        Equipment:{" "}
+                        {Array.isArray(record.equipment_used) && record.equipment_used.length
+                          ? record.equipment_used.join(", ")
+                          : "None listed"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ opacity: 0.76 }}>No service history for this property yet.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ opacity: 0.76 }}>Select a property from the client list to view details.</div>
+        )}
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Product Template Manager</h2>
+        <p style={{ opacity: 0.82, marginTop: -4, marginBottom: 10 }}>
+          Maintain chemical templates used by the product calculator and daily service workflow.
+        </p>
+        <form onSubmit={addProductTemplate} style={{ display: "grid", gap: 10, marginBottom: 12 }}>
+          <div style={fieldGridStyle}>
+            <label style={labelStyle}>
+              Product Name
+              <input value={productName} onChange={(e) => setProductName(e.target.value)} style={inputStyle} required />
+            </label>
+            <label style={labelStyle}>
+              Default Unit
+              <select
+                value={productDefaultUnit}
+                onChange={(e) => setProductDefaultUnit(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="LBS">LBS</option>
+                <option value="Gallons">Gallons</option>
+                <option value="Ounces">Ounces</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Default Target Pest
+              <input
+                value={productTargetPest}
+                onChange={(e) => setProductTargetPest(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              Default Application Rate
+              <input
+                value={productApplicationRate}
+                onChange={(e) => setProductApplicationRate(e.target.value)}
+                style={inputStyle}
+                placeholder="e.g. 3.5 lbs per 1,000 sqft"
+              />
+            </label>
+            <label style={labelStyle}>
+              EPA Registration #
+              <input
+                value={productEpaNumber}
+                onChange={(e) => setProductEpaNumber(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              Re-entry / PPE Notes
+              <textarea
+                value={productPpeNotes}
+                onChange={(e) => setProductPpeNotes(e.target.value)}
+                style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}
+              />
+            </label>
+          </div>
+          <div>
+            <button type="submit" style={buttonPrimaryStyle} disabled={saving}>
+              {saving ? "Saving..." : "Add Product Template"}
+            </button>
+          </div>
+        </form>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          {products.length ? (
+            products.map((product) => (
+              <div key={product.id} style={recordItemStyle}>
+                <div style={{ fontWeight: 700 }}>{product.name}</div>
+                <div style={{ opacity: 0.82, fontSize: 12 }}>
+                  Unit: {product.default_unit || "-"} · Target: {product.default_target_pest || "-"} · Rate:{" "}
+                  {product.default_application_rate || "-"}
+                </div>
+                <div style={{ opacity: 0.8, fontSize: 12 }}>
+                  EPA: {product.epa_registration_number || "-"} · PPE:{" "}
+                  {product.default_reentry_interval_ppe_notes || "-"}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div style={{ opacity: 0.75 }}>No product templates found.</div>
+          )}
+        </div>
+      </section>
+
+      <section style={cardStyle}>
         <h2 style={h2Style}>Service Timer</h2>
         <div style={{ opacity: 0.84, marginBottom: 10 }}>
           Start service when work begins, then stop service to prefill the tracking form times.
@@ -1125,7 +1365,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
               : "No active service"}
           </div>
           {!activeServiceStartedAt ? (
-            <button type="button" style={buttonPrimaryStyle} onClick={startServiceTimer} disabled={saving}>
+            <button type="button" style={buttonPrimaryStyle} onClick={() => startServiceTimer()} disabled={saving}>
               Start Service
             </button>
           ) : (
