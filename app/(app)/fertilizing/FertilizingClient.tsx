@@ -79,6 +79,26 @@ type Props = {
 
 const ACRE_TO_SQFT = 43_560;
 const ACTIVE_SERVICE_STORAGE_KEY = "oi_fertilizing_active_service_v1";
+const SERVICE_FORM_DRAFT_STORAGE_KEY = "oi_fertilizing_service_form_draft_v1";
+
+type ServiceFormDraft = {
+  servicePropertyId: string;
+  applicatorName: string;
+  applicatorLicense: string;
+  serviceDate: string;
+  startTime: string;
+  endTime: string;
+  weatherTemperatureF: string;
+  weatherWindSpeedMph: string;
+  weatherWindDirection: string;
+  weatherConditions: string;
+  weatherObservedAt: string;
+  weatherSource: string;
+  signatureMode: "typed" | "drawn";
+  typedSignature: string;
+  drawnSignatureData: string;
+  chemicals: ChemicalDraft[];
+};
 
 function toLocalDateInput(iso: string) {
   const date = new Date(iso);
@@ -145,6 +165,12 @@ function emptyChemicalDraft(): ChemicalDraft {
   };
 }
 
+function isChemicalDraft(value: unknown): value is ChemicalDraft {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.localId === "string" && typeof row.chemicalName === "string";
+}
+
 export default function FertilizingClient({ fullName: signedInName }: Props) {
   const supabase = useMemo(() => createSupabaseBrowser(), []);
 
@@ -201,6 +227,26 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [activeServicePropertyId, setActiveServicePropertyId] = useState("");
   const [activeServiceStartedAt, setActiveServiceStartedAt] = useState<string | null>(null);
   const [timerNow, setTimerNow] = useState(() => Date.now());
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  const clearServiceDraftState = useCallback(() => {
+    setServicePropertyId("");
+    setApplicatorName(signedInName);
+    setApplicatorLicense("");
+    setServiceDate(new Date().toISOString().slice(0, 10));
+    setStartTime("");
+    setEndTime("");
+    setWeatherTemperatureF("");
+    setWeatherWindSpeedMph("");
+    setWeatherWindDirection("");
+    setWeatherConditions("");
+    setWeatherObservedAt("");
+    setWeatherSource("");
+    setSignatureMode("typed");
+    setTypedSignature("");
+    setDrawnSignatureData("");
+    setChemicals([emptyChemicalDraft()]);
+  }, [signedInName]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -264,6 +310,87 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SERVICE_FORM_DRAFT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ServiceFormDraft> | null;
+        if (parsed && typeof parsed === "object") {
+          setServicePropertyId(typeof parsed.servicePropertyId === "string" ? parsed.servicePropertyId : "");
+          setApplicatorName(
+            typeof parsed.applicatorName === "string" && parsed.applicatorName.trim().length
+              ? parsed.applicatorName
+              : signedInName
+          );
+          setApplicatorLicense(typeof parsed.applicatorLicense === "string" ? parsed.applicatorLicense : "");
+          setServiceDate(
+            typeof parsed.serviceDate === "string" ? parsed.serviceDate : new Date().toISOString().slice(0, 10)
+          );
+          setStartTime(typeof parsed.startTime === "string" ? parsed.startTime : "");
+          setEndTime(typeof parsed.endTime === "string" ? parsed.endTime : "");
+          setWeatherTemperatureF(typeof parsed.weatherTemperatureF === "string" ? parsed.weatherTemperatureF : "");
+          setWeatherWindSpeedMph(typeof parsed.weatherWindSpeedMph === "string" ? parsed.weatherWindSpeedMph : "");
+          setWeatherWindDirection(typeof parsed.weatherWindDirection === "string" ? parsed.weatherWindDirection : "");
+          setWeatherConditions(typeof parsed.weatherConditions === "string" ? parsed.weatherConditions : "");
+          setWeatherObservedAt(typeof parsed.weatherObservedAt === "string" ? parsed.weatherObservedAt : "");
+          setWeatherSource(typeof parsed.weatherSource === "string" ? parsed.weatherSource : "");
+          setSignatureMode(parsed.signatureMode === "drawn" ? "drawn" : "typed");
+          setTypedSignature(typeof parsed.typedSignature === "string" ? parsed.typedSignature : "");
+          setDrawnSignatureData(typeof parsed.drawnSignatureData === "string" ? parsed.drawnSignatureData : "");
+          if (Array.isArray(parsed.chemicals)) {
+            const safeRows = parsed.chemicals.filter(isChemicalDraft);
+            setChemicals(safeRows.length ? safeRows : [emptyChemicalDraft()]);
+          }
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(SERVICE_FORM_DRAFT_STORAGE_KEY);
+    } finally {
+      setDraftHydrated(true);
+    }
+  }, [signedInName]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    const draft: ServiceFormDraft = {
+      servicePropertyId,
+      applicatorName,
+      applicatorLicense,
+      serviceDate,
+      startTime,
+      endTime,
+      weatherTemperatureF,
+      weatherWindSpeedMph,
+      weatherWindDirection,
+      weatherConditions,
+      weatherObservedAt,
+      weatherSource,
+      signatureMode,
+      typedSignature,
+      drawnSignatureData,
+      chemicals,
+    };
+    window.localStorage.setItem(SERVICE_FORM_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }, [
+    servicePropertyId,
+    applicatorName,
+    applicatorLicense,
+    serviceDate,
+    startTime,
+    endTime,
+    weatherTemperatureF,
+    weatherWindSpeedMph,
+    weatherWindDirection,
+    weatherConditions,
+    weatherObservedAt,
+    weatherSource,
+    signatureMode,
+    typedSignature,
+    drawnSignatureData,
+    chemicals,
+    draftHydrated,
+  ]);
 
   useEffect(() => {
     try {
@@ -617,9 +744,8 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
         window.URL.revokeObjectURL(url);
       }
 
-      setChemicals([emptyChemicalDraft()]);
-      setTypedSignature("");
-      setDrawnSignatureData("");
+      clearServiceDraftState();
+      window.localStorage.removeItem(SERVICE_FORM_DRAFT_STORAGE_KEY);
       const emailConfigured = json.email?.configured === true;
       const emailLine = emailConfigured
         ? ` Email sent ${Number(json.email?.sent ?? 0)} of ${Number(json.email?.attempted ?? 0)}.`
@@ -631,6 +757,39 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function saveServiceDraft() {
+    const draft: ServiceFormDraft = {
+      servicePropertyId,
+      applicatorName,
+      applicatorLicense,
+      serviceDate,
+      startTime,
+      endTime,
+      weatherTemperatureF,
+      weatherWindSpeedMph,
+      weatherWindDirection,
+      weatherConditions,
+      weatherObservedAt,
+      weatherSource,
+      signatureMode,
+      typedSignature,
+      drawnSignatureData,
+      chemicals,
+    };
+    window.localStorage.setItem(SERVICE_FORM_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    setError(null);
+    setSuccess("Draft saved.");
+  }
+
+  function deleteServiceDraftAndResetForm() {
+    const confirmed = window.confirm("Delete this draft and clear the chemical tracking form?");
+    if (!confirmed) return;
+    window.localStorage.removeItem(SERVICE_FORM_DRAFT_STORAGE_KEY);
+    clearServiceDraftState();
+    setError(null);
+    setSuccess("Draft deleted.");
   }
 
   const summary = useMemo(() => {
@@ -1230,8 +1389,14 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           <button type="button" style={buttonGhostStyle} onClick={() => setChemicals((prev) => [...prev, emptyChemicalDraft()])}>
             Add Chemical
           </button>
+          <button type="button" style={buttonGhostStyle} onClick={saveServiceDraft} disabled={saving}>
+            Save Draft
+          </button>
           <button type="submit" style={buttonPrimaryStyle} disabled={saving}>
             {saving ? "Submitting..." : "Submit Chemical Tracking Form"}
+          </button>
+          <button type="button" style={buttonDangerStyle} onClick={deleteServiceDraftAndResetForm} disabled={saving}>
+            Delete Form
           </button>
         </div>
       </form>
