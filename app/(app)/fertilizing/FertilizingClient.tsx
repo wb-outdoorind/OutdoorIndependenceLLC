@@ -48,6 +48,12 @@ type FertServiceRecord = {
   applicator_name: string | null;
   applicator_license_number: string | null;
   service_date: string | null;
+  weather_temperature_f: number | string | null;
+  weather_wind_speed_mph: number | string | null;
+  weather_wind_direction: string | null;
+  weather_conditions: string | null;
+  weather_observed_at: string | null;
+  weather_source: string | null;
   created_at: string;
 };
 
@@ -181,6 +187,13 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [weatherTemperatureF, setWeatherTemperatureF] = useState("");
+  const [weatherWindSpeedMph, setWeatherWindSpeedMph] = useState("");
+  const [weatherWindDirection, setWeatherWindDirection] = useState("");
+  const [weatherConditions, setWeatherConditions] = useState("");
+  const [weatherObservedAt, setWeatherObservedAt] = useState("");
+  const [weatherSource, setWeatherSource] = useState("");
+  const [weatherLoading, setWeatherLoading] = useState(false);
   const [signatureMode, setSignatureMode] = useState<"typed" | "drawn">("typed");
   const [typedSignature, setTypedSignature] = useState("");
   const [drawnSignatureData, setDrawnSignatureData] = useState("");
@@ -213,7 +226,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           .order("name", { ascending: true }),
         supabase
           .from("fert_service_records")
-          .select("id,property_id,applicator_name,applicator_license_number,service_date,created_at")
+          .select(
+            "id,property_id,applicator_name,applicator_license_number,service_date,weather_temperature_f,weather_wind_speed_mph,weather_wind_direction,weather_conditions,weather_observed_at,weather_source,created_at"
+          )
           .order("created_at", { ascending: false })
           .limit(30),
       ]);
@@ -466,6 +481,65 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     });
   }
 
+  async function autoFillWeather() {
+    const property = servicePropertyId ? propertyById.get(servicePropertyId) : null;
+    if (!property) {
+      setError("Select a property before auto-filling weather.");
+      return;
+    }
+    setWeatherLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/fertilizing/weather", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyName: property.property_name,
+          addressLine1: property.address_line_1,
+          addressLine2: property.address_line_2,
+          city: property.city,
+          state: property.state,
+          postalCode: property.postal_code,
+        }),
+      });
+      const json = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        source?: string;
+        weather?: {
+          temperatureF?: number | null;
+          windSpeedMph?: number | null;
+          windDirectionDegrees?: number | null;
+          windDirectionLabel?: string | null;
+          conditions?: string | null;
+          observedAt?: string | null;
+        };
+      };
+      if (!response.ok) throw new Error(json.error || "Failed to auto-fill weather.");
+      const weather = json.weather ?? {};
+      setWeatherTemperatureF(
+        weather.temperatureF === null || weather.temperatureF === undefined
+          ? ""
+          : String(weather.temperatureF)
+      );
+      setWeatherWindSpeedMph(
+        weather.windSpeedMph === null || weather.windSpeedMph === undefined ? "" : String(weather.windSpeedMph)
+      );
+      const windDir = [weather.windDirectionLabel || "", weather.windDirectionDegrees ?? ""]
+        .map((v) => String(v).trim())
+        .filter(Boolean)
+        .join(" ");
+      setWeatherWindDirection(windDir);
+      setWeatherConditions(String(weather.conditions || ""));
+      setWeatherObservedAt(String(weather.observedAt || ""));
+      setWeatherSource(String(json.source || "open-meteo"));
+      setSuccess("Weather auto-filled.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to auto-fill weather.");
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
   async function submitServiceRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -509,6 +583,12 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           serviceDate,
           startTime,
           endTime,
+          weatherTemperatureF,
+          weatherWindSpeedMph,
+          weatherWindDirection,
+          weatherConditions,
+          weatherObservedAt,
+          weatherSource,
           signatureMode,
           typedLegalSignature: typedSignature,
           drawnSignatureData,
@@ -907,6 +987,62 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
             <input value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} type="time" />
           </label>
           <label style={labelStyle}>
+            Weather Conditions
+            <input
+              value={weatherConditions}
+              onChange={(e) => setWeatherConditions(e.target.value)}
+              style={inputStyle}
+              placeholder="e.g. Clear sky"
+            />
+          </label>
+          <label style={labelStyle}>
+            Temperature (F)
+            <input
+              value={weatherTemperatureF}
+              onChange={(e) => setWeatherTemperatureF(e.target.value)}
+              style={inputStyle}
+              type="number"
+              step="any"
+            />
+          </label>
+          <label style={labelStyle}>
+            Wind Speed (mph)
+            <input
+              value={weatherWindSpeedMph}
+              onChange={(e) => setWeatherWindSpeedMph(e.target.value)}
+              style={inputStyle}
+              type="number"
+              step="any"
+            />
+          </label>
+          <label style={labelStyle}>
+            Wind Direction
+            <input
+              value={weatherWindDirection}
+              onChange={(e) => setWeatherWindDirection(e.target.value)}
+              style={inputStyle}
+              placeholder="e.g. WNW 292"
+            />
+          </label>
+          <label style={labelStyle}>
+            Weather Observed At
+            <input
+              value={weatherObservedAt}
+              onChange={(e) => setWeatherObservedAt(e.target.value)}
+              style={inputStyle}
+              placeholder="ISO timestamp"
+            />
+          </label>
+          <label style={labelStyle}>
+            Weather Source
+            <input
+              value={weatherSource}
+              onChange={(e) => setWeatherSource(e.target.value)}
+              style={inputStyle}
+              placeholder="open-meteo"
+            />
+          </label>
+          <label style={labelStyle}>
             Signature Mode
             <select value={signatureMode} onChange={(e) => setSignatureMode(e.target.value as "typed" | "drawn")} style={inputStyle}>
               <option value="typed">Typed legal signature</option>
@@ -930,6 +1066,12 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
               />
             </label>
           )}
+        </div>
+
+        <div style={{ marginTop: -2, marginBottom: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="button" style={buttonGhostStyle} onClick={() => void autoFillWeather()} disabled={weatherLoading || saving}>
+            {weatherLoading ? "Filling Weather..." : "Auto-fill Weather"}
+          </button>
         </div>
 
         <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
@@ -1111,6 +1253,10 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
                   </div>
                   <div style={{ opacity: 0.82, fontSize: 13 }}>
                     Service Date: {fmtDateOnly(row.service_date)} · Created: {fmtDate(row.created_at)}
+                  </div>
+                  <div style={{ opacity: 0.82, fontSize: 12 }}>
+                    Weather: {row.weather_conditions || "-"} · {row.weather_temperature_f ?? "-"} F ·{" "}
+                    {row.weather_wind_speed_mph ?? "-"} mph {row.weather_wind_direction || ""}
                   </div>
                 </div>
               );

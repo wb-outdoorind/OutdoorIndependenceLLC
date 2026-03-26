@@ -28,6 +28,12 @@ type SubmitBody = {
   serviceDate?: string;
   startTime?: string;
   endTime?: string;
+  weatherTemperatureF?: number | string | null;
+  weatherWindSpeedMph?: number | string | null;
+  weatherWindDirection?: string;
+  weatherConditions?: string;
+  weatherObservedAt?: string;
+  weatherSource?: string;
   signatureMode?: "typed" | "drawn";
   typedLegalSignature?: string;
   drawnSignatureData?: string;
@@ -88,6 +94,14 @@ function asNumberOrNull(value: unknown) {
   return n;
 }
 
+function asTimestampOrNull(value: unknown) {
+  const next = asString(value);
+  if (!next) return null;
+  const time = new Date(next).getTime();
+  if (!Number.isFinite(time)) return null;
+  return new Date(time).toISOString();
+}
+
 function fullClientName(client: ClientRow) {
   return [asString(client.first_name), asString(client.middle_name), asString(client.last_name)]
     .filter(Boolean)
@@ -120,6 +134,12 @@ async function buildServicePdf(params: {
   serviceDate: string | null;
   startTime: string | null;
   endTime: string | null;
+  weatherTemperatureF: number | null;
+  weatherWindSpeedMph: number | null;
+  weatherWindDirection: string | null;
+  weatherConditions: string | null;
+  weatherObservedAt: string | null;
+  weatherSource: string | null;
   chemicals: Array<{
     chemicalName: string;
     epaRegistrationNumber: string | null;
@@ -164,6 +184,10 @@ async function buildServicePdf(params: {
   );
   drawText(`Start: ${params.startTime || "-"}  |  End: ${params.endTime || "-"}`);
   drawText(`Lawn: ${Number(params.property.lawn_sqft || 0).toLocaleString()} sqft (${Number(params.property.lawn_acres || 0).toFixed(3)} acres)`);
+  drawText(
+    `Weather: ${params.weatherConditions || "-"} | Temp: ${params.weatherTemperatureF ?? "-"} F | Wind: ${params.weatherWindSpeedMph ?? "-"} mph ${params.weatherWindDirection || ""}`.trim()
+  );
+  drawText(`Weather Source: ${params.weatherSource || "-"} | Observed: ${params.weatherObservedAt || "-"}`);
   drawText("");
 
   drawText("Chemicals", { size: 12, bold: true });
@@ -257,6 +281,12 @@ export async function POST(req: Request) {
   const signatureMode = body.signatureMode === "drawn" ? "drawn" : "typed";
   const typedLegalSignature = asString(body.typedLegalSignature);
   const drawnSignatureData = asString(body.drawnSignatureData);
+  const weatherTemperatureF = asNumberOrNull(body.weatherTemperatureF);
+  const weatherWindSpeedMph = asNumberOrNull(body.weatherWindSpeedMph);
+  const weatherWindDirection = asNullable(body.weatherWindDirection);
+  const weatherConditions = asNullable(body.weatherConditions);
+  const weatherObservedAt = asTimestampOrNull(body.weatherObservedAt);
+  const weatherSource = asNullable(body.weatherSource);
 
   const rawChemicals = Array.isArray(body.chemicals) ? body.chemicals : [];
   const chemicals = rawChemicals
@@ -317,6 +347,12 @@ export async function POST(req: Request) {
       service_date: serviceDate,
       start_time: startTime,
       end_time: endTime,
+      weather_temperature_f: weatherTemperatureF,
+      weather_wind_speed_mph: weatherWindSpeedMph,
+      weather_wind_direction: weatherWindDirection,
+      weather_conditions: weatherConditions,
+      weather_observed_at: weatherObservedAt,
+      weather_source: weatherSource,
       typed_legal_signature: signatureMode === "typed" ? typedLegalSignature : null,
       signature_drawn_data: signatureMode === "drawn" ? drawnSignatureData : null,
       signature_mode: signatureMode,
@@ -355,6 +391,12 @@ export async function POST(req: Request) {
     serviceDate,
     startTime,
     endTime,
+    weatherTemperatureF,
+    weatherWindSpeedMph,
+    weatherWindDirection,
+    weatherConditions,
+    weatherObservedAt,
+    weatherSource,
     chemicals,
     signatureText,
   });
@@ -390,6 +432,7 @@ export async function POST(req: Request) {
         <p style="margin:0 0 6px"><strong>Property:</strong> ${propertyData.property_name}</p>
         <p style="margin:0 0 6px"><strong>Applicator:</strong> ${applicatorName || "-"}</p>
         <p style="margin:0 0 14px"><strong>Date:</strong> ${serviceDate || "-"}</p>
+        <p style="margin:0 0 14px"><strong>Weather:</strong> ${weatherConditions || "-"} · ${weatherTemperatureF ?? "-"} F · ${weatherWindSpeedMph ?? "-"} mph ${weatherWindDirection || ""}</p>
         <p style="margin:0">Attached: PDF summary</p>
       </div>
     `;
