@@ -34,6 +34,7 @@ type SubmitBody = {
   weatherConditions?: string;
   weatherObservedAt?: string;
   weatherSource?: string;
+  equipmentUsed?: string[];
   signatureMode?: "typed" | "drawn";
   typedLegalSignature?: string;
   drawnSignatureData?: string;
@@ -102,6 +103,19 @@ function asTimestampOrNull(value: unknown) {
   return new Date(time).toISOString();
 }
 
+function asStringList(value: unknown, maxItems = 30) {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const next = asString(item);
+    if (!next) continue;
+    if (out.includes(next)) continue;
+    out.push(next);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
 function fullClientName(client: ClientRow) {
   return [asString(client.first_name), asString(client.middle_name), asString(client.last_name)]
     .filter(Boolean)
@@ -140,6 +154,7 @@ async function buildServicePdf(params: {
   weatherConditions: string | null;
   weatherObservedAt: string | null;
   weatherSource: string | null;
+  equipmentUsed: string[];
   chemicals: Array<{
     chemicalName: string;
     epaRegistrationNumber: string | null;
@@ -188,6 +203,18 @@ async function buildServicePdf(params: {
     `Weather: ${params.weatherConditions || "-"} | Temp: ${params.weatherTemperatureF ?? "-"} F | Wind: ${params.weatherWindSpeedMph ?? "-"} mph ${params.weatherWindDirection || ""}`.trim()
   );
   drawText(`Weather Source: ${params.weatherSource || "-"} | Observed: ${params.weatherObservedAt || "-"}`);
+  drawText("");
+
+  drawText("Equipment Used", { size: 12, bold: true });
+  if (params.equipmentUsed.length) {
+    params.equipmentUsed.forEach((item, index) => {
+      for (const wrapped of wrapText(`${index + 1}. ${item}`, 95)) {
+        drawText(wrapped);
+      }
+    });
+  } else {
+    drawText("None listed");
+  }
   drawText("");
 
   drawText("Chemicals", { size: 12, bold: true });
@@ -287,6 +314,7 @@ export async function POST(req: Request) {
   const weatherConditions = asNullable(body.weatherConditions);
   const weatherObservedAt = asTimestampOrNull(body.weatherObservedAt);
   const weatherSource = asNullable(body.weatherSource);
+  const equipmentUsed = asStringList(body.equipmentUsed);
 
   const rawChemicals = Array.isArray(body.chemicals) ? body.chemicals : [];
   const chemicals = rawChemicals
@@ -353,6 +381,7 @@ export async function POST(req: Request) {
       weather_conditions: weatherConditions,
       weather_observed_at: weatherObservedAt,
       weather_source: weatherSource,
+      equipment_used: equipmentUsed,
       typed_legal_signature: signatureMode === "typed" ? typedLegalSignature : null,
       signature_drawn_data: signatureMode === "drawn" ? drawnSignatureData : null,
       signature_mode: signatureMode,
@@ -397,6 +426,7 @@ export async function POST(req: Request) {
     weatherConditions,
     weatherObservedAt,
     weatherSource,
+    equipmentUsed,
     chemicals,
     signatureText,
   });
@@ -433,6 +463,7 @@ export async function POST(req: Request) {
         <p style="margin:0 0 6px"><strong>Applicator:</strong> ${applicatorName || "-"}</p>
         <p style="margin:0 0 14px"><strong>Date:</strong> ${serviceDate || "-"}</p>
         <p style="margin:0 0 14px"><strong>Weather:</strong> ${weatherConditions || "-"} · ${weatherTemperatureF ?? "-"} F · ${weatherWindSpeedMph ?? "-"} mph ${weatherWindDirection || ""}</p>
+        <p style="margin:0 0 14px"><strong>Equipment Used:</strong> ${equipmentUsed.length ? equipmentUsed.join(", ") : "None listed"}</p>
         <p style="margin:0">Attached: PDF summary</p>
       </div>
     `;

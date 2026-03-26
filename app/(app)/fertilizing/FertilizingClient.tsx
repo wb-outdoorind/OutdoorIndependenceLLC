@@ -48,6 +48,7 @@ type FertServiceRecord = {
   applicator_name: string | null;
   applicator_license_number: string | null;
   service_date: string | null;
+  equipment_used: string[] | null;
   weather_temperature_f: number | string | null;
   weather_wind_speed_mph: number | string | null;
   weather_wind_direction: string | null;
@@ -94,6 +95,7 @@ type ServiceFormDraft = {
   weatherConditions: string;
   weatherObservedAt: string;
   weatherSource: string;
+  equipmentUsed: string[];
   signatureMode: "typed" | "drawn";
   typedSignature: string;
   drawnSignatureData: string;
@@ -124,6 +126,13 @@ function decodeBase64ToBytes(value: string) {
 function asNullable(value: string) {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function asStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
 }
 
 function fullName(client: FertClient) {
@@ -219,6 +228,8 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [weatherConditions, setWeatherConditions] = useState("");
   const [weatherObservedAt, setWeatherObservedAt] = useState("");
   const [weatherSource, setWeatherSource] = useState("");
+  const [equipmentUsed, setEquipmentUsed] = useState<string[]>([]);
+  const [equipmentUsedDraft, setEquipmentUsedDraft] = useState("");
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [signatureMode, setSignatureMode] = useState<"typed" | "drawn">("typed");
   const [typedSignature, setTypedSignature] = useState("");
@@ -242,6 +253,8 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     setWeatherConditions("");
     setWeatherObservedAt("");
     setWeatherSource("");
+    setEquipmentUsed([]);
+    setEquipmentUsedDraft("");
     setSignatureMode("typed");
     setTypedSignature("");
     setDrawnSignatureData("");
@@ -273,7 +286,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
         supabase
           .from("fert_service_records")
           .select(
-            "id,property_id,applicator_name,applicator_license_number,service_date,weather_temperature_f,weather_wind_speed_mph,weather_wind_direction,weather_conditions,weather_observed_at,weather_source,created_at"
+            "id,property_id,applicator_name,applicator_license_number,service_date,equipment_used,weather_temperature_f,weather_wind_speed_mph,weather_wind_direction,weather_conditions,weather_observed_at,weather_source,created_at"
           )
           .order("created_at", { ascending: false })
           .limit(30),
@@ -335,6 +348,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           setWeatherConditions(typeof parsed.weatherConditions === "string" ? parsed.weatherConditions : "");
           setWeatherObservedAt(typeof parsed.weatherObservedAt === "string" ? parsed.weatherObservedAt : "");
           setWeatherSource(typeof parsed.weatherSource === "string" ? parsed.weatherSource : "");
+          setEquipmentUsed(asStringList(parsed.equipmentUsed));
           setSignatureMode(parsed.signatureMode === "drawn" ? "drawn" : "typed");
           setTypedSignature(typeof parsed.typedSignature === "string" ? parsed.typedSignature : "");
           setDrawnSignatureData(typeof parsed.drawnSignatureData === "string" ? parsed.drawnSignatureData : "");
@@ -366,6 +380,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       weatherConditions,
       weatherObservedAt,
       weatherSource,
+      equipmentUsed,
       signatureMode,
       typedSignature,
       drawnSignatureData,
@@ -385,6 +400,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     weatherConditions,
     weatherObservedAt,
     weatherSource,
+    equipmentUsed,
     signatureMode,
     typedSignature,
     drawnSignatureData,
@@ -608,6 +624,17 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     });
   }
 
+  function addEquipmentUsed() {
+    const value = equipmentUsedDraft.trim();
+    if (!value) return;
+    setEquipmentUsed((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    setEquipmentUsedDraft("");
+  }
+
+  function removeEquipmentUsed(value: string) {
+    setEquipmentUsed((prev) => prev.filter((item) => item !== value));
+  }
+
   async function autoFillWeather() {
     const property = servicePropertyId ? propertyById.get(servicePropertyId) : null;
     if (!property) {
@@ -716,6 +743,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           weatherConditions,
           weatherObservedAt,
           weatherSource,
+          equipmentUsed,
           signatureMode,
           typedLegalSignature: typedSignature,
           drawnSignatureData,
@@ -773,6 +801,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       weatherConditions,
       weatherObservedAt,
       weatherSource,
+      equipmentUsed,
       signatureMode,
       typedSignature,
       drawnSignatureData,
@@ -1202,6 +1231,37 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
             />
           </label>
           <label style={labelStyle}>
+            Equipment Used
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={equipmentUsedDraft}
+                onChange={(e) => setEquipmentUsedDraft(e.target.value)}
+                style={{ ...inputStyle, minWidth: 200, flex: "1 1 200px" }}
+                placeholder="Type equipment name"
+              />
+              <button type="button" style={buttonGhostStyle} onClick={addEquipmentUsed}>
+                Add Equipment
+              </button>
+            </div>
+            {equipmentUsed.length ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {equipmentUsed.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => removeEquipmentUsed(item)}
+                    style={equipmentChipStyle}
+                    title="Remove equipment"
+                  >
+                    {item} ×
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ opacity: 0.72, fontSize: 12, marginTop: 8 }}>No equipment selected.</div>
+            )}
+          </label>
+          <label style={labelStyle}>
             Signature Mode
             <select value={signatureMode} onChange={(e) => setSignatureMode(e.target.value as "typed" | "drawn")} style={inputStyle}>
               <option value="typed">Typed legal signature</option>
@@ -1416,13 +1476,19 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
                   <div style={{ opacity: 0.82, fontSize: 13 }}>
                     Applicator: {row.applicator_name || "-"} · License: {row.applicator_license_number || "-"}
                   </div>
-                  <div style={{ opacity: 0.82, fontSize: 13 }}>
-                    Service Date: {fmtDateOnly(row.service_date)} · Created: {fmtDate(row.created_at)}
-                  </div>
-                  <div style={{ opacity: 0.82, fontSize: 12 }}>
-                    Weather: {row.weather_conditions || "-"} · {row.weather_temperature_f ?? "-"} F ·{" "}
-                    {row.weather_wind_speed_mph ?? "-"} mph {row.weather_wind_direction || ""}
-                  </div>
+                <div style={{ opacity: 0.82, fontSize: 13 }}>
+                  Service Date: {fmtDateOnly(row.service_date)} · Created: {fmtDate(row.created_at)}
+                </div>
+                <div style={{ opacity: 0.82, fontSize: 12 }}>
+                  Equipment:{" "}
+                  {Array.isArray(row.equipment_used) && row.equipment_used.length
+                    ? row.equipment_used.join(", ")
+                    : "None listed"}
+                </div>
+                <div style={{ opacity: 0.82, fontSize: 12 }}>
+                  Weather: {row.weather_conditions || "-"} · {row.weather_temperature_f ?? "-"} F ·{" "}
+                  {row.weather_wind_speed_mph ?? "-"} mph {row.weather_wind_direction || ""}
+                </div>
                 </div>
               );
             })
@@ -1536,6 +1602,17 @@ const buttonGhostStyle: CSSProperties = {
   background: "rgba(255,255,255,0.03)",
   color: "inherit",
   padding: "9px 12px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const equipmentChipStyle: CSSProperties = {
+  borderRadius: 999,
+  border: "1px solid var(--surface-border)",
+  background: "rgba(255,255,255,0.06)",
+  color: "inherit",
+  padding: "6px 10px",
+  fontSize: 12,
   fontWeight: 700,
   cursor: "pointer",
 };
