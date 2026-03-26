@@ -33,6 +33,20 @@ type WeekRow = {
   goal_description: string;
 };
 
+type WeekRequirementRow = {
+  id: string;
+  program_id: string;
+  week_number: number;
+  min_pass_percent: number;
+  require_safety_pass: boolean;
+  require_quality_pass: boolean;
+  require_efficiency_pass: boolean;
+  require_no_open_incidents: boolean;
+  production_benchmark: string | null;
+  quality_defect_tolerance: string | null;
+  notes: string | null;
+};
+
 type SkillRow = {
   id: string;
   program_id: string;
@@ -83,6 +97,14 @@ type CertificationRow = {
   crew_leader_approval: string | null;
   operations_approval: string | null;
   certification_result: string | null;
+  final_practical_score: number | null;
+  safety_signoff: boolean;
+  quality_signoff: boolean;
+  efficiency_signoff: boolean;
+  workflow_signoff: boolean;
+  equipment_signoff: boolean;
+  customer_standards_signoff: boolean;
+  remediation_plan: string | null;
 };
 
 type ProfileRow = {
@@ -113,8 +135,60 @@ type CertificationDraft = {
   certification_date: string;
   crew_leader_approval: string;
   operations_approval: string;
+  final_practical_score: string;
+  safety_signoff: boolean;
+  quality_signoff: boolean;
+  efficiency_signoff: boolean;
+  workflow_signoff: boolean;
+  equipment_signoff: boolean;
+  customer_standards_signoff: boolean;
+  remediation_plan: string;
   certification_result: "" | "Certified Mowing Technician" | "Additional Training Required";
 };
+
+type IncidentType = "near_miss" | "property_damage" | "safety_incident" | "customer_issue";
+type IncidentSeverity = "low" | "medium" | "high" | "critical";
+
+type IncidentLogRow = {
+  id: string;
+  enrollment_id: string;
+  incident_date: string;
+  incident_type: IncidentType;
+  severity: IncidentSeverity;
+  summary: string;
+  action_taken: string | null;
+  reported_by: string | null;
+  resolved_at: string | null;
+};
+
+type FollowupType = "30_day" | "60_day";
+
+type FollowupRow = {
+  id: string;
+  enrollment_id: string;
+  followup_type: FollowupType;
+  due_date: string;
+  completed_date: string | null;
+  reviewer_id: string | null;
+  score_percent: number | null;
+  notes: string | null;
+};
+
+type IncidentDraft = {
+  incident_date: string;
+  incident_type: IncidentType;
+  severity: IncidentSeverity;
+  summary: string;
+  action_taken: string;
+};
+
+type CertificationSignoffKey =
+  | "safety_signoff"
+  | "quality_signoff"
+  | "efficiency_signoff"
+  | "workflow_signoff"
+  | "equipment_signoff"
+  | "customer_standards_signoff";
 
 type AssignmentDraft = {
   trainee_id: string;
@@ -135,6 +209,41 @@ const MANAGEMENT_PLUS_MECHANIC_ROLES = new Set<AppRole>(["owner", "operations_ma
 const LEAD_ROLES = new Set<AppRole>(["team_lead_1", "team_lead_2"]);
 const TEAMMATE_ROLES = new Set<AppRole>(["team_member_1", "team_member_2", "employee"]);
 const DAILY_FORM_ENABLED_DEPARTMENTS = new Set(["mowing"]);
+const CERTIFICATION_MIN_SCORE = 85;
+
+const INCIDENT_TYPE_OPTIONS: Array<{ value: IncidentType; label: string }> = [
+  { value: "near_miss", label: "Near Miss" },
+  { value: "property_damage", label: "Property Damage" },
+  { value: "safety_incident", label: "Safety Incident" },
+  { value: "customer_issue", label: "Customer Issue" },
+];
+
+const INCIDENT_SEVERITY_OPTIONS: Array<{ value: IncidentSeverity; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "critical", label: "Critical" },
+];
+
+const CERTIFICATION_SIGNOFF_FIELDS: Array<{ key: CertificationSignoffKey; label: string }> = [
+  { key: "safety_signoff", label: "Safety" },
+  { key: "quality_signoff", label: "Quality" },
+  { key: "efficiency_signoff", label: "Efficiency" },
+  { key: "workflow_signoff", label: "Workflow / MEATS" },
+  { key: "equipment_signoff", label: "Equipment Care" },
+  { key: "customer_standards_signoff", label: "Customer Standards" },
+];
+
+const INCIDENT_SEVERITY_BADGE_BY_VALUE: Record<IncidentSeverity, string> = {
+  low: "#4e6f9d",
+  medium: "#7d6b2f",
+  high: "#9c5d2f",
+  critical: "#b94b4b",
+};
+
+function getIncidentTypeLabel(value: IncidentType) {
+  return INCIDENT_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+}
 
 function formatPerson(profile: ProfileRow | null | undefined, fallback = "Unassigned") {
   if (!profile) return fallback;
@@ -179,6 +288,7 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
 
   const [program, setProgram] = useState<ProgramRow | null>(null);
   const [weeks, setWeeks] = useState<WeekRow[]>([]);
+  const [weekRequirements, setWeekRequirements] = useState<WeekRequirementRow[]>([]);
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
@@ -186,6 +296,8 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
   const [dailySkillProgress, setDailySkillProgress] = useState<DailySkillProgressRow[]>([]);
   const [dailySkillNotes, setDailySkillNotes] = useState<DailySkillNoteRow[]>([]);
   const [certifications, setCertifications] = useState<CertificationRow[]>([]);
+  const [incidentLogs, setIncidentLogs] = useState<IncidentLogRow[]>([]);
+  const [followups, setFollowups] = useState<FollowupRow[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -199,6 +311,13 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
   const [draftNoteBySkillId, setDraftNoteBySkillId] = useState<Record<string, string>>({});
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
+  const [incidentDraft, setIncidentDraft] = useState<IncidentDraft>({
+    incident_date: todayIso,
+    incident_type: "near_miss",
+    severity: "low",
+    summary: "",
+    action_taken: "",
+  });
 
   const [assignmentDraft, setAssignmentDraft] = useState<AssignmentDraft>({
     trainee_id: "",
@@ -213,6 +332,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
     certification_date: "",
     crew_leader_approval: "",
     operations_approval: "",
+    final_practical_score: "",
+    safety_signoff: false,
+    quality_signoff: false,
+    efficiency_signoff: false,
+    workflow_signoff: false,
+    equipment_signoff: false,
+    customer_standards_signoff: false,
+    remediation_plan: "",
     certification_result: "",
   });
 
@@ -234,6 +361,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
     }
     return map;
   }, [weeks]);
+
+  const weekRequirementByWeek = useMemo(() => {
+    const map = new Map<number, WeekRequirementRow>();
+    for (const row of weekRequirements) {
+      map.set(row.week_number, row);
+    }
+    return map;
+  }, [weekRequirements]);
 
   const skillsByWeek = useMemo(() => {
     const map = new Map<number, SkillRow[]>();
@@ -346,6 +481,24 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
     return certifications.find((row) => row.enrollment_id === activeEnrollment.id) ?? null;
   }, [activeEnrollment, certifications]);
 
+  const activeEnrollmentIncidents = useMemo(() => {
+    if (!activeEnrollment) return [] as IncidentLogRow[];
+    return incidentLogs
+      .filter((row) => row.enrollment_id === activeEnrollment.id)
+      .sort((a, b) => b.incident_date.localeCompare(a.incident_date));
+  }, [activeEnrollment, incidentLogs]);
+
+  const openCriticalIncidentCount = useMemo(() => {
+    return activeEnrollmentIncidents.filter((row) => row.severity === "critical" && !row.resolved_at).length;
+  }, [activeEnrollmentIncidents]);
+
+  const activeEnrollmentFollowups = useMemo(() => {
+    if (!activeEnrollment) return [] as FollowupRow[];
+    return followups
+      .filter((row) => row.enrollment_id === activeEnrollment.id)
+      .sort((a, b) => a.due_date.localeCompare(b.due_date));
+  }, [activeEnrollment, followups]);
+
   async function loadTrainingData() {
     if (!viewerId) {
       setLoading(false);
@@ -376,20 +529,29 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
 
       if (!selectedProgram) {
         setWeeks([]);
+        setWeekRequirements([]);
         setSkills([]);
         setEnrollments([]);
         setDailyProgress([]);
         setDailySkillProgress([]);
         setDailySkillNotes([]);
         setCertifications([]);
-        setLoading(false);
+        setIncidentLogs([]);
+        setFollowups([]);
         return;
       }
 
-      const [weeksRes, skillsRes, enrollmentsRes, profilesRes] = await Promise.all([
+      const [weeksRes, weekRequirementsRes, skillsRes, enrollmentsRes, profilesRes] = await Promise.all([
         supabase
           .from("academy_training_weeks")
           .select("id,program_id,week_number,title,goal_percent,goal_description")
+          .eq("program_id", selectedProgram.id)
+          .order("week_number", { ascending: true }),
+        supabase
+          .from("academy_training_week_requirements")
+          .select(
+            "id,program_id,week_number,min_pass_percent,require_safety_pass,require_quality_pass,require_efficiency_pass,require_no_open_incidents,production_benchmark,quality_defect_tolerance,notes"
+          )
           .eq("program_id", selectedProgram.id)
           .order("week_number", { ascending: true }),
         supabase
@@ -411,16 +573,19 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
       ]);
 
       if (weeksRes.error) throw weeksRes.error;
+      if (weekRequirementsRes.error) throw weekRequirementsRes.error;
       if (skillsRes.error) throw skillsRes.error;
       if (enrollmentsRes.error) throw enrollmentsRes.error;
       if (profilesRes.error) throw profilesRes.error;
 
       const nextWeeks = (weeksRes.data ?? []) as WeekRow[];
+      const nextWeekRequirements = (weekRequirementsRes.data ?? []) as WeekRequirementRow[];
       const nextSkills = (skillsRes.data ?? []) as SkillRow[];
       const nextEnrollments = (enrollmentsRes.data ?? []) as EnrollmentRow[];
       const nextProfiles = (profilesRes.data ?? []) as ProfileRow[];
 
       setWeeks(nextWeeks);
+      setWeekRequirements(nextWeekRequirements);
       setSkills(nextSkills);
       setEnrollments(nextEnrollments);
       setProfiles(nextProfiles);
@@ -430,33 +595,56 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
         setDailySkillProgress([]);
         setDailySkillNotes([]);
         setCertifications([]);
-        setLoading(false);
+        setIncidentLogs([]);
+        setFollowups([]);
         return;
       }
 
       const enrollmentIds = nextEnrollments.map((row) => row.id);
 
-      const progressRes = await supabase
-        .from("academy_training_daily_progress")
-        .select("id,enrollment_id,progress_date,week_number,completion_percent")
-        .in("enrollment_id", enrollmentIds)
-        .order("progress_date", { ascending: false });
+      const [progressRes, certificationsRes, incidentLogsRes, followupsRes] = await Promise.all([
+        supabase
+          .from("academy_training_daily_progress")
+          .select("id,enrollment_id,progress_date,week_number,completion_percent")
+          .in("enrollment_id", enrollmentIds)
+          .order("progress_date", { ascending: false }),
+        supabase
+          .from("academy_training_certifications")
+          .select(
+            "id,enrollment_id,employee_name,crew_leader_id,start_date,certification_date,crew_leader_approval,operations_approval,certification_result,final_practical_score,safety_signoff,quality_signoff,efficiency_signoff,workflow_signoff,equipment_signoff,customer_standards_signoff,remediation_plan"
+          )
+          .in("enrollment_id", enrollmentIds),
+        supabase
+          .from("academy_training_incident_logs")
+          .select("id,enrollment_id,incident_date,incident_type,severity,summary,action_taken,reported_by,resolved_at")
+          .in("enrollment_id", enrollmentIds)
+          .order("incident_date", { ascending: false }),
+        supabase
+          .from("academy_training_followups")
+          .select("id,enrollment_id,followup_type,due_date,completed_date,reviewer_id,score_percent,notes")
+          .in("enrollment_id", enrollmentIds)
+          .order("due_date", { ascending: true }),
+      ]);
 
       if (progressRes.error) throw progressRes.error;
+      if (certificationsRes.error) throw certificationsRes.error;
+      if (incidentLogsRes.error) throw incidentLogsRes.error;
+      if (followupsRes.error) throw followupsRes.error;
 
       const nextProgress = (progressRes.data ?? []) as DailyProgressRow[];
       setDailyProgress(nextProgress);
+      setCertifications((certificationsRes.data ?? []) as CertificationRow[]);
+      setIncidentLogs((incidentLogsRes.data ?? []) as IncidentLogRow[]);
+      setFollowups((followupsRes.data ?? []) as FollowupRow[]);
 
       const progressIds = nextProgress.map((row) => row.id);
       if (progressIds.length === 0) {
         setDailySkillProgress([]);
         setDailySkillNotes([]);
-        setCertifications([]);
-        setLoading(false);
         return;
       }
 
-      const [skillProgressRes, notesRes, certificationsRes] = await Promise.all([
+      const [skillProgressRes, notesRes] = await Promise.all([
         supabase
           .from("academy_training_daily_skill_progress")
           .select("daily_progress_id,skill_id,status")
@@ -465,21 +653,13 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
           .from("academy_training_daily_skill_notes")
           .select("daily_progress_id,skill_id,note")
           .in("daily_progress_id", progressIds),
-        supabase
-          .from("academy_training_certifications")
-          .select(
-            "id,enrollment_id,employee_name,crew_leader_id,start_date,certification_date,crew_leader_approval,operations_approval,certification_result"
-          )
-          .in("enrollment_id", enrollmentIds),
       ]);
 
       if (skillProgressRes.error) throw skillProgressRes.error;
       if (notesRes.error) throw notesRes.error;
-      if (certificationsRes.error) throw certificationsRes.error;
 
       setDailySkillProgress((skillProgressRes.data ?? []) as DailySkillProgressRow[]);
       setDailySkillNotes((notesRes.data ?? []) as DailySkillNoteRow[]);
-      setCertifications((certificationsRes.data ?? []) as CertificationRow[]);
     } catch (err) {
       console.error("[academy-training] load error", err);
       setError(err instanceof Error ? err.message : "Failed to load training data.");
@@ -595,6 +775,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
         certification_date: "",
         crew_leader_approval: "",
         operations_approval: "",
+        final_practical_score: "",
+        safety_signoff: false,
+        quality_signoff: false,
+        efficiency_signoff: false,
+        workflow_signoff: false,
+        equipment_signoff: false,
+        customer_standards_signoff: false,
+        remediation_plan: "",
         certification_result: "",
       });
       return;
@@ -609,6 +797,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
       certification_date: existing?.certification_date ?? "",
       crew_leader_approval: existing?.crew_leader_approval ?? "",
       operations_approval: existing?.operations_approval ?? "",
+      final_practical_score: existing?.final_practical_score != null ? String(existing.final_practical_score) : "",
+      safety_signoff: existing?.safety_signoff ?? false,
+      quality_signoff: existing?.quality_signoff ?? false,
+      efficiency_signoff: existing?.efficiency_signoff ?? false,
+      workflow_signoff: existing?.workflow_signoff ?? false,
+      equipment_signoff: existing?.equipment_signoff ?? false,
+      customer_standards_signoff: existing?.customer_standards_signoff ?? false,
+      remediation_plan: existing?.remediation_plan ?? "",
       certification_result:
         existing?.certification_result === "Certified Mowing Technician" ||
         existing?.certification_result === "Additional Training Required"
@@ -817,6 +1013,50 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
   async function saveCertification() {
     if (!viewerId || !activeEnrollment || !canEditAnyProgress) return;
 
+    const scoreInput = certDraft.final_practical_score.trim();
+    let finalPracticalScore: number | null = null;
+    if (scoreInput.length > 0) {
+      const parsed = Number(scoreInput);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+        setError("Final practical score must be a number between 0 and 100.");
+        return;
+      }
+      finalPracticalScore = Number(parsed.toFixed(2));
+    }
+
+    const remediationPlan = certDraft.remediation_plan.trim();
+    const requiresAllSignoffs =
+      certDraft.safety_signoff &&
+      certDraft.quality_signoff &&
+      certDraft.efficiency_signoff &&
+      certDraft.workflow_signoff &&
+      certDraft.equipment_signoff &&
+      certDraft.customer_standards_signoff;
+
+    if (certDraft.certification_result === "Certified Mowing Technician") {
+      if (!certDraft.certification_date) {
+        setError("Certification date is required before marking a trainee certified.");
+        return;
+      }
+      if (finalPracticalScore == null || finalPracticalScore < CERTIFICATION_MIN_SCORE) {
+        setError(`Final practical score must be at least ${CERTIFICATION_MIN_SCORE}% to certify.`);
+        return;
+      }
+      if (!requiresAllSignoffs) {
+        setError("All certification signoffs must be completed before certification.");
+        return;
+      }
+      if (openCriticalIncidentCount > 0) {
+        setError("Resolve all open critical incidents before certification.");
+        return;
+      }
+    }
+
+    if (certDraft.certification_result === "Additional Training Required" && remediationPlan.length === 0) {
+      setError("Remediation plan is required when additional training is required.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
     setInfo(null);
@@ -833,6 +1073,14 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
         certification_date: certDraft.certification_date || null,
         crew_leader_approval: certDraft.crew_leader_approval.trim() || null,
         operations_approval: certDraft.operations_approval.trim() || null,
+        final_practical_score: finalPracticalScore,
+        safety_signoff: certDraft.safety_signoff,
+        quality_signoff: certDraft.quality_signoff,
+        efficiency_signoff: certDraft.efficiency_signoff,
+        workflow_signoff: certDraft.workflow_signoff,
+        equipment_signoff: certDraft.equipment_signoff,
+        customer_standards_signoff: certDraft.customer_standards_signoff,
+        remediation_plan: remediationPlan || null,
         certification_result: certDraft.certification_result || null,
         updated_by: viewerId,
         updated_at: new Date().toISOString(),
@@ -859,6 +1107,77 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
     } catch (err) {
       console.error("[academy-training] save certification error", err);
       setError(err instanceof Error ? err.message : "Failed to save certification.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveIncidentLog() {
+    if (!viewerId || !activeEnrollment || !canEditAnyProgress) return;
+
+    const summary = incidentDraft.summary.trim();
+    if (!summary) {
+      setError("Incident summary is required.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const supabase = createSupabaseBrowser();
+      const { error: insertError } = await supabase.from("academy_training_incident_logs").insert({
+        enrollment_id: activeEnrollment.id,
+        incident_date: incidentDraft.incident_date || todayIso,
+        incident_type: incidentDraft.incident_type,
+        severity: incidentDraft.severity,
+        summary,
+        action_taken: incidentDraft.action_taken.trim() || null,
+        reported_by: viewerId,
+      });
+      if (insertError) throw insertError;
+
+      setIncidentDraft({
+        incident_date: todayIso,
+        incident_type: "near_miss",
+        severity: "low",
+        summary: "",
+        action_taken: "",
+      });
+      setInfo("Incident logged.");
+      await loadTrainingData();
+    } catch (err) {
+      console.error("[academy-training] save incident error", err);
+      setError(err instanceof Error ? err.message : "Failed to save incident log.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleIncidentResolved(incident: IncidentLogRow) {
+    if (!canEditAnyProgress) return;
+
+    setSaving(true);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const supabase = createSupabaseBrowser();
+      const { error: updateError } = await supabase
+        .from("academy_training_incident_logs")
+        .update({
+          resolved_at: incident.resolved_at ? null : new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", incident.id);
+      if (updateError) throw updateError;
+
+      setInfo(incident.resolved_at ? "Incident reopened." : "Incident marked as resolved.");
+      await loadTrainingData();
+    } catch (err) {
+      console.error("[academy-training] resolve incident error", err);
+      setError(err instanceof Error ? err.message : "Failed to update incident status.");
     } finally {
       setSaving(false);
     }
@@ -965,9 +1284,9 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
 
       <div style={summaryGridStyle}>
         <SummaryTile title="Week 1" subtitle="Foundations" value="25% Goal" />
-        <SummaryTile title="Week 2" subtitle="Operational / Independent Ready" value="50% Goal" />
-        <SummaryTile title="Week 3" subtitle="Refinement & Consistency" value="75% Goal" />
-        <SummaryTile title="Week 4" subtitle="Excellence & Certification" value="100% Goal" />
+        <SummaryTile title="Week 2" subtitle="Operational Development" value="50% Goal" />
+        <SummaryTile title="Week 3" subtitle="Efficiency & Quality" value="75% Goal" />
+        <SummaryTile title="Week 4" subtitle="Independent Technician Development" value="100% Goal" />
       </div>
 
       {error ? <div style={{ ...inlineMessageStyle, color: "#ffb4b4" }}>{error}</div> : null}
@@ -1116,6 +1435,19 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                   <div style={{ display: "grid", gap: 14, marginBottom: 12 }}>
                     {weeks.map((week) => {
                       const list = skillsByWeek.get(week.week_number) ?? [];
+                      const requirement = weekRequirementByWeek.get(week.week_number) ?? null;
+                      const weekStatuses = list.map((skill) => draftStatusBySkillId[skill.id] ?? 1);
+                      const weekDraftScore =
+                        weekStatuses.length > 0
+                          ? Number(
+                              (
+                                weekStatuses.reduce((sum, statusValue) => sum + statusToPercent(statusValue), 0) /
+                                weekStatuses.length
+                              ).toFixed(1)
+                            )
+                          : 0;
+                      const weekGateMet = requirement ? weekDraftScore >= requirement.min_pass_percent : null;
+                      const requireNoOpenIncidents = requirement?.require_no_open_incidents ?? false;
                       return (
                         <section key={week.id} style={weekSectionStyle}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
@@ -1125,6 +1457,39 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                             <div style={goalBadgeStyle}>{week.goal_percent}% Goal</div>
                           </div>
                           <div style={{ opacity: 0.72, marginTop: 4, marginBottom: 8 }}>{week.goal_description}</div>
+
+                          {requirement ? (
+                            <section style={gateCardStyle}>
+                              <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                                Weekly Gate: {weekDraftScore.toFixed(1)}% / {requirement.min_pass_percent}%{" "}
+                                {weekGateMet ? "Pass" : "Needs Work"}
+                              </div>
+                              <div style={gateGridStyle}>
+                                <div style={gateItemStyle}>Safety Gate: {requirement.require_safety_pass ? "Required" : "Optional"}</div>
+                                <div style={gateItemStyle}>Quality Gate: {requirement.require_quality_pass ? "Required" : "Optional"}</div>
+                                <div style={gateItemStyle}>Efficiency Gate: {requirement.require_efficiency_pass ? "Required" : "Optional"}</div>
+                                <div style={gateItemStyle}>
+                                  Open Incident Gate:{" "}
+                                  {requireNoOpenIncidents
+                                    ? openCriticalIncidentCount > 0
+                                      ? `Blocked (${openCriticalIncidentCount} critical open)`
+                                      : "Clear"
+                                    : "Not Required"}
+                                </div>
+                              </div>
+                              {requirement.production_benchmark ? (
+                                <div style={{ opacity: 0.75, marginTop: 6 }}>
+                                  Benchmark: {requirement.production_benchmark}
+                                </div>
+                              ) : null}
+                              {requirement.quality_defect_tolerance ? (
+                                <div style={{ opacity: 0.75, marginTop: 4 }}>
+                                  Quality tolerance: {requirement.quality_defect_tolerance}
+                                </div>
+                              ) : null}
+                              {requirement.notes ? <div style={{ opacity: 0.75, marginTop: 4 }}>{requirement.notes}</div> : null}
+                            </section>
+                          ) : null}
 
                           <div style={{ display: "grid", gap: 8 }}>
                             {list.map((skill) => {
@@ -1201,6 +1566,171 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
               )}
 
               <section style={weekSectionStyle}>
+                <h5 style={{ marginTop: 0, marginBottom: 8 }}>Safety & Incident Log</h5>
+                <div style={{ opacity: 0.76, marginBottom: 10 }}>
+                  Open critical incidents:{" "}
+                  <strong style={{ color: openCriticalIncidentCount > 0 ? "#ffb4b4" : "#a6ffbe" }}>
+                    {openCriticalIncidentCount}
+                  </strong>
+                </div>
+
+                <div style={threeColGridStyle}>
+                  <Field label="Incident Date">
+                    <input
+                      type="date"
+                      value={incidentDraft.incident_date}
+                      onChange={(e) => setIncidentDraft((prev) => ({ ...prev, incident_date: e.target.value }))}
+                      style={inputStyle}
+                    />
+                  </Field>
+                  <Field label="Incident Type">
+                    <select
+                      value={incidentDraft.incident_type}
+                      onChange={(e) =>
+                        setIncidentDraft((prev) => ({
+                          ...prev,
+                          incident_type: e.target.value as IncidentType,
+                        }))
+                      }
+                      style={inputStyle}
+                    >
+                      {INCIDENT_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Severity">
+                    <select
+                      value={incidentDraft.severity}
+                      onChange={(e) =>
+                        setIncidentDraft((prev) => ({
+                          ...prev,
+                          severity: e.target.value as IncidentSeverity,
+                        }))
+                      }
+                      style={inputStyle}
+                    >
+                      {INCIDENT_SEVERITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <Field label="Incident Summary">
+                  <textarea
+                    value={incidentDraft.summary}
+                    onChange={(e) => setIncidentDraft((prev) => ({ ...prev, summary: e.target.value }))}
+                    style={{ ...inputStyle, minHeight: 65 }}
+                    placeholder="What happened?"
+                  />
+                </Field>
+
+                <Field label="Action Taken (Optional)">
+                  <textarea
+                    value={incidentDraft.action_taken}
+                    onChange={(e) => setIncidentDraft((prev) => ({ ...prev, action_taken: e.target.value }))}
+                    style={{ ...inputStyle, minHeight: 65 }}
+                    placeholder="Immediate containment or follow-up action"
+                  />
+                </Field>
+
+                <div style={{ marginTop: 10, marginBottom: 8 }}>
+                  <button type="button" style={actionButtonStyle} onClick={() => void saveIncidentLog()} disabled={saving}>
+                    {saving ? "Saving..." : "Log Incident"}
+                  </button>
+                </div>
+
+                {activeEnrollmentIncidents.length === 0 ? (
+                  <div style={{ opacity: 0.72 }}>No incidents logged for this apprentice yet.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                    {activeEnrollmentIncidents.map((incident) => {
+                      const severityLabel =
+                        INCIDENT_SEVERITY_OPTIONS.find((option) => option.value === incident.severity)?.label ?? incident.severity;
+                      const severityColor = INCIDENT_SEVERITY_BADGE_BY_VALUE[incident.severity];
+                      const reporter = incident.reported_by ? formatPerson(profileById.get(incident.reported_by) ?? null, "Unknown") : "Unknown";
+                      return (
+                        <div key={incident.id} style={incidentRowStyle}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                            <div style={{ minWidth: 250 }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+                                <span style={{ fontWeight: 700 }}>{incident.incident_date}</span>
+                                <span style={{ opacity: 0.82 }}>{getIncidentTypeLabel(incident.incident_type)}</span>
+                                <span style={{ ...statusBadgeStyle, borderColor: severityColor }}>{severityLabel}</span>
+                                <span style={{ ...statusBadgeStyle, borderColor: incident.resolved_at ? "#2f7d54" : "#9c5d2f" }}>
+                                  {incident.resolved_at ? "Resolved" : "Open"}
+                                </span>
+                              </div>
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{incident.summary}</div>
+                              {incident.action_taken ? <div style={{ opacity: 0.77, marginBottom: 4 }}>Action: {incident.action_taken}</div> : null}
+                              <div style={{ opacity: 0.72, fontSize: 12 }}>
+                                Reported by {reporter}
+                                {incident.resolved_at ? ` · Resolved ${incident.resolved_at.slice(0, 10)}` : ""}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              style={secondaryButtonStyle}
+                              onClick={() => void toggleIncidentResolved(incident)}
+                              disabled={saving}
+                            >
+                              {incident.resolved_at ? "Reopen" : "Mark Resolved"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section style={weekSectionStyle}>
+                <h5 style={{ marginTop: 0, marginBottom: 8 }}>Post-Certification Followups</h5>
+                {activeEnrollmentFollowups.length === 0 ? (
+                  <div style={{ opacity: 0.72 }}>
+                    Followups auto-populate after certification date is set and result is Certified Mowing Technician.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {activeEnrollmentFollowups.map((followup) => {
+                      const reviewerName = followup.reviewer_id
+                        ? formatPerson(profileById.get(followup.reviewer_id) ?? null, "Unassigned")
+                        : "Unassigned";
+                      const isComplete = Boolean(followup.completed_date);
+                      return (
+                        <div key={followup.id} style={incidentRowStyle}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                            <div>
+                              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                {followup.followup_type === "30_day" ? "30-Day Followup" : "60-Day Followup"} · Due {followup.due_date}
+                              </div>
+                              <div style={{ opacity: 0.75, fontSize: 13 }}>
+                                Status: {isComplete ? `Completed ${followup.completed_date}` : "Open"} · Reviewer: {reviewerName}
+                              </div>
+                              {followup.score_percent != null ? (
+                                <div style={{ opacity: 0.8, fontSize: 13, marginTop: 2 }}>
+                                  Followup score: {Number(followup.score_percent).toFixed(1)}%
+                                </div>
+                              ) : null}
+                              {followup.notes ? <div style={{ opacity: 0.78, marginTop: 4 }}>{followup.notes}</div> : null}
+                            </div>
+                            <span style={{ ...statusBadgeStyle, borderColor: isComplete ? "#2f7d54" : "#7d6b2f", height: "fit-content" }}>
+                              {isComplete ? "Complete" : "Pending"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section style={weekSectionStyle}>
                 <h5 style={{ marginTop: 0, marginBottom: 8 }}>Final Certification</h5>
                 <div style={threeColGridStyle}>
                   <Field label="Employee Name">
@@ -1254,6 +1784,39 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                       placeholder="Name / signed"
                     />
                   </Field>
+                  <Field label={`Final Practical Score (>= ${CERTIFICATION_MIN_SCORE}%)`}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={certDraft.final_practical_score}
+                      onChange={(e) => setCertDraft((prev) => ({ ...prev, final_practical_score: e.target.value }))}
+                      style={inputStyle}
+                      placeholder="0 - 100"
+                    />
+                  </Field>
+                </div>
+
+                <div style={{ opacity: 0.75, marginTop: 8, marginBottom: 8 }}>
+                  Certification gates require score threshold, all signoffs, and no open critical incidents.
+                </div>
+                <div style={signoffGridStyle}>
+                  {CERTIFICATION_SIGNOFF_FIELDS.map((field) => (
+                    <label key={field.key} style={checkboxRowStyle}>
+                      <input
+                        type="checkbox"
+                        checked={certDraft[field.key]}
+                        onChange={(e) =>
+                          setCertDraft((prev) => ({
+                            ...prev,
+                            [field.key]: e.target.checked,
+                          }))
+                        }
+                      />
+                      <span>{field.label}</span>
+                    </label>
+                  ))}
                 </div>
 
                 <Field label="Certification Result">
@@ -1271,6 +1834,21 @@ export default function AcademyTrainingHub(props: AcademyTrainingHubProps) {
                     <option value="Certified Mowing Technician">Certified Mowing Technician</option>
                     <option value="Additional Training Required">Additional Training Required</option>
                   </select>
+                </Field>
+
+                <Field
+                  label={
+                    certDraft.certification_result === "Additional Training Required"
+                      ? "Remediation Plan (Required)"
+                      : "Remediation Plan (Optional)"
+                  }
+                >
+                  <textarea
+                    value={certDraft.remediation_plan}
+                    onChange={(e) => setCertDraft((prev) => ({ ...prev, remediation_plan: e.target.value }))}
+                    style={{ ...inputStyle, minHeight: 75 }}
+                    placeholder="Targeted retraining plan, timeline, and reassessment criteria"
+                  />
                 </Field>
 
                 <div style={{ marginTop: 10 }}>
@@ -1488,6 +2066,28 @@ const weekSectionStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.02)",
 };
 
+const gateCardStyle: React.CSSProperties = {
+  border: "1px solid rgba(126,255,167,0.25)",
+  borderRadius: 10,
+  padding: "10px 10px",
+  background: "rgba(126,255,167,0.07)",
+  marginBottom: 10,
+};
+
+const gateGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+  gap: 6,
+};
+
+const gateItemStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 8,
+  padding: "6px 8px",
+  background: "rgba(7,10,12,0.35)",
+  fontSize: 12,
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%",
   borderRadius: 10,
@@ -1567,6 +2167,13 @@ const skillRowStyle: React.CSSProperties = {
   gap: 8,
 };
 
+const incidentRowStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 10,
+  padding: "8px 10px",
+  background: "rgba(255,255,255,0.03)",
+};
+
 const readonlySkillRowStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.11)",
   borderRadius: 10,
@@ -1592,6 +2199,23 @@ const statusBadgeStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
   background: "rgba(255,255,255,0.04)",
+};
+
+const signoffGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  marginBottom: 10,
+};
+
+const checkboxRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 10,
+  padding: "8px 10px",
+  background: "rgba(255,255,255,0.02)",
 };
 
 const inlineMessageStyle: React.CSSProperties = {
