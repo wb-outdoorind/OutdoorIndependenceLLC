@@ -1,9 +1,11 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import LogoutButton from "@/app/logout-button";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import DevelopmentSectionCard from "@/components/development/DevelopmentSectionCard";
 import {
   AppTextSize,
   AppTheme,
@@ -20,6 +22,7 @@ import {
   roleLabel,
   writeRoleViewOverride,
 } from "@/lib/roleView";
+import { isWilliamPlanningUser } from "@/lib/williamPlanningAccess";
 
 const VIEWABLE_ROLES: AppRole[] = [
   "owner",
@@ -57,6 +60,7 @@ export default function SettingsPage() {
   const [actualRole, setActualRole] = useState<string | null>(null);
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(() => readRoleViewOverride());
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [canAccessDevelopment, setCanAccessDevelopment] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [displayEmail, setDisplayEmail] = useState("");
   const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
@@ -84,9 +88,11 @@ export default function SettingsPage() {
         if (!active) return;
         if (!authData.user) {
           setActualRole("employee");
+          setCanAccessDevelopment(false);
           return;
         }
         setCurrentUserId(authData.user.id);
+        setCanAccessDevelopment(isWilliamPlanningUser(null, authData.user));
         const { data: profile } = await supabase
           .from("profiles")
           .select("role,full_name,first_name,last_name,nickname,email")
@@ -110,6 +116,7 @@ export default function SettingsPage() {
         setDisplayEmail(
           (typeof profile?.email === "string" ? profile.email : authData.user.email || "").trim()
         );
+        setCanAccessDevelopment(isWilliamPlanningUser(profile, authData.user));
         if (!canUseRoleView(nextRole)) {
           writeRoleViewOverride(null);
           void supabase
@@ -468,6 +475,37 @@ export default function SettingsPage() {
               </select>
             </Field>
           </div>
+        </section>
+      ) : null}
+
+      {canAccessDevelopment ? (
+        <section style={{ ...cardStyle, marginTop: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: 6 }}>Development</h2>
+              <div style={{ opacity: 0.78 }}>
+                Private planning area for future platform / SaaS strategy.
+              </div>
+            </div>
+
+            <Link href="/settings/development/future-platform" style={linkButtonStyle}>
+              Open
+            </Link>
+          </div>
+
+          <DevelopmentSectionCard
+            title="Future Platform Lab"
+            description="William-only control panel for auditing current modules, mapping future workflows, and planning the app’s evolution into a SaaS platform."
+            href="/settings/development/future-platform"
+          />
         </section>
       ) : null}
 
