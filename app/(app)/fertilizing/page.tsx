@@ -16,5 +16,5 @@ export default async function FertilizingOperationsPage() {
 
   const fullName = (session.profile?.full_name ?? "").trim() || (session.user.email ?? "").trim();
 
-  return <FertilizingClient fullName={fullName} userId={session.user.id} />;
+  return <FertilizingClient fullName={fullName} />;
 }

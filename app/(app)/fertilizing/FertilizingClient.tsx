@@ -55,6 +55,7 @@ type ChemicalDraft = {
   localId: string;
   productId: string;
   chemicalName: string;
+  ratePer1000Sqft: string;
   epaRegistrationNumber: string;
   batchLotNumber: string;
   concentration: string;
@@ -68,10 +69,31 @@ type ChemicalDraft = {
 
 type Props = {
   fullName: string;
-  userId: string;
 };
 
 const ACRE_TO_SQFT = 43_560;
+const ACTIVE_SERVICE_STORAGE_KEY = "oi_fertilizing_active_service_v1";
+
+function toLocalDateInput(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function toLocalTimeInput(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function decodeBase64ToBytes(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
 
 function asNullable(value: string) {
   const trimmed = value.trim();
@@ -99,17 +121,12 @@ function fmtDateOnly(value: string | null | undefined) {
   return date.toLocaleDateString();
 }
 
-function numberOrNull(value: string) {
-  if (!value.trim()) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function emptyChemicalDraft(): ChemicalDraft {
   return {
     localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     productId: "",
     chemicalName: "",
+    ratePer1000Sqft: "",
     epaRegistrationNumber: "",
     batchLotNumber: "",
     concentration: "",
@@ -122,7 +139,7 @@ function emptyChemicalDraft(): ChemicalDraft {
   };
 }
 
-export default function FertilizingClient({ fullName: signedInName, userId }: Props) {
+export default function FertilizingClient({ fullName: signedInName }: Props) {
   const supabase = useMemo(() => createSupabaseBrowser(), []);
 
   const [loading, setLoading] = useState(true);
@@ -168,6 +185,9 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
   const [typedSignature, setTypedSignature] = useState("");
   const [drawnSignatureData, setDrawnSignatureData] = useState("");
   const [chemicals, setChemicals] = useState<ChemicalDraft[]>([emptyChemicalDraft()]);
+  const [activeServicePropertyId, setActiveServicePropertyId] = useState("");
+  const [activeServiceStartedAt, setActiveServiceStartedAt] = useState<string | null>(null);
+  const [timerNow, setTimerNow] = useState(() => Date.now());
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -229,6 +249,37 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(ACTIVE_SERVICE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { propertyId?: string; startedAt?: string } | null;
+      if (!parsed?.propertyId || !parsed?.startedAt) return;
+      setActiveServicePropertyId(parsed.propertyId);
+      setActiveServiceStartedAt(parsed.startedAt);
+      setServicePropertyId((prev) => prev || parsed.propertyId || "");
+    } catch {
+      window.localStorage.removeItem(ACTIVE_SERVICE_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeServiceStartedAt || !activeServicePropertyId) {
+      window.localStorage.removeItem(ACTIVE_SERVICE_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      ACTIVE_SERVICE_STORAGE_KEY,
+      JSON.stringify({ propertyId: activeServicePropertyId, startedAt: activeServiceStartedAt })
+    );
+  }, [activeServicePropertyId, activeServiceStartedAt]);
+
+  useEffect(() => {
+    if (!activeServiceStartedAt) return;
+    const handle = window.setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => window.clearInterval(handle);
+  }, [activeServiceStartedAt]);
 
   const propertiesByClient = useMemo(() => {
     const grouped = new Map<string, FertProperty[]>();
@@ -398,9 +449,15 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
 
   function setChemicalProduct(index: number, productId: string) {
     const selectedProduct = products.find((row) => row.id === productId);
+    const parsedRate = (() => {
+      const src = selectedProduct?.default_application_rate ?? "";
+      const match = src.match(/-?\d+(\.\d+)?/);
+      return match ? match[0] : "";
+    })();
     updateChemical(index, {
       productId,
       chemicalName: selectedProduct?.name ?? "",
+      ratePer1000Sqft: parsedRate,
       epaRegistrationNumber: selectedProduct?.epa_registration_number ?? "",
       targetPest: selectedProduct?.default_target_pest ?? "",
       units: selectedProduct?.default_unit ?? "",
@@ -420,13 +477,15 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
 
       const cleanedChemicals = chemicals
         .map((row) => ({
-          ...row,
+          productId: row.productId.trim(),
           chemicalName: row.chemicalName.trim(),
           epaRegistrationNumber: row.epaRegistrationNumber.trim(),
           batchLotNumber: row.batchLotNumber.trim(),
           concentration: row.concentration.trim(),
           targetPest: row.targetPest.trim(),
+          totalApplied: row.totalApplied.trim(),
           units: row.units.trim(),
+          applicationAreaSqft: row.applicationAreaSqft.trim(),
           applicationRate: row.applicationRate.trim(),
           reentryIntervalPpeNotes: row.reentryIntervalPpeNotes.trim(),
         }))
@@ -440,47 +499,52 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
         throw new Error("Drawn signature data is required.");
       }
 
-      const { data: recordData, error: recordError } = await supabase
-        .from("fert_service_records")
-        .insert({
-          property_id: propertyId,
-          applicator_id: userId,
-          applicator_name: asNullable(applicatorName),
-          applicator_license_number: asNullable(applicatorLicense),
-          service_date: asNullable(serviceDate),
-          start_time: asNullable(startTime),
-          end_time: asNullable(endTime),
-          signature_mode: signatureMode,
-          typed_legal_signature: signatureMode === "typed" ? typedSignature.trim() : null,
-          signature_drawn_data: signatureMode === "drawn" ? drawnSignatureData.trim() : null,
-        })
-        .select("id")
-        .single();
-      if (recordError) throw recordError;
+      const response = await fetch("/api/fertilizing/service-records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyId,
+          applicatorName,
+          applicatorLicenseNumber: applicatorLicense,
+          serviceDate,
+          startTime,
+          endTime,
+          signatureMode,
+          typedLegalSignature: typedSignature,
+          drawnSignatureData,
+          chemicals: cleanedChemicals,
+        }),
+      });
+      const json = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        serviceRecordId?: string;
+        pdfFilename?: string;
+        pdfBase64?: string;
+        email?: { configured?: boolean; attempted?: number; sent?: number; failed?: number };
+      };
+      if (!response.ok) throw new Error(json.error || "Failed to submit service record.");
 
-      const serviceRecordId = recordData?.id as string;
-      const chemicalRows = cleanedChemicals.map((row) => ({
-        service_record_id: serviceRecordId,
-        product_id: asNullable(row.productId),
-        chemical_name: row.chemicalName,
-        epa_registration_number: asNullable(row.epaRegistrationNumber),
-        batch_lot_number: asNullable(row.batchLotNumber),
-        concentration: asNullable(row.concentration),
-        target_pest: asNullable(row.targetPest),
-        total_applied: numberOrNull(row.totalApplied),
-        units: asNullable(row.units),
-        application_area_sqft: numberOrNull(row.applicationAreaSqft),
-        application_rate: asNullable(row.applicationRate),
-        reentry_interval_ppe_notes: asNullable(row.reentryIntervalPpeNotes),
-      }));
-
-      const { error: chemError } = await supabase.from("fert_service_chemicals").insert(chemicalRows);
-      if (chemError) throw chemError;
+      if (json.pdfBase64 && json.pdfFilename) {
+        const bytes = decodeBase64ToBytes(json.pdfBase64);
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = json.pdfFilename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+      }
 
       setChemicals([emptyChemicalDraft()]);
       setTypedSignature("");
       setDrawnSignatureData("");
-      setSuccess("Chemical tracking record submitted.");
+      const emailConfigured = json.email?.configured === true;
+      const emailLine = emailConfigured
+        ? ` Email sent ${Number(json.email?.sent ?? 0)} of ${Number(json.email?.attempted ?? 0)}.`
+        : " Email not configured (missing Resend key).";
+      setSuccess(`Chemical tracking record submitted.${emailLine}`);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit service record.");
@@ -500,6 +564,78 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
       services: serviceRecords.length,
     };
   }, [clients, properties, serviceRecords]);
+
+  const selectedServiceProperty = servicePropertyId ? propertyById.get(servicePropertyId) ?? null : null;
+  const selectedServicePropertyId = selectedServiceProperty?.id ?? "";
+  const activeServiceProperty = activeServicePropertyId
+    ? propertyById.get(activeServicePropertyId) ?? null
+    : null;
+  const selectedServiceAreaSqft = Number(selectedServiceProperty?.lawn_sqft ?? 0);
+
+  useEffect(() => {
+    if (!selectedServicePropertyId || !Number.isFinite(selectedServiceAreaSqft) || selectedServiceAreaSqft <= 0) return;
+    const defaultArea = String(selectedServiceAreaSqft);
+    setChemicals((prev) =>
+      prev.map((row) => (row.applicationAreaSqft.trim() ? row : { ...row, applicationAreaSqft: defaultArea }))
+    );
+  }, [selectedServicePropertyId, selectedServiceAreaSqft]);
+
+  const activeDurationLabel = useMemo(() => {
+    if (!activeServiceStartedAt) return "00:00:00";
+    const startedMs = new Date(activeServiceStartedAt).getTime();
+    if (!Number.isFinite(startedMs)) return "00:00:00";
+    const elapsed = Math.max(0, timerNow - startedMs);
+    const hours = Math.floor(elapsed / 3_600_000);
+    const minutes = Math.floor((elapsed % 3_600_000) / 60_000);
+    const seconds = Math.floor((elapsed % 60_000) / 1_000);
+    return [hours, minutes, seconds].map((v) => String(v).padStart(2, "0")).join(":");
+  }, [activeServiceStartedAt, timerNow]);
+
+  function applyRecommendedTotal(index: number) {
+    const row = chemicals[index];
+    if (!row) return;
+    const rate = Number(row.ratePer1000Sqft);
+    if (!Number.isFinite(rate) || rate <= 0) return;
+    const fallbackArea = Number(selectedServiceProperty?.lawn_sqft ?? 0);
+    const area = Number(row.applicationAreaSqft || fallbackArea);
+    if (!Number.isFinite(area) || area <= 0) return;
+    const recommendedTotal = (area / 1000) * rate;
+    updateChemical(index, {
+      totalApplied: String(Number(recommendedTotal.toFixed(4))),
+    });
+  }
+
+  function startServiceTimer() {
+    if (!servicePropertyId) {
+      setError("Select a property before starting service.");
+      return;
+    }
+    setError(null);
+    const startedAt = new Date().toISOString();
+    setActiveServicePropertyId(servicePropertyId);
+    setActiveServiceStartedAt(startedAt);
+    setServiceDate(toLocalDateInput(startedAt));
+    setStartTime(toLocalTimeInput(startedAt));
+    setEndTime("");
+    setSuccess("Service timer started.");
+  }
+
+  function stopServiceTimer() {
+    if (!activeServiceStartedAt || !activeServicePropertyId) return;
+    setError(null);
+    const propertyLabel = activeServiceProperty?.property_name || "this property";
+    const confirmStop = window.confirm(`Stop service at ${propertyLabel}?`);
+    if (!confirmStop) return;
+    const endedAt = new Date().toISOString();
+    setServicePropertyId(activeServicePropertyId);
+    setServiceDate(toLocalDateInput(activeServiceStartedAt));
+    setStartTime(toLocalTimeInput(activeServiceStartedAt));
+    setEndTime(toLocalTimeInput(endedAt));
+    setActiveServicePropertyId("");
+    setActiveServiceStartedAt(null);
+    setTimerNow(Date.now());
+    setSuccess("Service timer stopped. Review and submit the tracking form.");
+  }
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 28 }}>
@@ -709,8 +845,31 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
         </div>
       </section>
 
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Service Timer</h2>
+        <div style={{ opacity: 0.84, marginBottom: 10 }}>
+          Start service when work begins, then stop service to prefill the tracking form times.
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={timerBadgeStyle}>
+            {activeServiceStartedAt
+              ? `${activeServiceProperty?.property_name || "Unknown property"} · ${activeDurationLabel}`
+              : "No active service"}
+          </div>
+          {!activeServiceStartedAt ? (
+            <button type="button" style={buttonPrimaryStyle} onClick={startServiceTimer} disabled={saving}>
+              Start Service
+            </button>
+          ) : (
+            <button type="button" style={buttonDangerStyle} onClick={stopServiceTimer} disabled={saving}>
+              Stop Service
+            </button>
+          )}
+        </div>
+      </section>
+
       <form style={cardStyle} onSubmit={submitServiceRecord}>
-        <h2 style={h2Style}>Chemical Tracking Form (Phase 1)</h2>
+        <h2 style={h2Style}>Chemical Tracking Form (Phase 2)</h2>
         <div style={fieldGridStyle}>
           <label style={labelStyle}>
             Property
@@ -878,6 +1037,18 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
                   />
                 </label>
                 <label style={labelStyle}>
+                  Calculator Rate (per 1,000 sqft)
+                  <input
+                    value={chemical.ratePer1000Sqft}
+                    onChange={(e) => updateChemical(index, { ratePer1000Sqft: e.target.value })}
+                    style={inputStyle}
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="e.g. 3.5"
+                  />
+                </label>
+                <label style={labelStyle}>
                   Application Rate
                   <input
                     value={chemical.applicationRate}
@@ -893,6 +1064,21 @@ export default function FertilizingClient({ fullName: signedInName, userId }: Pr
                     style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}
                   />
                 </label>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ opacity: 0.82, fontSize: 12 }}>
+                  Recommended total:{" "}
+                  {(() => {
+                    const rate = Number(chemical.ratePer1000Sqft);
+                    const area = Number(chemical.applicationAreaSqft || selectedServiceAreaSqft || 0);
+                    if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(area) || area <= 0) return "-";
+                    const recommended = (area / 1000) * rate;
+                    return `${Number(recommended.toFixed(4))} ${chemical.units || ""}`.trim();
+                  })()}
+                </div>
+                <button type="button" style={buttonGhostStyle} onClick={() => applyRecommendedTotal(index)}>
+                  Use Recommended
+                </button>
               </div>
             </div>
           ))}
@@ -1023,6 +1209,16 @@ const buttonPrimaryStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+const buttonDangerStyle: CSSProperties = {
+  borderRadius: 10,
+  border: "1px solid rgba(220,90,90,0.75)",
+  background: "linear-gradient(180deg, rgba(130,40,40,0.92), rgba(95,26,26,0.92))",
+  color: "#fff1f1",
+  padding: "10px 14px",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
 const buttonGhostStyle: CSSProperties = {
   borderRadius: 10,
   border: "1px solid var(--surface-border)",
@@ -1031,6 +1227,15 @@ const buttonGhostStyle: CSSProperties = {
   padding: "9px 12px",
   fontWeight: 700,
   cursor: "pointer",
+};
+
+const timerBadgeStyle: CSSProperties = {
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.2)",
+  background: "rgba(255,255,255,0.05)",
+  padding: "8px 12px",
+  fontWeight: 700,
+  fontSize: 13,
 };
 
 const filterRowStyle: CSSProperties = {
