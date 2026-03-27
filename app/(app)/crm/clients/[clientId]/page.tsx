@@ -6,7 +6,7 @@ import { useState } from "react";
 import ClientEditorDialog from "@/components/crm/ClientEditorDialog";
 import CrmShell from "@/components/crm/CrmShell";
 import PropertyEditorDialog from "@/components/crm/PropertyEditorDialog";
-import { useCrmMockData } from "@/components/crm/CrmMockDataProvider";
+import { useCrm } from "@/components/crm/CrmMockDataProvider";
 import {
   crmCardStyle,
   crmDangerButtonStyle,
@@ -78,7 +78,7 @@ export default function CrmClientDetailPage() {
     deleteClient,
     saveProperty,
     deleteProperty,
-  } = useCrmMockData();
+  } = useCrm();
 
   const client = getClient(clientId);
   const properties = propertiesForClient(clientId);

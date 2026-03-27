@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import ClientEditorDialog from "@/components/crm/ClientEditorDialog";
 import CrmShell from "@/components/crm/CrmShell";
-import { useCrmMockData } from "@/components/crm/CrmMockDataProvider";
+import { useCrm } from "@/components/crm/CrmMockDataProvider";
 import {
   crmCardStyle,
   crmDangerButtonStyle,
@@ -45,7 +45,7 @@ const activeSearchInputStyle: React.CSSProperties = {
 
 export default function CrmClientsPage() {
   const router = useRouter();
-  const { clients, propertiesForClient, saveClient, deleteClient } = useCrmMockData();
+  const { clients, propertiesForClient, saveClient, deleteClient } = useCrm();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<CrmClient | null>(null);
   const [expandedClientIds, setExpandedClientIds] = useState<Record<string, boolean>>({});

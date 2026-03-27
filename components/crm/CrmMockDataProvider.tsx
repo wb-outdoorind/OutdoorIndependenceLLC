@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   type CrmClient,
   type CrmClientFormValues,
@@ -26,7 +26,7 @@ type CrmSummary = {
   inactiveClients: number;
 };
 
-type CrmMockDataContextValue = {
+type CrmContextValue = {
   clients: CrmClient[];
   properties: CrmProperty[];
   summary: CrmSummary;
@@ -41,13 +41,13 @@ type CrmMockDataContextValue = {
   propertiesForClient: (clientId: string) => CrmProperty[];
 };
 
-const CrmMockDataContext = createContext<CrmMockDataContextValue | null>(null);
+const CrmContext = createContext<CrmContextValue | null>(null);
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-type CrmMockDataProviderProps = {
+type CrmProviderProps = {
   children: React.ReactNode;
   initialClients?: CrmClient[];
   initialProperties?: CrmProperty[];
@@ -63,11 +63,34 @@ function cloneProperty(property: CrmProperty): CrmProperty {
   return { ...property, serviceTemplates: [...property.serviceTemplates] };
 }
 
+function sortClients(clients: CrmClient[]) {
+  return clients.slice().sort((left, right) => left.displayName.localeCompare(right.displayName));
+}
+
+function sortProperties(properties: CrmProperty[]) {
+  return properties.slice().sort((left, right) => left.propertyName.localeCompare(right.propertyName));
+}
+
 function createInitialProperties(clients: CrmClient[]) {
   const clientIds = new Set(clients.map((client) => client.id));
-  return CRM_MOCK_PROPERTIES
-    .filter((property) => clientIds.has(property.clientId))
-    .map(cloneProperty);
+  return sortProperties(
+    CRM_MOCK_PROPERTIES
+      .filter((property) => clientIds.has(property.clientId))
+      .map(cloneProperty)
+  );
+}
+
+function normalizeInitialClients(clients: CrmClient[]) {
+  return sortClients(clients.map(cloneClient));
+}
+
+function normalizeInitialProperties(props: {
+  clients: CrmClient[];
+  properties?: CrmProperty[];
+}) {
+  const { clients, properties } = props;
+  const nextProperties = properties ?? createInitialProperties(clients);
+  return sortProperties(nextProperties.map(cloneProperty));
 }
 
 function notifyPersistenceError(message: string) {
@@ -76,13 +99,13 @@ function notifyPersistenceError(message: string) {
   }
 }
 
-export function CrmMockDataProvider({
+export function CrmProvider({
   children,
   initialClients = CRM_MOCK_CLIENTS,
   initialProperties,
   clientsPersistenceMode = "mock",
   propertiesPersistenceMode = "mock",
-}: CrmMockDataProviderProps) {
+}: CrmProviderProps) {
   const supabase = useMemo(
     () =>
       clientsPersistenceMode === "supabase" || propertiesPersistenceMode === "supabase"
@@ -90,10 +113,25 @@ export function CrmMockDataProvider({
         : null,
     [clientsPersistenceMode, propertiesPersistenceMode]
   );
-  const [clients, setClients] = useState<CrmClient[]>(() => initialClients.map(cloneClient));
-  const [properties, setProperties] = useState<CrmProperty[]>(() =>
-    (initialProperties ?? createInitialProperties(initialClients)).map(cloneProperty)
+  const normalizedInitialClients = useMemo(() => normalizeInitialClients(initialClients), [initialClients]);
+  const normalizedInitialProperties = useMemo(
+    () =>
+      normalizeInitialProperties({
+        clients: normalizedInitialClients,
+        properties: initialProperties,
+      }),
+    [initialProperties, normalizedInitialClients]
   );
+  const [clients, setClients] = useState<CrmClient[]>(() => normalizedInitialClients);
+  const [properties, setProperties] = useState<CrmProperty[]>(() => normalizedInitialProperties);
+
+  useEffect(() => {
+    setClients(normalizedInitialClients);
+  }, [normalizedInitialClients]);
+
+  useEffect(() => {
+    setProperties(normalizedInitialProperties);
+  }, [normalizedInitialProperties]);
 
   function saveClient(values: CrmClientFormValues, clientId?: string) {
     const now = new Date().toISOString();
@@ -223,15 +261,18 @@ export function CrmMockDataProvider({
       .sort((left, right) => left.propertyName.localeCompare(right.propertyName));
   }
 
-  const summary: CrmSummary = {
-    totalClients: clients.length,
-    totalProperties: properties.length,
-    activeClients: clients.filter((client) => client.status === "active").length,
-    inactiveClients: clients.filter((client) => client.status === "inactive" || client.status === "archived").length,
-  };
+  const summary = useMemo<CrmSummary>(
+    () => ({
+      totalClients: clients.length,
+      totalProperties: properties.length,
+      activeClients: clients.filter((client) => client.status === "active").length,
+      inactiveClients: clients.filter((client) => client.status === "inactive" || client.status === "archived").length,
+    }),
+    [clients, properties]
+  );
 
   return (
-    <CrmMockDataContext.Provider
+    <CrmContext.Provider
       value={{
         clients,
         properties,
@@ -248,14 +289,22 @@ export function CrmMockDataProvider({
       }}
     >
       {children}
-    </CrmMockDataContext.Provider>
+    </CrmContext.Provider>
   );
 }
 
-export function useCrmMockData() {
-  const value = useContext(CrmMockDataContext);
+export function CrmMockDataProvider(props: CrmProviderProps) {
+  return <CrmProvider {...props} />;
+}
+
+export function useCrm() {
+  const value = useContext(CrmContext);
   if (!value) {
-    throw new Error("useCrmMockData must be used within CrmMockDataProvider.");
+    throw new Error("useCrm must be used within CrmProvider.");
   }
   return value;
+}
+
+export function useCrmMockData() {
+  return useCrm();
 }

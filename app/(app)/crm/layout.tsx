@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CrmMockDataProvider } from "@/components/crm/CrmMockDataProvider";
+import { CrmProvider } from "@/components/crm/CrmMockDataProvider";
 import { CRM_MOCK_CLIENTS } from "@/components/crm/mockData";
 import { loadCrmClients, loadCrmProperties, logCrmPersistenceError } from "@/lib/crmPersistence";
 import { canAccessRoute } from "@/lib/routeAccess";
@@ -55,13 +55,13 @@ export default async function CrmLayout({
     clientsPersistenceAvailable && propertiesPersistenceAvailable ? "supabase" : "mock";
 
   return (
-    <CrmMockDataProvider
+    <CrmProvider
       initialClients={clientsPersistenceAvailable ? clients : CRM_MOCK_CLIENTS}
       initialProperties={crmPropertiesPersistenceMode === "supabase" ? properties : undefined}
       clientsPersistenceMode={clientsPersistenceAvailable ? "supabase" : "mock"}
       propertiesPersistenceMode={crmPropertiesPersistenceMode}
     >
       {children}
-    </CrmMockDataProvider>
+    </CrmProvider>
   );
 }

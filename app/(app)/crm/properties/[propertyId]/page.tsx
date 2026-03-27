@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import CrmShell from "@/components/crm/CrmShell";
-import { useCrmMockData } from "@/components/crm/CrmMockDataProvider";
+import { useCrm } from "@/components/crm/CrmMockDataProvider";
 import PropertyEditorDialog from "@/components/crm/PropertyEditorDialog";
 import {
   crmCardStyle,
@@ -18,7 +18,7 @@ export default function CrmPropertyDetailPage() {
   const params = useParams<{ propertyId: string }>();
   const router = useRouter();
   const propertyId = decodeURIComponent(params.propertyId);
-  const { getProperty, getClient, saveProperty, deleteProperty } = useCrmMockData();
+  const { getProperty, getClient, saveProperty, deleteProperty } = useCrm();
   const property = getProperty(propertyId);
   const client = property ? getClient(property.clientId) : null;
   const [editorOpen, setEditorOpen] = useState(false);
