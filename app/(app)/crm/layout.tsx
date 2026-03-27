@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { CrmMockDataProvider } from "@/components/crm/CrmMockDataProvider";
 import { CRM_MOCK_CLIENTS } from "@/components/crm/mockData";
-import { loadCrmClients, loadCrmProperties } from "@/lib/crmPersistence";
+import { loadCrmClients, loadCrmProperties, logCrmPersistenceError } from "@/lib/crmPersistence";
 import { canAccessRoute } from "@/lib/routeAccess";
 import { createServerSupabase, getCurrentUserProfile } from "@/lib/supabase/server";
 
@@ -34,11 +34,21 @@ export default async function CrmLayout({
   } = await loadCrmProperties(supabase);
 
   if (clientsError) {
-    console.error("Failed to load CRM clients from Supabase, falling back to seeded mock clients.", clientsError);
+    logCrmPersistenceError("Failed to load CRM clients from Supabase; falling back to seeded mock clients.", clientsError, {
+      table: "crm_clients",
+      fallback: "seeded_mock_clients",
+    });
   }
 
   if (propertiesError) {
-    console.error("Failed to load CRM properties from Supabase, falling back to seeded mock properties.", propertiesError);
+    logCrmPersistenceError(
+      "Failed to load CRM properties from Supabase; falling back to seeded mock properties.",
+      propertiesError,
+      {
+        table: "crm_properties",
+        fallback: "seeded_mock_properties",
+      }
+    );
   }
 
   const crmPropertiesPersistenceMode =

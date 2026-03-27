@@ -12,7 +12,12 @@ import {
   type CrmPropertyType,
 } from "@/lib/crm";
 
-type QueryError = { code?: string; message?: string } | null;
+type QueryError = {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+} | null;
 
 type TableOps<Row> = {
   select: (columns: string) => {
@@ -147,6 +152,23 @@ export const CRM_PROPERTY_SELECT = [
   "created_at",
   "updated_at",
 ].join(", ");
+
+export function crmPersistenceErrorDetails(error: QueryError) {
+  if (!error) return null;
+  return {
+    code: error.code ?? "unknown",
+    message: error.message ?? "Unknown Supabase error",
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  };
+}
+
+export function logCrmPersistenceError(context: string, error: QueryError, extra?: Record<string, unknown>) {
+  console.error(`[CRM] ${context}`, {
+    ...crmPersistenceErrorDetails(error),
+    ...(extra ?? {}),
+  });
+}
 
 function asNumberOrNull(value: number | string | null | undefined) {
   if (value == null) return null;

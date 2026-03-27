@@ -11,6 +11,7 @@ import { createSupabaseBrowser } from "@/lib/supabase/client";
 import {
   buildCrmPropertyRecord,
   buildCrmClientRecord,
+  logCrmPersistenceError,
   removeCrmProperty,
   removeCrmClient,
   upsertCrmProperty,
@@ -120,7 +121,10 @@ export function CrmMockDataProvider({
           });
         })
         .catch((error) => {
-          console.error("Failed to persist CRM client", error);
+          logCrmPersistenceError("Failed to persist CRM client.", error, {
+            operation: clientId ? "update" : "insert",
+            clientId: nextClient.id,
+          });
           setClients(previousClients);
           notifyPersistenceError("Unable to save CRM client. Your local changes were reverted.");
         });
@@ -137,7 +141,10 @@ export function CrmMockDataProvider({
 
     if (supabase && clientsPersistenceMode === "supabase") {
       void removeCrmClient(supabase, clientId).catch((error) => {
-        console.error("Failed to delete CRM client", error);
+        logCrmPersistenceError("Failed to delete CRM client.", error, {
+          operation: "delete",
+          clientId,
+        });
         setClients(previousClients);
         setProperties(previousProperties);
         notifyPersistenceError("Unable to delete CRM client. Your local changes were restored.");
@@ -172,7 +179,11 @@ export function CrmMockDataProvider({
           });
         })
         .catch((error) => {
-          console.error("Failed to persist CRM property", error);
+          logCrmPersistenceError("Failed to persist CRM property.", error, {
+            operation: propertyId ? "update" : "insert",
+            propertyId: nextProperty.id,
+            clientId,
+          });
           setProperties(previousProperties);
           notifyPersistenceError("Unable to save CRM property. Your local changes were reverted.");
         });
@@ -187,7 +198,10 @@ export function CrmMockDataProvider({
 
     if (supabase && propertiesPersistenceMode === "supabase") {
       void removeCrmProperty(supabase, propertyId).catch((error) => {
-        console.error("Failed to delete CRM property", error);
+        logCrmPersistenceError("Failed to delete CRM property.", error, {
+          operation: "delete",
+          propertyId,
+        });
         setProperties(previousProperties);
         notifyPersistenceError("Unable to delete CRM property. Your local changes were restored.");
       });
