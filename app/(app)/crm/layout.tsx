@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { CrmMockDataProvider } from "@/components/crm/CrmMockDataProvider";
 import { CRM_MOCK_CLIENTS } from "@/components/crm/mockData";
-import { loadCrmClients } from "@/lib/crmPersistence";
+import { loadCrmClients, loadCrmProperties } from "@/lib/crmPersistence";
 import { canAccessRoute } from "@/lib/routeAccess";
 import { createServerSupabase, getCurrentUserProfile } from "@/lib/supabase/server";
 
@@ -22,16 +22,34 @@ export default async function CrmLayout({
   }
 
   const supabase = await createServerSupabase();
-  const { clients, persistenceAvailable, error } = await loadCrmClients(supabase);
+  const {
+    clients,
+    persistenceAvailable: clientsPersistenceAvailable,
+    error: clientsError,
+  } = await loadCrmClients(supabase);
+  const {
+    properties,
+    persistenceAvailable: propertiesPersistenceAvailable,
+    error: propertiesError,
+  } = await loadCrmProperties(supabase);
 
-  if (error) {
-    console.error("Failed to load CRM clients from Supabase, falling back to seeded mock clients.", error);
+  if (clientsError) {
+    console.error("Failed to load CRM clients from Supabase, falling back to seeded mock clients.", clientsError);
   }
+
+  if (propertiesError) {
+    console.error("Failed to load CRM properties from Supabase, falling back to seeded mock properties.", propertiesError);
+  }
+
+  const crmPropertiesPersistenceMode =
+    clientsPersistenceAvailable && propertiesPersistenceAvailable ? "supabase" : "mock";
 
   return (
     <CrmMockDataProvider
-      initialClients={persistenceAvailable ? clients : CRM_MOCK_CLIENTS}
-      clientsPersistenceMode={persistenceAvailable ? "supabase" : "mock"}
+      initialClients={clientsPersistenceAvailable ? clients : CRM_MOCK_CLIENTS}
+      initialProperties={crmPropertiesPersistenceMode === "supabase" ? properties : undefined}
+      clientsPersistenceMode={clientsPersistenceAvailable ? "supabase" : "mock"}
+      propertiesPersistenceMode={crmPropertiesPersistenceMode}
     >
       {children}
     </CrmMockDataProvider>

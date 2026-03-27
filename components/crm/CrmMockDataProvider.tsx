@@ -2,8 +2,6 @@
 
 import { createContext, useContext, useMemo, useState } from "react";
 import {
-  crmNullable,
-  crmNumberOrNull,
   type CrmClient,
   type CrmClientFormValues,
   type CrmProperty,
@@ -11,8 +9,11 @@ import {
 } from "@/lib/crm";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import {
+  buildCrmPropertyRecord,
   buildCrmClientRecord,
+  removeCrmProperty,
   removeCrmClient,
+  upsertCrmProperty,
   upsertCrmClient,
 } from "@/lib/crmPersistence";
 import { CRM_MOCK_CLIENTS, CRM_MOCK_PROPERTIES } from "@/components/crm/mockData";
@@ -29,6 +30,7 @@ type CrmMockDataContextValue = {
   properties: CrmProperty[];
   summary: CrmSummary;
   clientsPersistenceMode: "mock" | "supabase";
+  propertiesPersistenceMode: "mock" | "supabase";
   saveClient: (values: CrmClientFormValues, clientId?: string) => CrmClient;
   deleteClient: (clientId: string) => void;
   saveProperty: (clientId: string, values: CrmPropertyFormValues, propertyId?: string) => CrmProperty;
@@ -47,7 +49,9 @@ function createId(prefix: string) {
 type CrmMockDataProviderProps = {
   children: React.ReactNode;
   initialClients?: CrmClient[];
+  initialProperties?: CrmProperty[];
   clientsPersistenceMode?: "mock" | "supabase";
+  propertiesPersistenceMode?: "mock" | "supabase";
 };
 
 function cloneClient(client: CrmClient): CrmClient {
@@ -74,15 +78,20 @@ function notifyPersistenceError(message: string) {
 export function CrmMockDataProvider({
   children,
   initialClients = CRM_MOCK_CLIENTS,
+  initialProperties,
   clientsPersistenceMode = "mock",
+  propertiesPersistenceMode = "mock",
 }: CrmMockDataProviderProps) {
   const supabase = useMemo(
-    () => (clientsPersistenceMode === "supabase" ? createSupabaseBrowser() : null),
-    [clientsPersistenceMode]
+    () =>
+      clientsPersistenceMode === "supabase" || propertiesPersistenceMode === "supabase"
+        ? createSupabaseBrowser()
+        : null,
+    [clientsPersistenceMode, propertiesPersistenceMode]
   );
   const [clients, setClients] = useState<CrmClient[]>(() => initialClients.map(cloneClient));
   const [properties, setProperties] = useState<CrmProperty[]>(() =>
-    createInitialProperties(initialClients)
+    (initialProperties ?? createInitialProperties(initialClients)).map(cloneProperty)
   );
 
   function saveClient(values: CrmClientFormValues, clientId?: string) {
@@ -101,7 +110,7 @@ export function CrmMockDataProvider({
       return current.map((client) => (client.id === clientId ? nextClient : client));
     });
 
-    if (supabase) {
+    if (supabase && clientsPersistenceMode === "supabase") {
       void upsertCrmClient(supabase, nextClient)
         .then((savedClient) => {
           setClients((current) => {
@@ -126,7 +135,7 @@ export function CrmMockDataProvider({
     setClients((current) => current.filter((client) => client.id !== clientId));
     setProperties((current) => current.filter((property) => property.clientId !== clientId));
 
-    if (supabase) {
+    if (supabase && clientsPersistenceMode === "supabase") {
       void removeCrmClient(supabase, clientId).catch((error) => {
         console.error("Failed to delete CRM client", error);
         setClients(previousClients);
@@ -139,53 +148,50 @@ export function CrmMockDataProvider({
   function saveProperty(clientId: string, values: CrmPropertyFormValues, propertyId?: string) {
     const now = new Date().toISOString();
     const existingProperty = propertyId ? properties.find((property) => property.id === propertyId) ?? null : null;
-    const nextProperty: CrmProperty = {
-      id: propertyId ?? createId("property"),
+    const { property: nextProperty } = buildCrmPropertyRecord({
+      values,
       clientId,
-      propertyName: values.propertyName.trim() || "Untitled Property",
-      addressLine1: values.addressLine1.trim(),
-      addressLine2: crmNullable(values.addressLine2),
-      city: values.city.trim(),
-      state: values.state.trim(),
-      postalCode: values.postalCode.trim(),
-      country: values.country.trim() || "US",
-      propertyType: values.propertyType,
-      lawnSizeSqft: crmNumberOrNull(values.lawnSizeSqft),
-      acreage: crmNumberOrNull(values.acreage),
-      gatePresent: values.gatePresent,
-      lockedGate: values.lockedGate,
-      petsPresent: values.petsPresent,
-      entryNotes: crmNullable(values.entryNotes),
-      siteNotes: crmNullable(values.siteNotes),
-      billingSameAsServiceAddress: values.billingSameAsServiceAddress,
-      billingAddressLine1: values.billingSameAsServiceAddress ? null : crmNullable(values.billingAddressLine1),
-      billingAddressLine2: values.billingSameAsServiceAddress ? null : crmNullable(values.billingAddressLine2),
-      billingCity: values.billingSameAsServiceAddress ? null : crmNullable(values.billingCity),
-      billingState: values.billingSameAsServiceAddress ? null : crmNullable(values.billingState),
-      billingPostalCode: values.billingSameAsServiceAddress ? null : crmNullable(values.billingPostalCode),
-      billingCountry: values.billingSameAsServiceAddress ? null : crmNullable(values.billingCountry),
-      isActive: values.isActive,
-      routeGroup: existingProperty?.routeGroup ?? null,
-      snowPriority: existingProperty?.snowPriority ?? null,
-      fertilizingPreferences: existingProperty?.fertilizingPreferences ?? null,
-      maintenanceContractLink: existingProperty?.maintenanceContractLink ?? null,
-      latitude: existingProperty?.latitude ?? null,
-      longitude: existingProperty?.longitude ?? null,
-      serviceTemplates: existingProperty?.serviceTemplates ?? [],
-      createdAt: existingProperty?.createdAt ?? now,
-      updatedAt: now,
-    };
+      propertyId: propertyId ?? createId("property"),
+      existingProperty,
+      now,
+    });
+    const previousProperties = properties.map(cloneProperty);
 
     setProperties((current) => {
       if (!propertyId) return [nextProperty, ...current];
       return current.map((property) => (property.id === propertyId ? nextProperty : property));
     });
 
+    if (supabase && propertiesPersistenceMode === "supabase") {
+      void upsertCrmProperty(supabase, nextProperty)
+        .then((savedProperty) => {
+          setProperties((current) => {
+            const exists = current.some((property) => property.id === savedProperty.id);
+            if (!exists) return [savedProperty, ...current];
+            return current.map((property) => (property.id === savedProperty.id ? savedProperty : property));
+          });
+        })
+        .catch((error) => {
+          console.error("Failed to persist CRM property", error);
+          setProperties(previousProperties);
+          notifyPersistenceError("Unable to save CRM property. Your local changes were reverted.");
+        });
+    }
+
     return nextProperty;
   }
 
   function deleteProperty(propertyId: string) {
+    const previousProperties = properties.map(cloneProperty);
     setProperties((current) => current.filter((property) => property.id !== propertyId));
+
+    if (supabase && propertiesPersistenceMode === "supabase") {
+      void removeCrmProperty(supabase, propertyId).catch((error) => {
+        console.error("Failed to delete CRM property", error);
+        setProperties(previousProperties);
+        notifyPersistenceError("Unable to delete CRM property. Your local changes were restored.");
+      });
+    }
   }
 
   function getClient(clientId: string) {
@@ -217,6 +223,7 @@ export function CrmMockDataProvider({
         properties,
         summary,
         clientsPersistenceMode,
+        propertiesPersistenceMode,
         saveClient,
         deleteClient,
         saveProperty,
