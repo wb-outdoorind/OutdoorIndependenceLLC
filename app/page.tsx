@@ -7,6 +7,7 @@ import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { canAccessRoute } from "@/lib/routeAccess";
+import { isWilliamPlanningUser } from "@/lib/williamPlanningAccess";
 import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
 import {
   isManagementRole,
@@ -464,7 +465,7 @@ export default async function Home() {
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
     const canViewFertilizingOperations = canAccessRoute(role, "fertilizing_operations");
     const canViewCrm = canAccessRoute(role, "crm");
-    const canViewEstimates = canAccessRoute(role, "estimates");
+    const canViewEstimates = canAccessRoute(role, "estimates") && isWilliamPlanningUser(profile, authData.user);
     const canViewPurchases = canAccessRoute(role, "purchases");
 
     if (canViewFertilizingOperations) {

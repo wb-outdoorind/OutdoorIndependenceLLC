@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { canAccessRoute } from "@/lib/routeAccess";
+import { isWilliamPlanningUser } from "@/lib/williamPlanningAccess";
 import {
   canUseRoleView,
   readRoleViewOverride,
@@ -24,6 +25,7 @@ export default function AppTopNavLinks() {
   const [isLead, setIsLead] = useState(false);
   const [actualRole, setActualRole] = useState<AppRole | null>(null);
   const [viewAsRole, setViewAsRole] = useState<AppRole | null>(null);
+  const [canViewWilliamOnlyWork, setCanViewWilliamOnlyWork] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<
     Array<{ id: string; inspectionType: string; vehicleId: string; teammateName: string }>
   >([]);
@@ -103,15 +105,20 @@ export default function AppTopNavLinks() {
     void (async () => {
       const supabase = createSupabaseBrowser();
       const { data: authData } = await supabase.auth.getUser();
-      if (!active || !authData.user) return;
+      if (!active) return;
+      if (!authData.user) {
+        setCanViewWilliamOnlyWork(false);
+        return;
+      }
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role,email")
         .eq("id", authData.user.id)
         .maybeSingle();
       if (!active) return;
       setActualRole((profile?.role as AppRole | undefined) ?? "employee");
       setViewAsRole(readRoleViewOverride());
+      setCanViewWilliamOnlyWork(isWilliamPlanningUser(profile, authData.user));
     })();
 
     const onStorage = (event: StorageEvent) => {
@@ -191,7 +198,7 @@ export default function AppTopNavLinks() {
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
   const canViewFertilizingOperations = canAccessRoute(effectiveNavRole, "fertilizing_operations");
   const canViewCrm = canAccessRoute(effectiveNavRole, "crm");
-  const canViewEstimates = canAccessRoute(effectiveNavRole, "estimates");
+  const canViewEstimates = canAccessRoute(effectiveNavRole, "estimates") && canViewWilliamOnlyWork;
   const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");
   const canViewAccountability = canAccessRoute(effectiveNavRole, "accountability_center");
   const canViewApprovals = canAccessRoute(effectiveNavRole, "lead_approvals");
