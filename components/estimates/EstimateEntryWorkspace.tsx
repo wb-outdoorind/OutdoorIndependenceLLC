@@ -1,18 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   crmCardStyle,
   crmInputStyle,
   crmMutedTextStyle,
   crmPrimaryButtonStyle,
-  crmSecondaryButtonStyle,
   crmSubtleCardStyle,
   crmTextareaStyle,
 } from "@/components/crm/styles";
 import {
-  CRM_CLIENT_STATUS_LABELS,
   CRM_CLIENT_TYPE_LABELS,
   CRM_PROPERTY_TYPE_LABELS,
   crmPropertyAddress,
@@ -46,8 +43,10 @@ export default function EstimateEntryWorkspace({
     useState<(typeof SERVICE_LINE_OPTIONS)[number]["value"]>("maintenance");
   const [targetStart, setTargetStart] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
+  const [scopeStepRequested, setScopeStepRequested] = useState(false);
 
   const normalizedSearch = clientSearch.trim().toLowerCase();
+
   const filteredClients = useMemo(
     () =>
       clients.filter((client) => {
@@ -69,6 +68,16 @@ export default function EstimateEntryWorkspace({
     [clients, selectedClientId]
   );
 
+  const clientOptions = useMemo(() => {
+    if (!selectedClient) {
+      return filteredClients;
+    }
+
+    return filteredClients.some((client) => client.id === selectedClient.id)
+      ? filteredClients
+      : [selectedClient, ...filteredClients];
+  }, [filteredClients, selectedClient]);
+
   const propertiesForClient = useMemo(
     () =>
       properties
@@ -77,16 +86,26 @@ export default function EstimateEntryWorkspace({
     [properties, selectedClientId]
   );
 
-  const resolvedPropertyId = propertiesForClient.some((property) => property.id === selectedPropertyId)
-    ? selectedPropertyId
-    : "";
-
   const selectedProperty = useMemo(
-    () => properties.find((property) => property.id === resolvedPropertyId) ?? null,
-    [properties, resolvedPropertyId]
+    () => propertiesForClient.find((property) => property.id === selectedPropertyId) ?? null,
+    [propertiesForClient, selectedPropertyId]
   );
 
-  const activePropertyCount = properties.filter((property) => property.isActive).length;
+  const accessFlags = selectedProperty
+    ? [
+        selectedProperty.gatePresent ? "Gate" : null,
+        selectedProperty.lockedGate ? "Locked Gate" : null,
+        selectedProperty.petsPresent ? "Pets" : null,
+      ]
+        .filter(Boolean)
+        .join(", ") || "None"
+    : null;
+
+  const hasClient = Boolean(selectedClient);
+  const hasProperty = Boolean(selectedProperty);
+  const basicsUnlocked = hasClient && hasProperty;
+  const scopeReady = hasClient && hasProperty;
+  const filteredClientCount = filteredClients.length;
 
   if (crmLoadError) {
     return (
@@ -94,7 +113,7 @@ export default function EstimateEntryWorkspace({
         <div style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0 }}>CRM Data Unavailable</h2>
           <div style={crmMutedTextStyle}>
-            The estimate shell could not load live CRM records. Resolve CRM persistence before continuing.
+            The estimate workflow could not load live CRM records. Resolve CRM persistence before continuing.
           </div>
           <div
             style={{
@@ -107,11 +126,6 @@ export default function EstimateEntryWorkspace({
           >
             {crmLoadError}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            <Link href="/crm/clients" style={crmSecondaryButtonStyle}>
-              Open CRM
-            </Link>
-          </div>
         </div>
       </section>
     );
@@ -123,12 +137,7 @@ export default function EstimateEntryWorkspace({
         <div style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0 }}>No CRM Accounts Available</h2>
           <div style={crmMutedTextStyle}>
-            Add at least one client and property record in CRM before preparing estimates.
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            <Link href="/crm/clients" style={crmPrimaryButtonStyle}>
-              Open CRM
-            </Link>
+            Estimates start from the shared CRM backbone. Add at least one client and property record before starting a new estimate.
           </div>
         </div>
       </section>
@@ -138,16 +147,37 @@ export default function EstimateEntryWorkspace({
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <section
+        aria-label="Estimate steps"
         style={{
           display: "grid",
           gap: 12,
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
         }}
       >
-        <SummaryCard label="Available Clients" value={`${clients.length}`} />
-        <SummaryCard label="Available Properties" value={`${properties.length}`} />
-        <SummaryCard label="Active Properties" value={`${activePropertyCount}`} />
-        <SummaryCard label="Filtered Clients" value={`${filteredClients.length}`} />
+        <StepChip
+          step="1"
+          title="Client"
+          status={hasClient ? "Complete" : "Current"}
+          tone={hasClient ? "complete" : "current"}
+        />
+        <StepChip
+          step="2"
+          title="Property"
+          status={hasProperty ? "Complete" : hasClient ? "Current" : "Locked"}
+          tone={hasProperty ? "complete" : hasClient ? "current" : "locked"}
+        />
+        <StepChip
+          step="3"
+          title="Basics"
+          status={basicsUnlocked ? "Ready" : "Locked"}
+          tone={basicsUnlocked ? "current" : "locked"}
+        />
+        <StepChip
+          step="4"
+          title="Scope"
+          status={scopeReady ? "Ready Next" : "Locked"}
+          tone={scopeReady ? "current" : "locked"}
+        />
       </section>
 
       <section
@@ -158,72 +188,22 @@ export default function EstimateEntryWorkspace({
           alignItems: "start",
         }}
       >
-        <div style={{ display: "grid", gap: 16 }}>
-          <section style={crmCardStyle}>
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <h2 style={{ margin: "0 0 6px" }}>Estimate Setup</h2>
-                <div style={crmMutedTextStyle}>
-                  Start the estimate by choosing the client, tying it to the correct property, and outlining the work package.
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                }}
-              >
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, opacity: 0.78 }}>Estimate Title</span>
-                  <input
-                    value={estimateTitle}
-                    onChange={(event) => setEstimateTitle(event.target.value)}
-                    placeholder="Seasonal maintenance proposal"
-                    style={crmInputStyle}
-                  />
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, opacity: 0.78 }}>Service Line</span>
-                  <select
-                    value={serviceLine}
-                    onChange={(event) =>
-                      setServiceLine(event.target.value as (typeof SERVICE_LINE_OPTIONS)[number]["value"])
-                    }
-                    style={crmInputStyle}
-                  >
-                    {SERVICE_LINE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, opacity: 0.78 }}>Target Start</span>
-                  <input
-                    type="date"
-                    value={targetStart}
-                    onChange={(event) => setTargetStart(event.target.value)}
-                    style={crmInputStyle}
-                  />
-                </label>
+        <section style={crmCardStyle}>
+          <div style={{ display: "grid", gap: 18 }}>
+            <div>
+              <h2 style={{ margin: "0 0 6px" }}>Estimate Foundation</h2>
+              <div style={crmMutedTextStyle}>
+                Lock the client, property, and estimate basics before scope and pricing open up.
               </div>
             </div>
-          </section>
 
-          <section style={crmCardStyle}>
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <h2 style={{ margin: "0 0 6px" }}>Client & Property</h2>
-                <div style={crmMutedTextStyle}>
-                  This shell now reads live CRM records so the estimate starts from the same shared client and property backbone.
-                </div>
-              </div>
-
+            <FlowSection
+              step="1"
+              title="Select Client"
+              body="Choose the account that owns this estimate and future billing relationship."
+              stateLabel={hasClient ? "Complete" : "Required"}
+              tone={hasClient ? "complete" : "current"}
+            >
               <div
                 style={{
                   display: "grid",
@@ -245,147 +225,527 @@ export default function EstimateEntryWorkspace({
                   <span style={{ fontSize: 13, opacity: 0.78 }}>Client</span>
                   <select
                     value={selectedClientId}
-                    onChange={(event) => setSelectedClientId(event.target.value)}
+                    onChange={(event) => {
+                      setSelectedClientId(event.target.value);
+                      setSelectedPropertyId("");
+                      setScopeStepRequested(false);
+                    }}
                     style={crmInputStyle}
                   >
                     <option value="">Select a client</option>
-                    {filteredClients.map((client) => (
+                    {clientOptions.map((client) => (
                       <option key={client.id} value={client.id}>
                         {client.displayName}
                       </option>
                     ))}
                   </select>
                 </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, opacity: 0.78 }}>Property</span>
-                  <select
-                    value={resolvedPropertyId}
-                    onChange={(event) => setSelectedPropertyId(event.target.value)}
-                    style={crmInputStyle}
-                    disabled={!selectedClientId}
-                  >
-                    <option value="">{selectedClientId ? "Select a property" : "Choose a client first"}</option>
-                    {propertiesForClient.map((property) => (
-                      <option key={property.id} value={property.id}>
-                        {property.propertyName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
 
+              <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
+                {filteredClientCount} {filteredClientCount === 1 ? "client matches" : "clients match"} the current search.
+              </div>
+            </FlowSection>
+
+            <FlowSection
+              step="2"
+              title="Select Property"
+              body="Attach the exact service location so route context, pricing, and future work stay tied to the right place."
+              stateLabel={hasProperty ? "Complete" : hasClient ? "Required" : "Locked"}
+              tone={hasProperty ? "complete" : hasClient ? "current" : "locked"}
+              locked={!hasClient}
+            >
               <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, opacity: 0.78 }}>Internal Notes</span>
-                <textarea
-                  value={internalNotes}
-                  onChange={(event) => setInternalNotes(event.target.value)}
-                  placeholder="Capture walk-through notes, assumptions, or follow-up items for review."
-                  style={{ ...crmTextareaStyle, minHeight: 120 }}
-                />
+                <span style={{ fontSize: 13, opacity: 0.78 }}>Property</span>
+                <select
+                  value={selectedPropertyId}
+                  onChange={(event) => {
+                    setSelectedPropertyId(event.target.value);
+                    setScopeStepRequested(false);
+                  }}
+                  style={fieldStyle(!hasClient)}
+                  disabled={!hasClient}
+                >
+                  <option value="">{hasClient ? "Select a property" : "Choose a client first"}</option>
+                  {propertiesForClient.map((property) => (
+                    <option key={property.id} value={property.id}>
+                      {property.propertyName}
+                    </option>
+                  ))}
+                </select>
               </label>
-            </div>
-          </section>
-        </div>
 
-        <div style={{ display: "grid", gap: 16 }}>
-          <section style={crmCardStyle}>
-            <div style={{ display: "grid", gap: 12 }}>
-              <div>
-                <h2 style={{ margin: "0 0 6px" }}>Selected Account</h2>
-                <div style={crmMutedTextStyle}>
-                  Confirm the client and property before pricing and scope are built out.
-                </div>
-              </div>
-
-              {selectedClient ? (
-                <article style={crmSubtleCardStyle}>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>{selectedClient.displayName}</div>
-                  <div style={{ marginTop: 8, ...crmMutedTextStyle }}>
-                    {CRM_CLIENT_TYPE_LABELS[selectedClient.clientType]} •{" "}
-                    {CRM_CLIENT_STATUS_LABELS[selectedClient.status]}
-                  </div>
-                  <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: 14 }}>
-                    <div><strong>Primary Phone:</strong> {selectedClient.primaryPhone || "Not set"}</div>
-                    <div><strong>Primary Email:</strong> {selectedClient.primaryEmail || "Not set"}</div>
-                    <div><strong>Properties:</strong> {propertiesForClient.length}</div>
+              {hasClient && !propertiesForClient.length ? (
+                <article style={{ ...crmSubtleCardStyle, display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>No properties on this client</div>
+                  <div style={crmMutedTextStyle}>
+                    This client is available, but there is not yet a service property tied to the record.
                   </div>
                 </article>
-              ) : (
-                <EmptyPanel title="No client selected" body="Choose a CRM client to start the estimate." />
-              )}
+              ) : null}
 
               {selectedProperty ? (
-                <article style={crmSubtleCardStyle}>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>{selectedProperty.propertyName}</div>
-                  <div style={{ marginTop: 8, ...crmMutedTextStyle }}>
-                    {crmPropertyAddress(selectedProperty)}
+                <article style={{ ...crmSubtleCardStyle, display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <div style={{ fontSize: 17, fontWeight: 800 }}>{selectedProperty.propertyName}</div>
+                    <div style={crmMutedTextStyle}>{crmPropertyAddress(selectedProperty)}</div>
                   </div>
-                  <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: 14 }}>
-                    <div><strong>Type:</strong> {CRM_PROPERTY_TYPE_LABELS[selectedProperty.propertyType]}</div>
-                    <div><strong>Route Group:</strong> {selectedProperty.routeGroup || "Not set"}</div>
-                    <div><strong>Lawn Size:</strong> {selectedProperty.lawnSizeSqft?.toLocaleString() ?? "Not set"} sqft</div>
-                    <div><strong>Acreage:</strong> {selectedProperty.acreage ?? "Not set"}</div>
-                    <div>
-                      <strong>Access Flags:</strong>{" "}
-                      {[
-                        selectedProperty.gatePresent ? "Gate" : null,
-                        selectedProperty.lockedGate ? "Locked Gate" : null,
-                        selectedProperty.petsPresent ? "Pets" : null,
-                      ]
-                        .filter(Boolean)
-                        .join(", ") || "None"}
-                    </div>
-                    <div>
-                      <strong>Service Templates:</strong>{" "}
-                      {selectedProperty.serviceTemplates.length
-                        ? selectedProperty.serviceTemplates.join(", ")
-                        : "Not set"}
-                    </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 10,
+                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                      fontSize: 14,
+                    }}
+                  >
+                    <MetadataItem label="Type" value={CRM_PROPERTY_TYPE_LABELS[selectedProperty.propertyType]} />
+                    <MetadataItem label="Route Group" value={selectedProperty.routeGroup || "Not set"} />
+                    <MetadataItem
+                      label="Acreage"
+                      value={selectedProperty.acreage != null ? `${selectedProperty.acreage}` : "Not set"}
+                    />
+                    <MetadataItem label="Flags" value={accessFlags ?? "None"} />
                   </div>
                 </article>
-              ) : (
-                <EmptyPanel
-                  title="No property selected"
-                  body="Choose the exact service property so the estimate is tied to the right location."
-                />
-              )}
-            </div>
-          </section>
+              ) : null}
+            </FlowSection>
 
-          <section style={crmCardStyle}>
-            <div style={{ display: "grid", gap: 10 }}>
-              <h2 style={{ margin: 0 }}>Next Slice</h2>
+            <FlowSection
+              step="3"
+              title="Estimate Basics"
+              body="Capture the estimate identity before moving into scope and pricing."
+              stateLabel={basicsUnlocked ? "Ready" : "Locked"}
+              tone={basicsUnlocked ? "current" : "locked"}
+              locked={!basicsUnlocked}
+            >
+              {basicsUnlocked ? (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 12,
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    }}
+                  >
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 13, opacity: 0.78 }}>Estimate Title</span>
+                      <input
+                        value={estimateTitle}
+                        onChange={(event) => setEstimateTitle(event.target.value)}
+                        placeholder="Seasonal maintenance proposal"
+                        style={crmInputStyle}
+                      />
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 13, opacity: 0.78 }}>Service Line</span>
+                      <select
+                        value={serviceLine}
+                        onChange={(event) =>
+                          setServiceLine(event.target.value as (typeof SERVICE_LINE_OPTIONS)[number]["value"])
+                        }
+                        style={crmInputStyle}
+                      >
+                        {SERVICE_LINE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 13, opacity: 0.78 }}>Target Start</span>
+                      <input
+                        type="date"
+                        value={targetStart}
+                        onChange={(event) => setTargetStart(event.target.value)}
+                        style={crmInputStyle}
+                      />
+                    </label>
+                  </div>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span style={{ fontSize: 13, opacity: 0.78 }}>Internal Notes</span>
+                    <textarea
+                      value={internalNotes}
+                      onChange={(event) => setInternalNotes(event.target.value)}
+                      placeholder="Capture walk-through notes, assumptions, or follow-up items for review."
+                      style={{ ...crmTextareaStyle, minHeight: 120 }}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div style={crmMutedTextStyle}>
+                  Estimate basics unlock once the estimate is tied to a specific client and property.
+                </div>
+              )}
+            </FlowSection>
+          </div>
+        </section>
+
+        <section style={{ ...crmCardStyle, position: "sticky", top: 16 }}>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div>
+              <h2 style={{ margin: "0 0 6px" }}>Progress Panel</h2>
               <div style={crmMutedTextStyle}>
-                The next step after review is wiring these selections into a real draft header so the estimate shell can begin carrying structured estimate data.
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <Link href="/crm/clients" style={crmSecondaryButtonStyle}>
-                  Open CRM
-                </Link>
+                Complete the foundation in order, then continue into scope and pricing.
               </div>
             </div>
-          </section>
-        </div>
+
+            <ProgressRow
+              step="1"
+              title="Select a Client"
+              description={
+                selectedClient
+                  ? `${selectedClient.displayName} • ${CRM_CLIENT_TYPE_LABELS[selectedClient.clientType]}`
+                  : "Choose a customer to begin this estimate."
+              }
+              state={selectedClient ? "Complete" : "Incomplete"}
+              tone={selectedClient ? "complete" : "current"}
+            />
+
+            <ProgressRow
+              step="2"
+              title="Select a Property"
+              description={
+                selectedProperty
+                  ? `${selectedProperty.propertyName} • ${crmPropertyAddress(selectedProperty)}`
+                  : selectedClient
+                    ? "Choose the exact property tied to this estimate."
+                    : "Locked until a client is selected."
+              }
+              state={selectedProperty ? "Complete" : selectedClient ? "Incomplete" : "Locked"}
+              tone={selectedProperty ? "complete" : selectedClient ? "current" : "locked"}
+            />
+
+            <ProgressRow
+              step="3"
+              title="Define Estimate Basics"
+              description={
+                basicsUnlocked
+                  ? "Title, service line, start date, and notes are ready to be filled in."
+                  : "Locked until both client and property are selected."
+              }
+              state={basicsUnlocked ? "Ready" : "Locked"}
+              tone={basicsUnlocked ? "current" : "locked"}
+            />
+
+            <ProgressRow
+              step="4"
+              title="Scope & Pricing"
+              description={
+                scopeReady
+                  ? "Foundation complete. Continue forward when you are ready to build scope."
+                  : "Locked until client and property are both selected."
+              }
+              state={scopeReady ? "Ready Next" : "Locked"}
+              tone={scopeReady ? "current" : "locked"}
+            />
+
+            <button
+              type="button"
+              onClick={() => setScopeStepRequested(true)}
+              disabled={!scopeReady}
+              style={{
+                ...crmPrimaryButtonStyle,
+                width: "100%",
+                border: scopeReady
+                  ? crmPrimaryButtonStyle.border
+                  : "1px solid rgba(255,255,255,0.08)",
+                background: scopeReady ? crmPrimaryButtonStyle.background : "rgba(255,255,255,0.04)",
+                color: scopeReady ? crmPrimaryButtonStyle.color : "rgba(255,255,255,0.5)",
+                cursor: scopeReady ? "pointer" : "not-allowed",
+                transition: "background 120ms ease, border-color 120ms ease, color 120ms ease",
+              }}
+            >
+              Continue to Scope & Pricing
+            </button>
+
+            <article
+              style={{
+                ...crmSubtleCardStyle,
+                border: scopeStepRequested
+                  ? "1px solid rgba(116, 168, 255, 0.28)"
+                  : "1px solid rgba(255,255,255,0.08)",
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 800 }}>Next Action</div>
+              <div style={crmMutedTextStyle}>
+                {scopeReady
+                  ? "Foundation is complete. Scope and pricing are the next workflow stage for this estimate."
+                  : "Select a client and property first. Scope and pricing stay locked until the foundation is complete."}
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
     </div>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function StepChip({
+  step,
+  title,
+  status,
+  tone,
+}: {
+  step: string;
+  title: string;
+  status: string;
+  tone: "current" | "complete" | "locked";
+}) {
+  const palette = stepTone(tone);
+
   return (
-    <article style={crmCardStyle}>
-      <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>{label}</div>
-      <div style={{ marginTop: 6, fontSize: 28, fontWeight: 900 }}>{value}</div>
+    <article
+      style={{
+        ...crmSubtleCardStyle,
+        display: "grid",
+        gap: 8,
+        padding: 14,
+        border: palette.border,
+        background: palette.background,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 999,
+            display: "grid",
+            placeItems: "center",
+            fontSize: 13,
+            fontWeight: 900,
+            border: palette.badgeBorder,
+            color: palette.badgeText,
+            background: palette.badgeBackground,
+          }}
+        >
+          {step}
+        </div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{title}</div>
+          <div style={{ ...crmMutedTextStyle, fontSize: 12 }}>{status}</div>
+        </div>
+      </div>
     </article>
   );
 }
 
-function EmptyPanel({ title, body }: { title: string; body: string }) {
+function FlowSection({
+  step,
+  title,
+  body,
+  stateLabel,
+  tone,
+  locked = false,
+  children,
+}: {
+  step: string;
+  title: string;
+  body: string;
+  stateLabel: string;
+  tone: "current" | "complete" | "locked";
+  locked?: boolean;
+  children: React.ReactNode;
+}) {
+  const palette = stepTone(tone);
+
   return (
-    <article style={{ ...crmSubtleCardStyle, display: "grid", gap: 8 }}>
-      <div style={{ fontSize: 17, fontWeight: 800 }}>{title}</div>
-      <div style={crmMutedTextStyle}>{body}</div>
+    <section
+      style={{
+        ...crmSubtleCardStyle,
+        display: "grid",
+        gap: 14,
+        padding: 16,
+        border: palette.border,
+        background: palette.background,
+        opacity: locked ? 0.82 : 1,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "start",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "grid", gap: 5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 999,
+                display: "grid",
+                placeItems: "center",
+                fontSize: 13,
+                fontWeight: 900,
+                border: palette.badgeBorder,
+                color: palette.badgeText,
+                background: palette.badgeBackground,
+              }}
+            >
+              {step}
+            </div>
+            <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
+          </div>
+          <div style={crmMutedTextStyle}>{body}</div>
+        </div>
+
+        <StatusPill label={stateLabel} tone={tone} />
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+function ProgressRow({
+  step,
+  title,
+  description,
+  state,
+  tone,
+}: {
+  step: string;
+  title: string;
+  description: string;
+  state: string;
+  tone: "current" | "complete" | "locked";
+}) {
+  const palette = stepTone(tone);
+
+  return (
+    <article
+      style={{
+        ...crmSubtleCardStyle,
+        display: "grid",
+        gap: 8,
+        padding: 14,
+        border: palette.border,
+        background: palette.background,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          alignItems: "start",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 999,
+              display: "grid",
+              placeItems: "center",
+              fontSize: 13,
+              fontWeight: 900,
+              border: palette.badgeBorder,
+              color: palette.badgeText,
+              background: palette.badgeBackground,
+            }}
+          >
+            {step}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
+        </div>
+
+        <StatusPill label={state} tone={tone} />
+      </div>
+
+      <div style={crmMutedTextStyle}>{description}</div>
     </article>
   );
+}
+
+function StatusPill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "current" | "complete" | "locked";
+}) {
+  const palette = stepTone(tone);
+
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 30,
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: palette.badgeBorder,
+        color: palette.badgeText,
+        background: palette.badgeBackground,
+        fontSize: 12,
+        fontWeight: 800,
+        letterSpacing: 0.2,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function MetadataItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "grid", gap: 3 }}>
+      <div style={{ ...crmMutedTextStyle, fontSize: 12 }}>{label}</div>
+      <div style={{ fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function fieldStyle(disabled: boolean): React.CSSProperties {
+  return disabled
+    ? {
+        ...crmInputStyle,
+        opacity: 0.6,
+        cursor: "not-allowed",
+      }
+    : crmInputStyle;
+}
+
+function stepTone(tone: "current" | "complete" | "locked") {
+  if (tone === "complete") {
+    return {
+      border: "1px solid rgba(94, 186, 140, 0.24)",
+      background: "rgba(36, 76, 54, 0.22)",
+      badgeBorder: "1px solid rgba(94, 186, 140, 0.32)",
+      badgeBackground: "rgba(36, 76, 54, 0.35)",
+      badgeText: "#d7f4e1",
+    };
+  }
+
+  if (tone === "current") {
+    return {
+      border: "1px solid rgba(116, 168, 255, 0.22)",
+      background: "rgba(20, 43, 80, 0.22)",
+      badgeBorder: "1px solid rgba(116, 168, 255, 0.3)",
+      badgeBackground: "rgba(20, 43, 80, 0.36)",
+      badgeText: "#d7e7ff",
+    };
+  }
+
+  return {
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.03)",
+    badgeBorder: "1px solid rgba(255,255,255,0.1)",
+    badgeBackground: "rgba(255,255,255,0.04)",
+    badgeText: "rgba(255,255,255,0.74)",
+  };
 }
