@@ -1,8 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import {
-  crmClientIdentity,
   crmNullable,
   crmNumberOrNull,
   type CrmClient,
@@ -10,6 +9,12 @@ import {
   type CrmProperty,
   type CrmPropertyFormValues,
 } from "@/lib/crm";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
+import {
+  buildCrmClientRecord,
+  removeCrmClient,
+  upsertCrmClient,
+} from "@/lib/crmPersistence";
 import { CRM_MOCK_CLIENTS, CRM_MOCK_PROPERTIES } from "@/components/crm/mockData";
 
 type CrmSummary = {
@@ -23,6 +28,7 @@ type CrmMockDataContextValue = {
   clients: CrmClient[];
   properties: CrmProperty[];
   summary: CrmSummary;
+  clientsPersistenceMode: "mock" | "supabase";
   saveClient: (values: CrmClientFormValues, clientId?: string) => CrmClient;
   deleteClient: (clientId: string) => void;
   saveProperty: (clientId: string, values: CrmPropertyFormValues, propertyId?: string) => CrmProperty;
@@ -38,48 +44,96 @@ function createId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function CrmMockDataProvider({ children }: { children: React.ReactNode }) {
-  const [clients, setClients] = useState<CrmClient[]>(() => CRM_MOCK_CLIENTS.map((client) => ({ ...client })));
+type CrmMockDataProviderProps = {
+  children: React.ReactNode;
+  initialClients?: CrmClient[];
+  clientsPersistenceMode?: "mock" | "supabase";
+};
+
+function cloneClient(client: CrmClient): CrmClient {
+  return { ...client, tags: [...client.tags] };
+}
+
+function cloneProperty(property: CrmProperty): CrmProperty {
+  return { ...property, serviceTemplates: [...property.serviceTemplates] };
+}
+
+function createInitialProperties(clients: CrmClient[]) {
+  const clientIds = new Set(clients.map((client) => client.id));
+  return CRM_MOCK_PROPERTIES
+    .filter((property) => clientIds.has(property.clientId))
+    .map(cloneProperty);
+}
+
+function notifyPersistenceError(message: string) {
+  if (typeof window !== "undefined") {
+    window.alert(message);
+  }
+}
+
+export function CrmMockDataProvider({
+  children,
+  initialClients = CRM_MOCK_CLIENTS,
+  clientsPersistenceMode = "mock",
+}: CrmMockDataProviderProps) {
+  const supabase = useMemo(
+    () => (clientsPersistenceMode === "supabase" ? createSupabaseBrowser() : null),
+    [clientsPersistenceMode]
+  );
+  const [clients, setClients] = useState<CrmClient[]>(() => initialClients.map(cloneClient));
   const [properties, setProperties] = useState<CrmProperty[]>(() =>
-    CRM_MOCK_PROPERTIES.map((property) => ({ ...property, serviceTemplates: [...property.serviceTemplates] }))
+    createInitialProperties(initialClients)
   );
 
   function saveClient(values: CrmClientFormValues, clientId?: string) {
     const now = new Date().toISOString();
     const existingClient = clientId ? clients.find((client) => client.id === clientId) ?? null : null;
-    const identity = crmClientIdentity(values);
-    const nextClient: CrmClient = {
-      id: clientId ?? createId("client"),
-      clientType: values.clientType,
-      companyName: identity.companyName,
-      firstName: identity.firstName,
-      lastName: identity.lastName,
-      displayName: identity.displayName,
-      primaryPhone: crmNullable(values.primaryPhone),
-      secondaryPhone: crmNullable(values.secondaryPhone),
-      primaryEmail: crmNullable(values.primaryEmail),
-      billingEmail: crmNullable(values.billingEmail),
-      status: values.status,
-      preferredContactMethod:
-        existingClient?.preferredContactMethod ??
-        (values.primaryEmail.trim() ? "email" : values.primaryPhone.trim() ? "phone" : "phone"),
-      notes: crmNullable(values.notes),
-      tags: existingClient?.tags ?? [],
-      createdAt: existingClient?.createdAt ?? now,
-      updatedAt: now,
-    };
+    const { client: nextClient } = buildCrmClientRecord({
+      values,
+      clientId: clientId ?? createId("client"),
+      existingClient,
+      now,
+    });
+    const previousClients = clients.map(cloneClient);
 
     setClients((current) => {
       if (!clientId) return [nextClient, ...current];
       return current.map((client) => (client.id === clientId ? nextClient : client));
     });
 
+    if (supabase) {
+      void upsertCrmClient(supabase, nextClient)
+        .then((savedClient) => {
+          setClients((current) => {
+            const exists = current.some((client) => client.id === savedClient.id);
+            if (!exists) return [savedClient, ...current];
+            return current.map((client) => (client.id === savedClient.id ? savedClient : client));
+          });
+        })
+        .catch((error) => {
+          console.error("Failed to persist CRM client", error);
+          setClients(previousClients);
+          notifyPersistenceError("Unable to save CRM client. Your local changes were reverted.");
+        });
+    }
+
     return nextClient;
   }
 
   function deleteClient(clientId: string) {
+    const previousClients = clients.map(cloneClient);
+    const previousProperties = properties.map(cloneProperty);
     setClients((current) => current.filter((client) => client.id !== clientId));
     setProperties((current) => current.filter((property) => property.clientId !== clientId));
+
+    if (supabase) {
+      void removeCrmClient(supabase, clientId).catch((error) => {
+        console.error("Failed to delete CRM client", error);
+        setClients(previousClients);
+        setProperties(previousProperties);
+        notifyPersistenceError("Unable to delete CRM client. Your local changes were restored.");
+      });
+    }
   }
 
   function saveProperty(clientId: string, values: CrmPropertyFormValues, propertyId?: string) {
@@ -162,6 +216,7 @@ export function CrmMockDataProvider({ children }: { children: React.ReactNode })
         clients,
         properties,
         summary,
+        clientsPersistenceMode,
         saveClient,
         deleteClient,
         saveProperty,
