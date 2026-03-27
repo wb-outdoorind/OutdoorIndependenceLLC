@@ -464,6 +464,7 @@ export default async function Home() {
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
     const canViewFertilizingOperations = canAccessRoute(role, "fertilizing_operations");
     const canViewCrm = canAccessRoute(role, "crm");
+    const canViewEstimates = canAccessRoute(role, "estimates");
     const canViewPurchases = canAccessRoute(role, "purchases");
 
     if (canViewFertilizingOperations) {
@@ -491,6 +492,20 @@ export default async function Home() {
         insertionIndex > 0
           ? [...tiles.slice(0, insertionIndex), crmTile, ...tiles.slice(insertionIndex)]
           : [...tiles, crmTile];
+    }
+
+    if (canViewEstimates) {
+      const estimatesTile = {
+        title: "Estimates",
+        href: "/estimates",
+        desc: "Build client and property estimate drafts before jobs, scheduling, and invoicing",
+      };
+      const crmIndex = tiles.findIndex((tile) => tile.title === "CRM");
+      const insertionIndex = crmIndex >= 0 ? crmIndex + 1 : tiles.findIndex((tile) => tile.title === "Inventory") + 1;
+      tiles =
+        insertionIndex > 0
+          ? [...tiles.slice(0, insertionIndex), estimatesTile, ...tiles.slice(insertionIndex)]
+          : [...tiles, estimatesTile];
     }
 
     if (canViewPurchases) {

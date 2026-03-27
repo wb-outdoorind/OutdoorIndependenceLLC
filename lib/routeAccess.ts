@@ -10,6 +10,7 @@ export type RouteAccessKey =
   | "maintenance_center"
   | "fertilizing_operations"
   | "crm"
+  | "estimates"
   | "purchases"
   | "accountability_center"
   | "vehicles_create"
@@ -24,6 +25,7 @@ const ACCESS_MATRIX: Record<RouteAccessKey, AppRole[]> = {
   maintenance_center: [...MANAGEMENT_OR_MECHANIC_ROLES],
   fertilizing_operations: [...MANAGEMENT_OR_MECHANIC_ROLES],
   crm: [...MANAGEMENT_ROLES],
+  estimates: [...MANAGEMENT_ROLES],
   purchases: [...MANAGEMENT_OR_MECHANIC_ROLES],
   accountability_center: [...MANAGEMENT_OR_MECHANIC_ROLES],
   vehicles_create: [...MANAGEMENT_OR_MECHANIC_ROLES],
