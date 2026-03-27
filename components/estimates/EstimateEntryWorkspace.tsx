@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import scrollbarStyles from "@/components/crm/modalScrollbar.module.css";
 import {
   crmCardStyle,
@@ -17,13 +18,10 @@ import {
   type CrmClient,
   type CrmProperty,
 } from "@/lib/crm";
-
-const SERVICE_LINE_OPTIONS = [
-  { value: "maintenance", label: "Maintenance" },
-  { value: "fertilizing", label: "Fertilizing" },
-  { value: "snow", label: "Snow" },
-  { value: "landscape", label: "Landscape" },
-] as const;
+import {
+  ESTIMATE_SERVICE_LINE_OPTIONS,
+  type EstimateServiceLine,
+} from "@/lib/estimatePersistence";
 
 type EstimateEntryWorkspaceProps = {
   clients: CrmClient[];
@@ -36,22 +34,24 @@ export default function EstimateEntryWorkspace({
   properties,
   crmLoadError = null,
 }: EstimateEntryWorkspaceProps) {
+  const router = useRouter();
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [estimateTitle, setEstimateTitle] = useState("");
-  const [serviceLine, setServiceLine] =
-    useState<(typeof SERVICE_LINE_OPTIONS)[number]["value"]>("maintenance");
+  const [serviceLine, setServiceLine] = useState<EstimateServiceLine>("maintenance");
   const [targetStart, setTargetStart] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
-  const [scopeStepRequested, setScopeStepRequested] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const normalizedSearch = clientSearch.trim().toLowerCase();
+  const hasClientSearch = normalizedSearch.length > 0;
 
   const filteredClients = useMemo(
     () =>
       clients.filter((client) => {
-        if (!normalizedSearch) return true;
+        if (!normalizedSearch) return false;
         return [
           client.displayName,
           client.primaryEmail,
@@ -102,9 +102,56 @@ export default function EstimateEntryWorkspace({
     const client = clients.find((entry) => entry.id === clientId);
     setSelectedClientId(clientId);
     setSelectedPropertyId("");
-    setScopeStepRequested(false);
+    setSaveError(null);
     if (client) {
       setClientSearch(client.displayName);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!selectedClient || !selectedProperty || isSaving) return;
+
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      const response = await fetch("/api/estimates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId: selectedClient.id,
+          propertyId: selectedProperty.id,
+          title: estimateTitle,
+          serviceLine,
+          targetStart,
+          internalNotes,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; draft?: { id?: string } }
+        | null;
+
+      if (!response.ok) {
+        setSaveError(payload?.error ?? "Unable to create the estimate draft.");
+        setIsSaving(false);
+        return;
+      }
+
+      const draftId = payload?.draft?.id;
+      if (!draftId) {
+        setSaveError("The estimate draft was created, but no draft id was returned.");
+        setIsSaving(false);
+        return;
+      }
+
+      router.push(`/estimates/${draftId}`);
+      router.refresh();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to create the estimate draft.");
+      setIsSaving(false);
     }
   };
 
@@ -239,7 +286,11 @@ export default function EstimateEntryWorkspace({
                       paddingRight: 4,
                     }}
                   >
-                    {filteredClients.length ? (
+                    {!hasClientSearch ? (
+                      <div style={{ ...crmMutedTextStyle, padding: "12px 14px", fontSize: 13 }}>
+                        Start typing to search CRM clients.
+                      </div>
+                    ) : filteredClients.length ? (
                       filteredClients.map((client) => {
                         const isSelected = client.id === selectedClientId;
 
@@ -296,7 +347,9 @@ export default function EstimateEntryWorkspace({
               </div>
 
               <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
-                {filteredClientCount} {filteredClientCount === 1 ? "client matches" : "clients match"} the current search.
+                {hasClientSearch
+                  ? `${filteredClientCount} ${filteredClientCount === 1 ? "client matches" : "clients match"} the current search.`
+                  : "Search by client name, phone, or email to choose the account."}
               </div>
             </FlowSection>
 
@@ -314,7 +367,7 @@ export default function EstimateEntryWorkspace({
                   value={selectedPropertyId}
                   onChange={(event) => {
                     setSelectedPropertyId(event.target.value);
-                    setScopeStepRequested(false);
+                    setSaveError(null);
                   }}
                   style={fieldStyle(!hasClient)}
                   disabled={!hasClient}
@@ -396,11 +449,11 @@ export default function EstimateEntryWorkspace({
                       <select
                         value={serviceLine}
                         onChange={(event) =>
-                          setServiceLine(event.target.value as (typeof SERVICE_LINE_OPTIONS)[number]["value"])
+                          setServiceLine(event.target.value as EstimateServiceLine)
                         }
                         style={crmInputStyle}
                       >
-                        {SERVICE_LINE_OPTIONS.map((option) => (
+                        {ESTIMATE_SERVICE_LINE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -499,28 +552,31 @@ export default function EstimateEntryWorkspace({
 
             <button
               type="button"
-              onClick={() => setScopeStepRequested(true)}
-              disabled={!scopeReady}
+              onClick={handleContinue}
+              disabled={!scopeReady || isSaving}
               style={{
                 ...crmPrimaryButtonStyle,
                 width: "100%",
-                border: scopeReady
+                border: scopeReady && !isSaving
                   ? crmPrimaryButtonStyle.border
                   : "1px solid rgba(255,255,255,0.08)",
-                background: scopeReady ? crmPrimaryButtonStyle.background : "rgba(255,255,255,0.04)",
-                color: scopeReady ? crmPrimaryButtonStyle.color : "rgba(255,255,255,0.5)",
-                cursor: scopeReady ? "pointer" : "not-allowed",
+                background:
+                  scopeReady && !isSaving
+                    ? crmPrimaryButtonStyle.background
+                    : "rgba(255,255,255,0.04)",
+                color: scopeReady && !isSaving ? crmPrimaryButtonStyle.color : "rgba(255,255,255,0.5)",
+                cursor: scopeReady && !isSaving ? "pointer" : "not-allowed",
                 transition: "background 120ms ease, border-color 120ms ease, color 120ms ease",
               }}
             >
-              Continue to Scope & Pricing
+              {isSaving ? "Saving Draft..." : "Continue to Scope & Pricing"}
             </button>
 
             <article
               style={{
                 ...crmSubtleCardStyle,
-                border: scopeStepRequested
-                  ? "1px solid rgba(116, 168, 255, 0.28)"
+                border: saveError
+                  ? "1px solid rgba(255, 126, 126, 0.22)"
                   : "1px solid rgba(255,255,255,0.08)",
                 display: "grid",
                 gap: 8,
@@ -529,9 +585,14 @@ export default function EstimateEntryWorkspace({
               <div style={{ fontSize: 16, fontWeight: 800 }}>Next Action</div>
               <div style={crmMutedTextStyle}>
                 {scopeReady
-                  ? "Foundation is complete. Scope and pricing are the next workflow stage for this estimate."
+                  ? "Create the draft header and continue into scope and pricing from the selected client and property."
                   : "Select a client and property first. Scope and pricing stay locked until the foundation is complete."}
               </div>
+              {saveError ? (
+                <div style={{ color: "#ffd7d7", fontSize: 13 }}>
+                  {saveError}
+                </div>
+              ) : null}
             </article>
           </div>
         </section>
