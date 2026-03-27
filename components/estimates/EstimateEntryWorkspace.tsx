@@ -68,16 +68,6 @@ export default function EstimateEntryWorkspace({
     [clients, selectedClientId]
   );
 
-  const clientOptions = useMemo(() => {
-    if (!selectedClient) {
-      return filteredClients;
-    }
-
-    return filteredClients.some((client) => client.id === selectedClient.id)
-      ? filteredClients
-      : [selectedClient, ...filteredClients];
-  }, [filteredClients, selectedClient]);
-
   const propertiesForClient = useMemo(
     () =>
       properties
@@ -106,6 +96,16 @@ export default function EstimateEntryWorkspace({
   const basicsUnlocked = hasClient && hasProperty;
   const scopeReady = hasClient && hasProperty;
   const filteredClientCount = filteredClients.length;
+
+  const handleSelectClient = (clientId: string) => {
+    const client = clients.find((entry) => entry.id === clientId);
+    setSelectedClientId(clientId);
+    setSelectedPropertyId("");
+    setScopeStepRequested(false);
+    if (client) {
+      setClientSearch(client.displayName);
+    }
+  };
 
   if (crmLoadError) {
     return (
@@ -204,13 +204,7 @@ export default function EstimateEntryWorkspace({
               stateLabel={hasClient ? "Complete" : "Required"}
               tone={hasClient ? "complete" : "current"}
             >
-              <div
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                }}
-              >
+              <div style={{ display: "grid", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={{ fontSize: 13, opacity: 0.78 }}>Find Client</span>
                   <input
@@ -221,25 +215,69 @@ export default function EstimateEntryWorkspace({
                   />
                 </label>
 
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span style={{ fontSize: 13, opacity: 0.78 }}>Client</span>
-                  <select
-                    value={selectedClientId}
-                    onChange={(event) => {
-                      setSelectedClientId(event.target.value);
-                      setSelectedPropertyId("");
-                      setScopeStepRequested(false);
-                    }}
-                    style={crmInputStyle}
-                  >
-                    <option value="">Select a client</option>
-                    {clientOptions.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div
+                  style={{
+                    ...crmSubtleCardStyle,
+                    padding: 8,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                    display: "grid",
+                    gap: 6,
+                  }}
+                >
+                  {filteredClients.length ? (
+                    filteredClients.map((client) => {
+                      const isSelected = client.id === selectedClientId;
+
+                      return (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => handleSelectClient(client.id)}
+                          style={{
+                            appearance: "none",
+                            width: "100%",
+                            textAlign: "left",
+                            display: "grid",
+                            gap: 4,
+                            padding: "12px 14px",
+                            borderRadius: 12,
+                            border: isSelected
+                              ? "1px solid rgba(116, 168, 255, 0.3)"
+                              : "1px solid rgba(255,255,255,0.08)",
+                            background: isSelected
+                              ? "rgba(20, 43, 80, 0.3)"
+                              : "rgba(255,255,255,0.03)",
+                            color: "inherit",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div style={{ fontSize: 15, fontWeight: 800 }}>{client.displayName}</div>
+                          <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
+                            {CRM_CLIENT_TYPE_LABELS[client.clientType]}
+                            {client.primaryPhone ? ` • ${client.primaryPhone}` : ""}
+                            {client.primaryEmail ? ` • ${client.primaryEmail}` : ""}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div style={{ ...crmMutedTextStyle, padding: "12px 14px", fontSize: 13 }}>
+                      No clients match the current search.
+                    </div>
+                  )}
+                </div>
+
+                {selectedClient ? (
+                  <article style={{ ...crmSubtleCardStyle, display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{selectedClient.displayName}</div>
+                    <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
+                      {CRM_CLIENT_TYPE_LABELS[selectedClient.clientType]}
+                      {selectedClient.primaryPhone ? ` • ${selectedClient.primaryPhone}` : ""}
+                      {selectedClient.primaryEmail ? ` • ${selectedClient.primaryEmail}` : ""}
+                    </div>
+                  </article>
+                ) : null}
               </div>
 
               <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
