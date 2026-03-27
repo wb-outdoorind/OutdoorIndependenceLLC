@@ -1,0 +1,21 @@
+.scrollbarDark {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+}
+
+.scrollbarDark::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbarDark::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbarDark::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.4);
+  border-radius: 6px;
+}
+
+.scrollbarDark::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.6);
+}

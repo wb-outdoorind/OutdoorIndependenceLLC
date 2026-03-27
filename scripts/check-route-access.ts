@@ -29,6 +29,7 @@ function expectAllowed(route: Parameters<typeof canAccessRoute>[1], allowed: str
 expectAllowed("ops_dashboard", ["owner", "operations_manager", "office_admin", "mechanic"]);
 expectAllowed("maintenance_center", ["owner", "operations_manager", "office_admin", "mechanic"]);
 expectAllowed("fertilizing_operations", ["owner", "operations_manager", "office_admin", "mechanic"]);
+expectAllowed("crm", ["owner", "operations_manager", "office_admin"]);
 expectAllowed("purchases", ["owner", "operations_manager", "office_admin", "mechanic"]);
 expectAllowed("accountability_center", ["owner", "operations_manager", "office_admin", "mechanic"]);
 expectAllowed("vehicles_create", ["owner", "operations_manager", "office_admin", "mechanic"]);

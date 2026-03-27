@@ -190,6 +190,7 @@ export default function AppTopNavLinks() {
   const effectiveNavRole = viewAsRole ?? actualRole;
   const canViewMaintenanceCenter = canAccessRoute(effectiveNavRole, "maintenance_center");
   const canViewFertilizingOperations = canAccessRoute(effectiveNavRole, "fertilizing_operations");
+  const canViewCrm = canAccessRoute(effectiveNavRole, "crm");
   const canViewPurchases = canAccessRoute(effectiveNavRole, "purchases");
   const canViewAccountability = canAccessRoute(effectiveNavRole, "accountability_center");
   const canViewApprovals = canAccessRoute(effectiveNavRole, "lead_approvals");
@@ -204,6 +205,9 @@ export default function AppTopNavLinks() {
   ];
   if (canViewFertilizingOperations) {
     navLinks.push({ href: "/fertilizing", label: "Fertilizing Ops" });
+  }
+  if (canViewCrm) {
+    navLinks.push({ href: "/crm", label: "CRM" });
   }
   if (canViewPurchases) {
     navLinks.push({ href: "/purchases", label: "Purchases" });
