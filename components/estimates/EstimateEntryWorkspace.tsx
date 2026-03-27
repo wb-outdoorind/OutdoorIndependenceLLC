@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import scrollbarStyles from "@/components/crm/modalScrollbar.module.css";
 import {
   crmCardStyle,
   crmInputStyle,
@@ -207,65 +208,79 @@ export default function EstimateEntryWorkspace({
               <div style={{ display: "grid", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={{ fontSize: 13, opacity: 0.78 }}>Find Client</span>
-                  <input
-                    value={clientSearch}
-                    onChange={(event) => setClientSearch(event.target.value)}
-                    placeholder="Search name, phone, or email"
-                    style={crmInputStyle}
-                  />
                 </label>
 
                 <div
                   style={{
                     ...crmSubtleCardStyle,
                     padding: 8,
-                    maxHeight: 220,
-                    overflowY: "auto",
                     display: "grid",
-                    gap: 6,
+                    gap: 8,
                   }}
                 >
-                  {filteredClients.length ? (
-                    filteredClients.map((client) => {
-                      const isSelected = client.id === selectedClientId;
+                  <input
+                    value={clientSearch}
+                    onChange={(event) => setClientSearch(event.target.value)}
+                    placeholder="Search name, phone, or email"
+                    style={{
+                      ...crmInputStyle,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(8,12,19,0.65)",
+                    }}
+                  />
 
-                      return (
-                        <button
-                          key={client.id}
-                          type="button"
-                          onClick={() => handleSelectClient(client.id)}
-                          style={{
-                            appearance: "none",
-                            width: "100%",
-                            textAlign: "left",
-                            display: "grid",
-                            gap: 4,
-                            padding: "12px 14px",
-                            borderRadius: 12,
-                            border: isSelected
-                              ? "1px solid rgba(116, 168, 255, 0.3)"
-                              : "1px solid rgba(255,255,255,0.08)",
-                            background: isSelected
-                              ? "rgba(20, 43, 80, 0.3)"
-                              : "rgba(255,255,255,0.03)",
-                            color: "inherit",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <div style={{ fontSize: 15, fontWeight: 800 }}>{client.displayName}</div>
-                          <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
-                            {CRM_CLIENT_TYPE_LABELS[client.clientType]}
-                            {client.primaryPhone ? ` • ${client.primaryPhone}` : ""}
-                            {client.primaryEmail ? ` • ${client.primaryEmail}` : ""}
-                          </div>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div style={{ ...crmMutedTextStyle, padding: "12px 14px", fontSize: 13 }}>
-                      No clients match the current search.
-                    </div>
-                  )}
+                  <div
+                    className={scrollbarStyles.scrollbarDark}
+                    style={{
+                      display: "grid",
+                      gap: 6,
+                      maxHeight: 220,
+                      overflowY: "auto",
+                      paddingRight: 4,
+                    }}
+                  >
+                    {filteredClients.length ? (
+                      filteredClients.map((client) => {
+                        const isSelected = client.id === selectedClientId;
+
+                        return (
+                          <button
+                            key={client.id}
+                            type="button"
+                            onClick={() => handleSelectClient(client.id)}
+                            style={{
+                              appearance: "none",
+                              width: "100%",
+                              textAlign: "left",
+                              display: "grid",
+                              gap: 4,
+                              padding: "12px 14px",
+                              borderRadius: 12,
+                              border: isSelected
+                                ? "1px solid rgba(116, 168, 255, 0.3)"
+                                : "1px solid rgba(255,255,255,0.08)",
+                              background: isSelected
+                                ? "rgba(20, 43, 80, 0.3)"
+                                : "rgba(255,255,255,0.03)",
+                              color: "inherit",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div style={{ fontSize: 15, fontWeight: 800 }}>{client.displayName}</div>
+                            <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>
+                              {CRM_CLIENT_TYPE_LABELS[client.clientType]}
+                              {client.primaryPhone ? ` • ${client.primaryPhone}` : ""}
+                              {client.primaryEmail ? ` • ${client.primaryEmail}` : ""}
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div style={{ ...crmMutedTextStyle, padding: "12px 14px", fontSize: 13 }}>
+                        No clients match the current search.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {selectedClient ? (
