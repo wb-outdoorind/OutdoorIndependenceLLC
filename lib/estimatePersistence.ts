@@ -11,8 +11,16 @@ export const ESTIMATE_DRAFT_STAGES = [
   "sent",
 ] as const;
 
+export const ESTIMATE_VISIT_INTENTS = [
+  "recurring",
+  "seasonal",
+  "event_based",
+  "one_time",
+] as const;
+
 export type EstimateServiceLine = (typeof ESTIMATE_SERVICE_LINES)[number];
 export type EstimateDraftStage = (typeof ESTIMATE_DRAFT_STAGES)[number];
+export type EstimateVisitIntent = (typeof ESTIMATE_VISIT_INTENTS)[number];
 
 export type EstimateDraft = {
   id: string;
@@ -22,6 +30,11 @@ export type EstimateDraft = {
   serviceLine: EstimateServiceLine;
   targetStart: string | null;
   internalNotes: string | null;
+  packageName: string | null;
+  visitIntent: EstimateVisitIntent | null;
+  scopeSummary: string | null;
+  scopeDetails: Record<string, string>;
+  operationsNotes: string | null;
   stage: EstimateDraftStage;
   createdBy: string | null;
   updatedBy: string | null;
@@ -37,6 +50,11 @@ export type EstimateDraftRow = {
   service_line: EstimateServiceLine;
   target_start: string | null;
   internal_notes: string | null;
+  package_name: string | null;
+  visit_intent: EstimateVisitIntent | null;
+  scope_summary: string | null;
+  scope_details: Record<string, string> | null;
+  operations_notes: string | null;
   stage: EstimateDraftStage;
   created_by: string | null;
   updated_by: string | null;
@@ -91,6 +109,11 @@ export const ESTIMATE_DRAFT_SELECT = [
   "service_line",
   "target_start",
   "internal_notes",
+  "package_name",
+  "visit_intent",
+  "scope_summary",
+  "scope_details",
+  "operations_notes",
   "stage",
   "created_by",
   "updated_by",
@@ -108,6 +131,15 @@ function asDateOrNull(value: string | null | undefined) {
   const trimmed = nullableString(value);
   if (!trimmed) return null;
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function asScopeDetails(value: Record<string, string> | null | undefined) {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, entry]) => [key.trim(), typeof entry === "string" ? entry.trim() : ""])
+      .filter(([key, entry]) => key.length > 0 && entry.length > 0)
+  );
 }
 
 export function estimatePersistenceErrorDetails(error: QueryError) {
@@ -140,6 +172,11 @@ export function mapEstimateDraftRow(row: EstimateDraftRow): EstimateDraft {
     serviceLine: row.service_line,
     targetStart: row.target_start,
     internalNotes: row.internal_notes,
+    packageName: row.package_name,
+    visitIntent: row.visit_intent,
+    scopeSummary: row.scope_summary,
+    scopeDetails: asScopeDetails(row.scope_details),
+    operationsNotes: row.operations_notes,
     stage: row.stage,
     createdBy: row.created_by,
     updatedBy: row.updated_by,
@@ -156,6 +193,11 @@ export function buildEstimateDraftRecord(params: {
   serviceLine: EstimateServiceLine;
   targetStart?: string | null;
   internalNotes?: string | null;
+  packageName?: string | null;
+  visitIntent?: EstimateVisitIntent | null;
+  scopeSummary?: string | null;
+  scopeDetails?: Record<string, string> | null;
+  operationsNotes?: string | null;
   actorId?: string | null;
   stage?: EstimateDraftStage;
   existingDraft?: EstimateDraft | null;
@@ -169,6 +211,11 @@ export function buildEstimateDraftRecord(params: {
     serviceLine,
     targetStart = null,
     internalNotes = null,
+    packageName = null,
+    visitIntent = null,
+    scopeSummary = null,
+    scopeDetails = null,
+    operationsNotes = null,
     actorId = null,
     stage = "scope_pricing",
     existingDraft = null,
@@ -185,6 +232,11 @@ export function buildEstimateDraftRecord(params: {
     serviceLine,
     targetStart: asDateOrNull(targetStart),
     internalNotes: nullableString(internalNotes),
+    packageName: nullableString(packageName) ?? existingDraft?.packageName ?? null,
+    visitIntent: visitIntent ?? existingDraft?.visitIntent ?? null,
+    scopeSummary: nullableString(scopeSummary) ?? existingDraft?.scopeSummary ?? null,
+    scopeDetails: asScopeDetails(scopeDetails ?? existingDraft?.scopeDetails ?? null),
+    operationsNotes: nullableString(operationsNotes) ?? existingDraft?.operationsNotes ?? null,
     stage,
     createdBy: existingDraft?.createdBy ?? actorId,
     updatedBy: actorId,
@@ -204,6 +256,11 @@ export function estimateDraftToRow(draft: EstimateDraft): EstimateDraftRow {
     service_line: draft.serviceLine,
     target_start: draft.targetStart,
     internal_notes: draft.internalNotes,
+    package_name: draft.packageName,
+    visit_intent: draft.visitIntent,
+    scope_summary: draft.scopeSummary,
+    scope_details: asScopeDetails(draft.scopeDetails),
+    operations_notes: draft.operationsNotes,
     stage: draft.stage,
     created_by: draft.createdBy,
     updated_by: draft.updatedBy,

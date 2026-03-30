@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   crmCardStyle,
   crmInputStyle,
@@ -22,6 +23,7 @@ import {
   ESTIMATE_SERVICE_LINE_LABELS,
   type EstimateDraft,
   type EstimateServiceLine,
+  type EstimateVisitIntent,
 } from "@/lib/estimatePersistence";
 
 type EstimateScopeWorkspaceProps = {
@@ -121,16 +123,30 @@ function defaultPackageName(draft: EstimateDraft) {
   return `${ESTIMATE_SERVICE_LINE_LABELS[draft.serviceLine]} Package`;
 }
 
+function normalizedScopeDetails(value: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, entry]) => [key, entry.trim()])
+      .filter(([, entry]) => entry.length > 0)
+  );
+}
+
 export default function EstimateScopeWorkspace({
   draft,
   client,
   property,
 }: EstimateScopeWorkspaceProps) {
-  const [packageName, setPackageName] = useState(defaultPackageName(draft));
-  const [visitIntent, setVisitIntent] = useState(defaultVisitIntent(draft.serviceLine));
-  const [scopeSummary, setScopeSummary] = useState("");
-  const [operationsNotes, setOperationsNotes] = useState("");
-  const [serviceDetails, setServiceDetails] = useState<Record<string, string>>({});
+  const router = useRouter();
+  const [packageName, setPackageName] = useState(draft.packageName ?? defaultPackageName(draft));
+  const [visitIntent, setVisitIntent] = useState<EstimateVisitIntent>(
+    draft.visitIntent ?? defaultVisitIntent(draft.serviceLine)
+  );
+  const [scopeSummary, setScopeSummary] = useState(draft.scopeSummary ?? "");
+  const [operationsNotes, setOperationsNotes] = useState(draft.operationsNotes ?? "");
+  const [serviceDetails, setServiceDetails] = useState<Record<string, string>>(draft.scopeDetails ?? {});
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState(draft.updatedAt);
 
   const scopeConfig = SERVICE_SCOPE_FIELDS[draft.serviceLine];
   const accessFlags = property
@@ -146,6 +162,66 @@ export default function EstimateScopeWorkspace({
   const packageReady = packageName.trim().length > 0;
   const summaryReady = scopeSummary.trim().length > 0;
   const scopeReady = packageReady && summaryReady;
+  const normalizedDetails = normalizedScopeDetails(serviceDetails);
+
+  const savedSnapshot = useMemo(
+    () => ({
+      packageName: draft.packageName ?? defaultPackageName(draft),
+      visitIntent: draft.visitIntent ?? defaultVisitIntent(draft.serviceLine),
+      scopeSummary: draft.scopeSummary ?? "",
+      operationsNotes: draft.operationsNotes ?? "",
+      scopeDetails: normalizedScopeDetails(draft.scopeDetails ?? {}),
+    }),
+    [draft]
+  );
+
+  const isDirty =
+    packageName.trim() !== savedSnapshot.packageName.trim() ||
+    visitIntent !== savedSnapshot.visitIntent ||
+    scopeSummary.trim() !== savedSnapshot.scopeSummary.trim() ||
+    operationsNotes.trim() !== savedSnapshot.operationsNotes.trim() ||
+    JSON.stringify(normalizedDetails) !== JSON.stringify(savedSnapshot.scopeDetails);
+
+  async function handleSaveScopeDraft() {
+    if (saveState === "saving") return;
+
+    setSaveState("saving");
+    setSaveMessage(null);
+
+    try {
+      const response = await fetch(`/api/estimates/${draft.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          packageName,
+          visitIntent,
+          scopeSummary,
+          scopeDetails: normalizedDetails,
+          operationsNotes,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; draft?: { updatedAt?: string } }
+        | null;
+
+      if (!response.ok) {
+        setSaveState("error");
+        setSaveMessage(payload?.error ?? "Unable to save the scope draft.");
+        return;
+      }
+
+      setSaveState("saved");
+      setSaveMessage("Scope draft saved.");
+      setLastSavedAt(payload?.draft?.updatedAt ?? new Date().toISOString());
+      router.refresh();
+    } catch (error) {
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : "Unable to save the scope draft.");
+    }
+  }
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -238,7 +314,13 @@ export default function EstimateScopeWorkspace({
                   <span style={{ fontSize: 13, opacity: 0.78 }}>Service Package Name</span>
                   <input
                     value={packageName}
-                    onChange={(event) => setPackageName(event.target.value)}
+                    onChange={(event) => {
+                      setPackageName(event.target.value);
+                      if (saveState !== "idle") {
+                        setSaveState("idle");
+                        setSaveMessage(null);
+                      }
+                    }}
                     placeholder="Seasonal grounds package"
                     style={crmInputStyle}
                   />
@@ -248,7 +330,13 @@ export default function EstimateScopeWorkspace({
                   <span style={{ fontSize: 13, opacity: 0.78 }}>Visit Intent</span>
                   <select
                     value={visitIntent}
-                    onChange={(event) => setVisitIntent(event.target.value)}
+                    onChange={(event) => {
+                      setVisitIntent(event.target.value as EstimateVisitIntent);
+                      if (saveState !== "idle") {
+                        setSaveState("idle");
+                        setSaveMessage(null);
+                      }
+                    }}
                     style={crmInputStyle}
                   >
                     {VISIT_INTENT_OPTIONS.map((option) => (
@@ -264,7 +352,13 @@ export default function EstimateScopeWorkspace({
                 <span style={{ fontSize: 13, opacity: 0.78 }}>Scope Summary</span>
                 <textarea
                   value={scopeSummary}
-                  onChange={(event) => setScopeSummary(event.target.value)}
+                  onChange={(event) => {
+                    setScopeSummary(event.target.value);
+                    if (saveState !== "idle") {
+                      setSaveState("idle");
+                      setSaveMessage(null);
+                    }
+                  }}
                   placeholder="Summarize the service package, deliverables, and what the field team is committing to perform."
                   style={{ ...crmTextareaStyle, minHeight: 148 }}
                 />
@@ -290,10 +384,17 @@ export default function EstimateScopeWorkspace({
                         <textarea
                           value={serviceDetails[field.id] ?? ""}
                           onChange={(event) =>
-                            setServiceDetails((current) => ({
-                              ...current,
-                              [field.id]: event.target.value,
-                            }))
+                            setServiceDetails((current) => {
+                              if (saveState !== "idle") {
+                                setSaveState("idle");
+                                setSaveMessage(null);
+                              }
+
+                              return {
+                                ...current,
+                                [field.id]: event.target.value,
+                              };
+                            })
                           }
                           placeholder={field.placeholder}
                           style={{ ...crmTextareaStyle, minHeight: 132 }}
@@ -308,7 +409,13 @@ export default function EstimateScopeWorkspace({
                 <span style={{ fontSize: 13, opacity: 0.78 }}>Operational Handoff Notes</span>
                 <textarea
                   value={operationsNotes}
-                  onChange={(event) => setOperationsNotes(event.target.value)}
+                  onChange={(event) => {
+                    setOperationsNotes(event.target.value);
+                    if (saveState !== "idle") {
+                      setSaveState("idle");
+                      setSaveMessage(null);
+                    }
+                  }}
                   placeholder="Crew notes, sequencing concerns, production assumptions, or approval follow-up items."
                   style={{ ...crmTextareaStyle, minHeight: 132 }}
                 />
@@ -334,24 +441,55 @@ export default function EstimateScopeWorkspace({
                   <ProgressLine label="Estimate Header Saved" value="Complete" />
                   <ProgressLine label="Package Defined" value={packageReady ? "Yes" : "Not yet"} />
                   <ProgressLine label="Scope Summary Added" value={summaryReady ? "Yes" : "Not yet"} />
+                  <ProgressLine label="Draft Saved" value={isDirty ? "Not yet" : "Current"} />
                   <ProgressLine label="Pricing Layer" value={scopeReady ? "Ready next" : "Locked"} />
                 </div>
               </article>
 
               <button
                 type="button"
-                disabled
+                onClick={handleSaveScopeDraft}
+                disabled={saveState === "saving" || !isDirty}
                 style={{
                   ...crmPrimaryButtonStyle,
                   width: "100%",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "rgba(255,255,255,0.5)",
-                  cursor: "not-allowed",
+                  border:
+                    saveState === "saving" || !isDirty
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : crmPrimaryButtonStyle.border,
+                  background:
+                    saveState === "saving" || !isDirty
+                      ? "rgba(255,255,255,0.04)"
+                      : crmPrimaryButtonStyle.background,
+                  color:
+                    saveState === "saving" || !isDirty
+                      ? "rgba(255,255,255,0.5)"
+                      : crmPrimaryButtonStyle.color,
+                  cursor: saveState === "saving" || !isDirty ? "not-allowed" : "pointer",
                 }}
               >
-                Save Scope Draft Next
+                {saveState === "saving" ? "Saving Scope Draft..." : "Save Scope Draft"}
               </button>
+
+              <article style={crmSubtleCardStyle}>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>Save Status</div>
+                  <div style={crmMutedTextStyle}>
+                    {saveState === "saved"
+                      ? `Saved. Last updated ${new Date(lastSavedAt).toLocaleString()}.`
+                      : saveState === "saving"
+                        ? "Saving scope draft..."
+                        : isDirty
+                          ? "Unsaved changes ready to save."
+                          : "No new changes to save."}
+                  </div>
+                  {saveMessage ? (
+                    <div style={{ color: saveState === "error" ? "#ffd7d7" : "#d7f4e1", fontSize: 13 }}>
+                      {saveMessage}
+                    </div>
+                  ) : null}
+                </div>
+              </article>
             </div>
           </section>
 
