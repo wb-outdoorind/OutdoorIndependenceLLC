@@ -147,6 +147,11 @@ export default function EstimateScopeWorkspace({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState(draft.updatedAt);
+  const [laborAllowance, setLaborAllowance] = useState("");
+  const [materialAllowance, setMaterialAllowance] = useState("");
+  const [visitCount, setVisitCount] = useState("");
+  const [contractSpan, setContractSpan] = useState("");
+  const [pricingAssumptions, setPricingAssumptions] = useState("");
 
   const scopeConfig = SERVICE_SCOPE_FIELDS[draft.serviceLine];
   const accessFlags = property
@@ -163,6 +168,23 @@ export default function EstimateScopeWorkspace({
   const summaryReady = scopeSummary.trim().length > 0;
   const scopeReady = packageReady && summaryReady;
   const normalizedDetails = normalizedScopeDetails(serviceDetails);
+  const laborAllowanceValue = Number.parseFloat(laborAllowance);
+  const materialAllowanceValue = Number.parseFloat(materialAllowance);
+  const hasLaborAllowance = Number.isFinite(laborAllowanceValue) && laborAllowanceValue >= 0;
+  const hasMaterialAllowance = Number.isFinite(materialAllowanceValue) && materialAllowanceValue >= 0;
+  const hasVisitCount = Number.parseInt(visitCount, 10) > 0;
+  const hasContractSpan = contractSpan.trim().length > 0;
+  const hasPricingAssumptions = pricingAssumptions.trim().length > 0;
+  const pricingStarted =
+    laborAllowance.trim().length > 0 ||
+    materialAllowance.trim().length > 0 ||
+    visitCount.trim().length > 0 ||
+    contractSpan.trim().length > 0 ||
+    pricingAssumptions.trim().length > 0;
+  const pricingReady =
+    scopeReady && hasLaborAllowance && hasMaterialAllowance && hasVisitCount && hasContractSpan;
+  const pricingSubtotal =
+    (hasLaborAllowance ? laborAllowanceValue : 0) + (hasMaterialAllowance ? materialAllowanceValue : 0);
 
   const savedSnapshot = useMemo(
     () => ({
@@ -422,6 +444,96 @@ export default function EstimateScopeWorkspace({
               </label>
             </div>
           </section>
+
+          <section style={crmCardStyle}>
+            <div style={{ display: "grid", gap: 16, opacity: scopeReady ? 1 : 0.72 }}>
+              <div>
+                <h2 style={{ margin: "0 0 6px" }}>Pricing Builder</h2>
+                <div style={crmMutedTextStyle}>
+                  Shape the allowance layer and review assumptions before the full pricing engine is added.
+                  {!scopeReady ? " Complete the scope package and summary first to unlock pricing." : ""}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                }}
+              >
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, opacity: 0.78 }}>Labor Allowance</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={laborAllowance}
+                    onChange={(event) => setLaborAllowance(event.target.value)}
+                    placeholder="0.00"
+                    disabled={!scopeReady}
+                    style={crmInputStyle}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, opacity: 0.78 }}>Material Allowance</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={materialAllowance}
+                    onChange={(event) => setMaterialAllowance(event.target.value)}
+                    placeholder="0.00"
+                    disabled={!scopeReady}
+                    style={crmInputStyle}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, opacity: 0.78 }}>Visit Count</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={visitCount}
+                    onChange={(event) => setVisitCount(event.target.value)}
+                    placeholder="12"
+                    disabled={!scopeReady}
+                    style={crmInputStyle}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 13, opacity: 0.78 }}>Contract Term / Span</span>
+                  <select
+                    value={contractSpan}
+                    onChange={(event) => setContractSpan(event.target.value)}
+                    disabled={!scopeReady}
+                    style={crmInputStyle}
+                  >
+                    <option value="">Select a term</option>
+                    <option value="one_time">One-Time</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="seasonal">Seasonal</option>
+                    <option value="annual">Annual</option>
+                    <option value="per_event">Per Event</option>
+                  </select>
+                </label>
+              </div>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 13, opacity: 0.78 }}>Pricing Assumptions & Exclusions</span>
+                <textarea
+                  value={pricingAssumptions}
+                  onChange={(event) => setPricingAssumptions(event.target.value)}
+                  placeholder="Capture assumptions, exclusions, weather triggers, material carry allowances, or approval dependencies."
+                  disabled={!scopeReady}
+                  style={{ ...crmTextareaStyle, minHeight: 132 }}
+                />
+              </label>
+            </div>
+          </section>
         </div>
 
         <div style={{ display: "grid", gap: 16 }}>
@@ -442,7 +554,8 @@ export default function EstimateScopeWorkspace({
                   <ProgressLine label="Package Defined" value={packageReady ? "Yes" : "Not yet"} />
                   <ProgressLine label="Scope Summary Added" value={summaryReady ? "Yes" : "Not yet"} />
                   <ProgressLine label="Draft Saved" value={isDirty ? "Not yet" : "Current"} />
-                  <ProgressLine label="Pricing Layer" value={scopeReady ? "Ready next" : "Locked"} />
+                  <ProgressLine label="Pricing Layer" value={pricingStarted ? "In progress" : scopeReady ? "Ready next" : "Locked"} />
+                  <ProgressLine label="Review Gate" value={pricingReady ? "Ready next" : "Locked"} />
                 </div>
               </article>
 
@@ -496,25 +609,46 @@ export default function EstimateScopeWorkspace({
           <section style={crmCardStyle}>
             <div style={{ display: "grid", gap: 12 }}>
               <div>
-                <h2 style={{ margin: "0 0 6px" }}>Pricing Placeholder</h2>
+                <h2 style={{ margin: "0 0 6px" }}>Pricing Snapshot</h2>
                 <div style={crmMutedTextStyle}>
-                  Pricing stays intentionally light for now while the scope structure is being approved.
+                  Use the shell inputs to rough in the estimate economics before a full pricing engine exists.
                 </div>
               </div>
 
               <article style={crmSubtleCardStyle}>
                 <div style={{ display: "grid", gap: 10 }}>
-                  <ProgressLine label="Labor" value="Pending" />
-                  <ProgressLine label="Materials" value="Pending" />
-                  <ProgressLine label="Adjustments" value="Pending" />
-                  <ProgressLine label="Estimate Total" value="Pending" />
+                  <ProgressLine label="Labor" value={hasLaborAllowance ? formatCurrency(laborAllowanceValue) : "Pending"} />
+                  <ProgressLine
+                    label="Materials"
+                    value={hasMaterialAllowance ? formatCurrency(materialAllowanceValue) : "Pending"}
+                  />
+                  <ProgressLine label="Visits" value={hasVisitCount ? visitCount : "Pending"} />
+                  <ProgressLine label="Term" value={hasContractSpan ? formatContractSpan(contractSpan) : "Pending"} />
+                  <ProgressLine
+                    label="Draft Total"
+                    value={hasLaborAllowance || hasMaterialAllowance ? formatCurrency(pricingSubtotal) : "Pending"}
+                  />
                 </div>
               </article>
 
               <article style={crmSubtleCardStyle}>
                 <div style={{ ...crmMutedTextStyle, fontSize: 13 }}>Pricing Assumptions</div>
                 <div style={{ marginTop: 6 }}>
-                  Scope comes first. Pricing, totals, and approval-ready summaries will attach once this scope structure is locked in.
+                  {hasPricingAssumptions
+                    ? pricingAssumptions
+                    : "Scope comes first. Capture assumptions here now, then layer in a fuller pricing engine next."}
+                </div>
+              </article>
+
+              <article style={crmSubtleCardStyle}>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>Ready for Review</div>
+                  <div style={crmMutedTextStyle}>
+                    Review unlocks after the scope is defined and the core pricing allowances are shaped.
+                  </div>
+                  <div style={{ marginTop: 2, fontWeight: 800 }}>
+                    {pricingReady ? "Ready for the next slice" : "Still gathering pricing inputs"}
+                  </div>
                 </div>
               </article>
             </div>
@@ -650,4 +784,19 @@ function ProgressLine({ label, value }: { label: string; value: string }) {
       <div style={{ fontWeight: 800 }}>{value}</div>
     </div>
   );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatContractSpan(value: string) {
+  return value
+    .split("_")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
 }
