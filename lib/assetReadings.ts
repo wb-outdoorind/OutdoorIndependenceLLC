@@ -1,5 +1,9 @@
 type SupabaseLikeClient = {
   from: (table: string) => unknown;
+  rpc?: (fn: string, args: Record<string, unknown>) => PromiseLike<{
+    data: unknown;
+    error: { message?: string } | null;
+  }>;
 };
 
 type SyncResult = {
@@ -12,6 +16,21 @@ function normalizeReading(value: number) {
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+function parseNumericResult(value: unknown) {
+  const firstValue = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(firstValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isMissingFunctionError(message?: string | null) {
+  const text = (message || "").toLowerCase();
+  return (
+    text.includes("does not exist") ||
+    text.includes("could not find the function") ||
+    (text.includes("function") && text.includes("not found"))
+  );
+}
+
 export async function syncVehicleMileageForward(params: {
   supabase: SupabaseLikeClient;
   vehicleId: string;
@@ -19,6 +38,22 @@ export async function syncVehicleMileageForward(params: {
 }): Promise<SyncResult> {
   const mileage = normalizeReading(params.mileage);
   if (mileage === null) return { ok: false, message: "Invalid mileage." };
+
+  if (typeof params.supabase.rpc === "function") {
+    const { data, error } = await params.supabase.rpc("sync_vehicle_mileage_forward", {
+      p_vehicle_id: params.vehicleId,
+      p_mileage: mileage,
+    });
+
+    if (!error) {
+      const nextValue = parseNumericResult(data);
+      return { ok: true, nextValue: nextValue ?? mileage };
+    }
+
+    if (!isMissingFunctionError(error.message)) {
+      return { ok: false, message: error.message || "Failed to update vehicle mileage." };
+    }
+  }
 
   const vehiclesTable = params.supabase.from("vehicles") as {
     select: (columns: string) => {
@@ -69,6 +104,22 @@ export async function syncEquipmentHoursForward(params: {
 }): Promise<SyncResult> {
   const hours = normalizeReading(params.hours);
   if (hours === null) return { ok: false, message: "Invalid hours." };
+
+  if (typeof params.supabase.rpc === "function") {
+    const { data, error } = await params.supabase.rpc("sync_equipment_hours_forward", {
+      p_equipment_id: params.equipmentId,
+      p_hours: hours,
+    });
+
+    if (!error) {
+      const nextValue = parseNumericResult(data);
+      return { ok: true, nextValue: nextValue ?? hours };
+    }
+
+    if (!isMissingFunctionError(error.message)) {
+      return { ok: false, message: error.message || "Failed to update equipment hours." };
+    }
+  }
 
   const equipmentTable = params.supabase.from("equipment") as {
     select: (columns: string) => {
