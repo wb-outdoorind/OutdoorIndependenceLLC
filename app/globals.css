@@ -348,7 +348,7 @@ body {
   pointer-events: auto;
   background: rgba(6, 8, 11, 1);
   backdrop-filter: blur(8px);
-  animation: startup-splash-fade 1500ms ease forwards;
+  animation: startup-splash-fade 3000ms ease forwards;
 }
 
 [data-theme="light"] .startup-splash {
@@ -361,7 +361,7 @@ body {
   filter: none;
   mix-blend-mode: normal;
   opacity: 0;
-  animation: startup-logo-fade 1500ms ease forwards;
+  animation: startup-logo-fade 3000ms ease forwards;
 }
 
 @keyframes startup-splash-fade {

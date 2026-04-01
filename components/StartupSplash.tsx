@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-const DEFAULT_DURATION_MS = 1500;
+const DEFAULT_DURATION_MS = 3000;
 const REDUCED_MOTION_DURATION_MS = 260;
 
 export default function StartupSplash() {
