@@ -6,7 +6,7 @@ const config: CapacitorConfig = {
   webDir: ".next",
   server: {
     // Set this to your deployed HTTPS URL before store builds.
-    url: "https://outdoor-independence-llc-app.vercel.app/",
+    url: "https://operations.outdoorind.org/",
     cleartext: false,
   },
 };
