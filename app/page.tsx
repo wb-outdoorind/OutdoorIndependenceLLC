@@ -7,7 +7,6 @@ import RoleViewBanner from "@/components/home/RoleViewBanner";
 import { ROLE_VIEW_COOKIE, resolveEffectiveRole } from "@/lib/roleView";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { canAccessRoute } from "@/lib/routeAccess";
-import { isWilliamPlanningUser } from "@/lib/williamPlanningAccess";
 import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
 import {
   isManagementRole,
@@ -464,8 +463,6 @@ export default async function Home() {
     const isTeammateOpsRole = isTeammateRole(role);
     const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
     const canViewFertilizingOperations = canAccessRoute(role, "fertilizing_operations");
-    const canViewCrm = canAccessRoute(role, "crm");
-    const canViewEstimates = canAccessRoute(role, "estimates") && isWilliamPlanningUser(profile, authData.user);
     const canViewPurchases = canAccessRoute(role, "purchases");
 
     if (canViewFertilizingOperations) {
@@ -479,34 +476,6 @@ export default async function Home() {
         inventoryIndex >= 0
           ? [...tiles.slice(0, inventoryIndex + 1), fertilizingTile, ...tiles.slice(inventoryIndex + 1)]
           : [...tiles, fertilizingTile];
-    }
-
-    if (canViewCrm) {
-      const crmTile = {
-        title: "CRM",
-        href: "/crm",
-        desc: "Client and property backbone for future estimating, jobs, scheduling, and billing",
-      };
-      const fertilizingIndex = tiles.findIndex((tile) => tile.title === "Fertilizing Operations");
-      const insertionIndex = fertilizingIndex >= 0 ? fertilizingIndex + 1 : tiles.findIndex((tile) => tile.title === "Inventory") + 1;
-      tiles =
-        insertionIndex > 0
-          ? [...tiles.slice(0, insertionIndex), crmTile, ...tiles.slice(insertionIndex)]
-          : [...tiles, crmTile];
-    }
-
-    if (canViewEstimates) {
-      const estimatesTile = {
-        title: "Estimates",
-        href: "/estimates",
-        desc: "Build client and property estimate drafts before jobs, scheduling, and invoicing",
-      };
-      const crmIndex = tiles.findIndex((tile) => tile.title === "CRM");
-      const insertionIndex = crmIndex >= 0 ? crmIndex + 1 : tiles.findIndex((tile) => tile.title === "Inventory") + 1;
-      tiles =
-        insertionIndex > 0
-          ? [...tiles.slice(0, insertionIndex), estimatesTile, ...tiles.slice(insertionIndex)]
-          : [...tiles, estimatesTile];
     }
 
     if (canViewPurchases) {

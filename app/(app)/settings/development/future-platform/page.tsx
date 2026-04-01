@@ -35,6 +35,58 @@ export default function FuturePlatformOverviewPage() {
         </div>
       </section>
 
+      <section style={{ ...labCardStyle, display: "grid", gap: 14 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Platform Workbench</h2>
+          <div style={{ ...labMutedTextStyle, marginTop: 8 }}>
+            Open the live William-only platform modules here instead of surfacing them on the main
+            home dashboard.
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 14,
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          }}
+        >
+          <Link
+            href="/crm"
+            style={{
+              ...labSubtleCardStyle,
+              textDecoration: "none",
+              color: "inherit",
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 800 }}>CRM</div>
+            <div style={labMutedTextStyle}>
+              Manage the shared client and property backbone that future estimates, jobs, and
+              billing workflows depend on.
+            </div>
+          </Link>
+
+          <Link
+            href="/estimates"
+            style={{
+              ...labSubtleCardStyle,
+              textDecoration: "none",
+              color: "inherit",
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 800 }}>Estimates</div>
+            <div style={labMutedTextStyle}>
+              Continue the William-only estimate foundation, scope, and pricing workflow without
+              exposing it on the main dashboard.
+            </div>
+          </Link>
+        </div>
+      </section>
+
       <section
         style={{
           display: "grid",
