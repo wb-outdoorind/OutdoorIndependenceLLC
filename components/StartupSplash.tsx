@@ -25,7 +25,7 @@ export default function StartupSplash() {
   return (
     <div className="startup-splash" aria-hidden="true">
       <Image
-        src="/App_Logo_Circle.png"
+        src="/App_Logo_Circle_Transparent.png"
         alt=""
         width={220}
         height={220}
