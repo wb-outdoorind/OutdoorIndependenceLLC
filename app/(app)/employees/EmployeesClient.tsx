@@ -19,6 +19,14 @@ type Teammate = {
   department: string | null;
 };
 
+type ResendInviteResponse = {
+  error?: string;
+  temporaryPassword?: string;
+  inviteEmailSent?: boolean;
+  inviteEmailConfigured?: boolean;
+  inviteEmailError?: string | null;
+};
+
 function buildLegalName(emp: Teammate) {
   const first = (emp.first_name ?? "").trim();
   const middle = (emp.middle_initial ?? "").trim().slice(0, 1).toUpperCase();
@@ -109,9 +117,7 @@ export default function EmployeesClient({ role }: { role: string }) {
   =============================== */
 
   async function resendInvite(emp: Teammate) {
-    const ok = confirm(
-      `Reset login for ${emp.email || "this teammate"} to temporary password Outdoor2026!?`
-    );
+    const ok = confirm(`Reset login for ${emp.email || "this teammate"} with a new random temporary password?`);
     if (!ok) return;
 
     const res = await fetch("/api/employees/resend-invite", {
@@ -121,7 +127,7 @@ export default function EmployeesClient({ role }: { role: string }) {
     });
 
     const contentType = res.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
+    const data: ResendInviteResponse = contentType.includes("application/json")
       ? await res.json()
       : { error: await res.text() };
 
@@ -138,7 +144,18 @@ export default function EmployeesClient({ role }: { role: string }) {
       meta: { email: emp.email ?? null },
     });
 
-    alert("Temporary password reset to Outdoor2026! User must change it on next login.");
+    const tempPassword = (data?.temporaryPassword || "").trim();
+    const emailStatus =
+      data?.inviteEmailSent === true
+        ? "Invite email sent."
+        : data?.inviteEmailConfigured === false
+          ? "Invite email not sent (email service not configured)."
+          : data?.inviteEmailError
+            ? `Invite email failed (${data.inviteEmailError}).`
+            : "Invite email status unknown.";
+    alert(
+      `Temporary password reset to ${tempPassword || "(not returned)"}. ${emailStatus} User must change password on next login.`
+    );
   }
 
   async function auditEditClick(emp: Teammate) {

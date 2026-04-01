@@ -3,9 +3,9 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { writeServerAudit } from "@/lib/auditServer";
+import { generateTemporaryPassword, sendTeammateInviteEmail } from "@/lib/teammateInvites";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
-const TEMP_PASSWORD = "Outdoor2026!";
 const ALLOWED_ROLES = new Set([
   "owner",
   "operations_manager",
@@ -123,13 +123,14 @@ export async function POST(req: Request) {
     }
 
     const admin = createSupabaseAdmin();
+    const temporaryPassword = generateTemporaryPassword(16);
 
     let userId: string | null = null;
 
     const { data: createdUserData, error: createErr } =
       await admin.auth.admin.createUser({
         email,
-        password: TEMP_PASSWORD,
+        password: temporaryPassword,
         email_confirm: true,
       });
 
@@ -164,7 +165,7 @@ export async function POST(req: Request) {
 
       userId = existingUser.id;
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
-        password: TEMP_PASSWORD,
+        password: temporaryPassword,
         email_confirm: true,
       });
       if (updateErr) {
@@ -230,7 +231,25 @@ export async function POST(req: Request) {
       meta: { requesterRole },
     });
 
-    return NextResponse.json({ ok: true, userId, temporaryPassword: TEMP_PASSWORD });
+    const inviteEmail = await sendTeammateInviteEmail({
+      toEmail: email,
+      temporaryPassword,
+      teammateName: full_name,
+      invitedByName:
+        session?.profile?.full_name?.trim() ||
+        session?.profile?.email?.trim() ||
+        session?.user?.email?.trim() ||
+        null,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      userId,
+      temporaryPassword,
+      inviteEmailSent: inviteEmail.sent,
+      inviteEmailConfigured: inviteEmail.configured,
+      inviteEmailError: inviteEmail.error,
+    });
   } catch (err: unknown) {
     console.error("Invite route crashed:", err);
     const message = err instanceof Error ? err.message : "Invite route crashed (unknown error)";

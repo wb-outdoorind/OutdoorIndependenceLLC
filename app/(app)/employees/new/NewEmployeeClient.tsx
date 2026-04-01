@@ -4,7 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-type ApiResponse = { error?: string; temporaryPassword?: string };
+type ApiResponse = {
+  error?: string;
+  temporaryPassword?: string;
+  inviteEmailSent?: boolean;
+  inviteEmailConfigured?: boolean;
+  inviteEmailError?: string | null;
+};
 const DEPARTMENT_OPTIONS = [
   "Mowing",
   "Administration",
@@ -87,8 +93,18 @@ export default function NewEmployeeClient() {
         return;
       }
 
+      const tempPassword = (data?.temporaryPassword || "").trim();
+      const emailStatus =
+        data?.inviteEmailSent === true
+          ? "Invite email sent."
+          : data?.inviteEmailConfigured === false
+            ? "Invite email not sent (email service not configured)."
+            : data?.inviteEmailError
+              ? `Invite email failed (${data.inviteEmailError}).`
+              : "Invite email status unknown.";
+
       setMsg(
-        `Teammate created. Temporary password: ${data?.temporaryPassword ?? "Outdoor2026!"}. User must change it on first login.`
+        `Teammate created. Temporary password: ${tempPassword || "(not returned)"}. ${emailStatus} User must change password on first login.`
       );
       router.push("/employees");
     } catch (err: unknown) {
