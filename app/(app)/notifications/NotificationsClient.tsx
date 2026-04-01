@@ -83,6 +83,19 @@ type NotificationPresetDbRow = {
   created_at: string;
 };
 
+type EmailTemplatePayload = {
+  template: {
+    key: string;
+    subjectTemplate: string;
+    bodyTemplate: string;
+    updatedAt: string | null;
+  };
+  defaults: {
+    subjectTemplate: string;
+    bodyTemplate: string;
+  };
+};
+
 const NOTIFICATION_PRESET_PREFIX = "notifications::";
 const NOTIFICATION_LAST_PRESET_KEY = "oi:notifications:last-preset";
 const NOTIFICATION_DEFAULT_PRESET_KEY = "oi:notifications:default-preset";
@@ -91,6 +104,15 @@ const NOTIFICATION_AUTO_REFRESH_MINUTES_KEY = "oi:notifications:auto-refresh-min
 
 function canTriageSla(role: string | null | undefined) {
   return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
+}
+
+function canManageEmailTemplates(role: string | null | undefined) {
+  return (
+    role === "owner" ||
+    role === "operations_manager" ||
+    role === "sales_manager" ||
+    role === "office_admin"
+  );
 }
 
 function isSlaStatusFilter(value: string | null): value is SlaStatusFilter {
@@ -442,6 +464,14 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [queueEventsEnabled, setQueueEventsEnabled] = useState(true);
+  const [inviteTemplateSubject, setInviteTemplateSubject] = useState("");
+  const [inviteTemplateBody, setInviteTemplateBody] = useState("");
+  const [inviteTemplateDefaultSubject, setInviteTemplateDefaultSubject] = useState("");
+  const [inviteTemplateDefaultBody, setInviteTemplateDefaultBody] = useState("");
+  const [inviteTemplateUpdatedAt, setInviteTemplateUpdatedAt] = useState<string | null>(null);
+  const [inviteTemplateLoading, setInviteTemplateLoading] = useState(false);
+  const [inviteTemplateSaving, setInviteTemplateSaving] = useState(false);
+  const [inviteTemplateMessage, setInviteTemplateMessage] = useState<string | null>(null);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
@@ -460,6 +490,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [digestRuns, setDigestRuns] = useState<DigestRunRow[]>([]);
   const [slaRuns, setSlaRuns] = useState<SlaRunRow[]>([]);
   const canViewMaintenanceCenter = canAccessRoute(role, "maintenance_center");
+  const canManageEmailTemplatesRole = canManageEmailTemplates(role);
   const [slaStatusFilter, setSlaStatusFilter] = useState<SlaStatusFilter>(() => {
     const fromQuery = searchParams.get("sla");
     if (isSlaStatusFilter(fromQuery)) return fromQuery;
@@ -700,6 +731,34 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     };
   }, [currentUserId, defaultNotificationPresetId, hasExplicitFilterQuery]);
 
+  useEffect(() => {
+    if (!canManageEmailTemplatesRole) return;
+    let active = true;
+    setInviteTemplateLoading(true);
+    setInviteTemplateMessage(null);
+    void (async () => {
+      const res = await fetch("/api/notifications/email-templates", { method: "GET" });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<EmailTemplatePayload>;
+      if (!active) return;
+      if (!res.ok || !json?.template || !json?.defaults) {
+        setInviteTemplateMessage(json?.error || "Failed to load invite email template.");
+        setInviteTemplateLoading(false);
+        return;
+      }
+      setInviteTemplateSubject(json.template.subjectTemplate || "");
+      setInviteTemplateBody(json.template.bodyTemplate || "");
+      setInviteTemplateUpdatedAt(json.template.updatedAt ?? null);
+      setInviteTemplateDefaultSubject(json.defaults.subjectTemplate || "");
+      setInviteTemplateDefaultBody(json.defaults.bodyTemplate || "");
+      setInviteTemplateLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [canManageEmailTemplatesRole]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const now = new Date();
@@ -919,6 +978,40 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setSmsEnabled(nextSmsEnabled);
     setQueueEventsEnabled(nextQueueEventsEnabled);
     setPrefsSaving(false);
+  }
+
+  async function saveInviteEmailTemplate() {
+    if (!canManageEmailTemplatesRole) return;
+    setInviteTemplateSaving(true);
+    setInviteTemplateMessage(null);
+    const res = await fetch("/api/notifications/email-templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subjectTemplate: inviteTemplateSubject,
+        bodyTemplate: inviteTemplateBody,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      template?: EmailTemplatePayload["template"];
+    };
+    if (!res.ok || !json.template) {
+      setInviteTemplateMessage(json?.error || "Failed to save invite email template.");
+      setInviteTemplateSaving(false);
+      return;
+    }
+    setInviteTemplateSubject(json.template.subjectTemplate || "");
+    setInviteTemplateBody(json.template.bodyTemplate || "");
+    setInviteTemplateUpdatedAt(json.template.updatedAt ?? null);
+    setInviteTemplateMessage("Invite email template saved.");
+    setInviteTemplateSaving(false);
+  }
+
+  function resetInviteEmailTemplateToDefault() {
+    setInviteTemplateSubject(inviteTemplateDefaultSubject);
+    setInviteTemplateBody(inviteTemplateDefaultBody);
+    setInviteTemplateMessage("Reset to default template values. Click Save Template to apply.");
   }
 
   async function runDigestNow() {
@@ -1300,6 +1393,63 @@ export default function NotificationsClient({ role }: { role: string | null }) {
           </label>
         </div>
       </div>
+
+      {canManageEmailTemplatesRole ? (
+        <div style={{ marginTop: 12, ...cardStyle(), display: "grid", gap: 10 }}>
+          <div style={{ fontWeight: 900 }}>Email Templates</div>
+          <div style={{ opacity: 0.78, fontSize: 13 }}>
+            Configure teammate invite email content. Required tokens in body:{" "}
+            <code>{`{{login_email}}`}</code>, <code>{`{{temporary_password}}`}</code>, <code>{`{{login_url}}`}</code>.
+          </div>
+          {inviteTemplateUpdatedAt ? (
+            <div style={{ opacity: 0.62, fontSize: 12 }}>Last updated: {formatDateTime(inviteTemplateUpdatedAt)}</div>
+          ) : null}
+          {inviteTemplateLoading ? (
+            <div style={{ opacity: 0.72 }}>Loading template...</div>
+          ) : (
+            <>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 12, opacity: 0.78 }}>Invite Email Subject</span>
+                <input
+                  value={inviteTemplateSubject}
+                  onChange={(e) => setInviteTemplateSubject(e.target.value)}
+                  style={inputStyle()}
+                  placeholder="Your Outdoor Independence LLC app login"
+                />
+              </label>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 12, opacity: 0.78 }}>Invite Email Body</span>
+                <textarea
+                  value={inviteTemplateBody}
+                  onChange={(e) => setInviteTemplateBody(e.target.value)}
+                  style={{ ...inputStyle(), minHeight: 180, resize: "vertical" }}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => void saveInviteEmailTemplate()}
+                  style={buttonStyle()}
+                  disabled={inviteTemplateSaving}
+                >
+                  {inviteTemplateSaving ? "Saving..." : "Save Template"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetInviteEmailTemplateToDefault}
+                  style={buttonStyle()}
+                  disabled={inviteTemplateSaving}
+                >
+                  Reset to Default
+                </button>
+              </div>
+              {inviteTemplateMessage ? (
+                <div style={{ opacity: 0.84, fontSize: 13 }}>{inviteTemplateMessage}</div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
 
       {role === "owner" || role === "mechanic" ? (
         <div style={{ marginTop: 12, ...cardStyle() }}>

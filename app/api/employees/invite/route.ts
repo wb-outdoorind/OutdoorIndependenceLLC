@@ -3,7 +3,12 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { writeServerAudit } from "@/lib/auditServer";
-import { generateTemporaryPassword, sendTeammateInviteEmail } from "@/lib/teammateInvites";
+import {
+  defaultTeammateInviteTemplate,
+  generateTemporaryPassword,
+  sendTeammateInviteEmail,
+  TEAMMATE_INVITE_TEMPLATE_KEY,
+} from "@/lib/teammateInvites";
 
 export const runtime = "nodejs"; // ✅ ensure admin SDK runs in Node, not edge
 const ALLOWED_ROLES = new Set([
@@ -124,6 +129,16 @@ export async function POST(req: Request) {
 
     const admin = createSupabaseAdmin();
     const temporaryPassword = generateTemporaryPassword(16);
+    const fallbackTemplate = defaultTeammateInviteTemplate();
+    const { data: inviteTemplateRow } = await admin
+      .from("app_email_templates")
+      .select("subject_template,body_template")
+      .eq("template_key", TEAMMATE_INVITE_TEMPLATE_KEY)
+      .maybeSingle();
+    const inviteTemplate = {
+      subjectTemplate: inviteTemplateRow?.subject_template ?? fallbackTemplate.subjectTemplate,
+      bodyTemplate: inviteTemplateRow?.body_template ?? fallbackTemplate.bodyTemplate,
+    };
 
     let userId: string | null = null;
 
@@ -240,6 +255,7 @@ export async function POST(req: Request) {
         session?.profile?.email?.trim() ||
         session?.user?.email?.trim() ||
         null,
+      template: inviteTemplate,
     });
 
     return NextResponse.json({
