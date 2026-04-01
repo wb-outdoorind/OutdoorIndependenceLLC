@@ -90,7 +90,7 @@ const NOTIFICATION_AUTO_REFRESH_ENABLED_KEY = "oi:notifications:auto-refresh-ena
 const NOTIFICATION_AUTO_REFRESH_MINUTES_KEY = "oi:notifications:auto-refresh-minutes";
 
 function canTriageSla(role: string | null | undefined) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function isSlaStatusFilter(value: string | null): value is SlaStatusFilter {
@@ -550,7 +550,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }
     const shouldLoadRuns = role === "owner" || role === "mechanic";
     const shouldLoadSlaRuns =
-      role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+      role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
     const [notificationsRes, prefsRes, runsRes, slaRunsRes] = await Promise.all([
       fetch("/api/notifications", { method: "GET" }),
       fetch("/api/notifications", {
@@ -1341,7 +1341,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
         </div>
       ) : null}
 
-      {role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic" ? (
+      {role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic" ? (
         <div style={{ marginTop: 12, ...cardStyle() }}>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>Recent SLA Scan Runs</div>
           {slaRuns.length === 0 ? (

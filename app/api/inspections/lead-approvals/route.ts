@@ -188,7 +188,10 @@ export async function POST(req: Request) {
     if (decision !== "approved" && decision !== "rejected") {
       return NextResponse.json({ error: "decision must be approved or rejected" }, { status: 400 });
     }
-    const canOverride = Boolean(role && (role === "owner" || role === "operations_manager" || role === "office_admin"));
+    const canOverride = Boolean(
+      role &&
+        (role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin")
+    );
     if (!leadApproverId || (leadApproverId !== userId && !canOverride)) {
       return NextResponse.json({ error: "Not authorized to decide this sign-off." }, { status: 403 });
     }

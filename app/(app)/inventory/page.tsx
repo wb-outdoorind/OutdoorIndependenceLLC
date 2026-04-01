@@ -23,7 +23,7 @@ type InventoryLocationRow = {
 };
 
 function canManageInventory(role: string | null | undefined) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function cardStyle(): React.CSSProperties {

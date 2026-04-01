@@ -3,6 +3,7 @@ import { normalizeRole, type AppRole } from "@/lib/roleView";
 export const MANAGEMENT_ROLES: readonly AppRole[] = [
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
 ];
 

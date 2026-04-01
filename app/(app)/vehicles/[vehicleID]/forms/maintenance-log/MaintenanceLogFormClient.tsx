@@ -148,15 +148,15 @@ type PartUsed = {
 };
 
 function canManagePartsUsage(role: Role | null) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function canQuickLogOverride(role: Role | null) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function canEditManagedForms(role: Role | null) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function isVehicleType(value: string | null | undefined): value is VehicleType {

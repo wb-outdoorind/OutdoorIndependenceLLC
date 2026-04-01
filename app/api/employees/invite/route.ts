@@ -9,6 +9,7 @@ const TEMP_PASSWORD = "Outdoor2026!";
 const ALLOWED_ROLES = new Set([
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
   "mechanic",
   "teammate",
@@ -25,6 +26,7 @@ const ALLOWED_DEPARTMENTS = new Set([
   "Landscaping",
   "Fertilizing",
   "Maintenance",
+  "Sales",
 ]);
 
 function parseNamePartsFromFullName(fullName: string) {
@@ -70,6 +72,7 @@ export async function POST(req: Request) {
     if (
       requesterRole !== "owner" &&
       requesterRole !== "operations_manager" &&
+      requesterRole !== "sales_manager" &&
       requesterRole !== "office_admin"
     ) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
@@ -110,7 +113,7 @@ export async function POST(req: Request) {
 
     // extra safety
     if (
-      requesterRole === "office_admin" &&
+      (requesterRole === "office_admin" || requesterRole === "sales_manager") &&
       (role === "owner" || role === "operations_manager")
     ) {
       return NextResponse.json(

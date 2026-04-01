@@ -4,6 +4,7 @@ import { canAccessRoute } from "@/lib/routeAccess";
 const roles = [
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
   "mechanic",
   "team_lead_1",
@@ -26,17 +27,17 @@ function expectAllowed(route: Parameters<typeof canAccessRoute>[1], allowed: str
   }
 }
 
-expectAllowed("ops_dashboard", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("maintenance_center", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("fertilizing_operations", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("crm", ["owner", "operations_manager", "office_admin"]);
-expectAllowed("purchases", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("accountability_center", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("vehicles_create", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("equipment_create", ["owner", "operations_manager", "office_admin", "mechanic"]);
-expectAllowed("employees_create", ["owner", "operations_manager", "office_admin"]);
-expectAllowed("lead_approvals", ["owner", "operations_manager", "office_admin", "team_lead_1", "team_lead_2"]);
+expectAllowed("ops_dashboard", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("maintenance_center", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("fertilizing_operations", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("crm", ["owner", "operations_manager", "sales_manager", "office_admin"]);
+expectAllowed("purchases", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("accountability_center", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("vehicles_create", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("equipment_create", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
+expectAllowed("employees_create", ["owner", "operations_manager", "sales_manager", "office_admin"]);
+expectAllowed("lead_approvals", ["owner", "operations_manager", "sales_manager", "office_admin", "team_lead_1", "team_lead_2"]);
 expectAllowed("digest_details", ["owner", "mechanic"]);
-expectAllowed("audit_trail", ["owner", "operations_manager", "office_admin", "mechanic"]);
+expectAllowed("audit_trail", ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
 
 console.log("Route access matrix checks passed.");

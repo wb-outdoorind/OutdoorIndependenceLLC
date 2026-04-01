@@ -46,7 +46,7 @@ export default function EmployeesClient({ role }: { role: string }) {
   const [statusFilter, setStatusFilter] = useState<string>("All");
 
   const canManage =
-    role === "owner" || role === "operations_manager" || role === "office_admin";
+    role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin";
 
   /* ===============================
      Load Teammates
@@ -317,6 +317,7 @@ function prettyRole(role: string) {
   if (r === "owner") return "Owner";
   if (r === "operations_manager") return "Operations Manager";
   if (r === "office_admin") return "Office Admin";
+  if (r === "sales_manager") return "Sales Manager";
   if (r === "mechanic") return "Mechanic";
   if (r === "team_lead_1") return "Team Lead 1";
   if (r === "team_lead_2") return "Team Lead 2";

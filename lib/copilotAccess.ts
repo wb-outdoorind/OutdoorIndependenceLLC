@@ -12,7 +12,7 @@ type CopilotUser = {
   email?: string | null;
 } | null;
 
-const ALLOWED_ROLES = new Set(["owner", "operations_manager", "office_admin", "mechanic"]);
+const ALLOWED_ROLES = new Set(["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
 
 const WILLIAM_EMAILS = new Set([
   "wb@outdoorind.org",
@@ -69,4 +69,3 @@ export function canAccessCopilot(params: {
   if (!isAllowedRole(params.role)) return false;
   return isWilliamIdentity(params.profile, params.user);
 }
-

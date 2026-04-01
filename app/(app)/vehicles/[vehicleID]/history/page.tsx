@@ -183,7 +183,7 @@ function normalizeVehicleType(value: string | null | undefined): VehicleType {
 }
 
 function canManageMaintenance(role: Role | null) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function badgeStyle(type: TimelineType): React.CSSProperties {

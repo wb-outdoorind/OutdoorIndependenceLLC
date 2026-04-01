@@ -30,6 +30,7 @@ export async function POST(req: Request) {
     if (
       requesterRole !== "owner" &&
       requesterRole !== "operations_manager" &&
+      requesterRole !== "sales_manager" &&
       requesterRole !== "office_admin"
     ) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });

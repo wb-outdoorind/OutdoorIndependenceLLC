@@ -4,6 +4,7 @@ export const PURCHASE_DEPARTMENTS = [
   "Landscaping",
   "Fertilizing",
   "Maintenance",
+  "Sales",
 ] as const;
 
 export type PurchaseDepartment = (typeof PURCHASE_DEPARTMENTS)[number];
@@ -54,11 +55,12 @@ export type PurchaseOverallStatus = (typeof PURCHASE_OVERALL_STATUS_OPTIONS)[num
 export const PURCHASE_ATTACHMENT_TYPES = ["quote", "receipt"] as const;
 export type PurchaseAttachmentType = (typeof PURCHASE_ATTACHMENT_TYPES)[number];
 
-export const PURCHASE_MANAGER_ROLES = ["owner", "operations_manager", "office_admin"] as const;
-export const PURCHASE_AP_ROLES = ["owner", "operations_manager", "office_admin"] as const;
+export const PURCHASE_MANAGER_ROLES = ["owner", "operations_manager", "sales_manager", "office_admin"] as const;
+export const PURCHASE_AP_ROLES = ["owner", "operations_manager", "sales_manager", "office_admin"] as const;
 export const PURCHASE_ACCESS_ROLES = [
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
   "mechanic",
 ] as const;

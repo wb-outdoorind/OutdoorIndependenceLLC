@@ -1,6 +1,7 @@
 export type AppRole =
   | "owner"
   | "operations_manager"
+  | "sales_manager"
   | "office_admin"
   | "mechanic"
   | "apprentice"
@@ -17,6 +18,7 @@ export const ROLE_VIEW_CHANGED_EVENT = "oi:role-view-changed";
 const ALL_ROLES: AppRole[] = [
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
   "mechanic",
   "team_lead_1",

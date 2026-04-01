@@ -60,7 +60,7 @@ function isTimelineType(value: string | null): value is TimelineType {
 }
 
 function canManageMaintenance(role: Role | null) {
-  return role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  return role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 }
 
 function parseTitleAndDescription(raw: string | null) {

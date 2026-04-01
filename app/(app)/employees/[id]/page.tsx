@@ -13,7 +13,7 @@ export default async function Page({
   if (!session?.user) redirect("/login");
 
   const role = session?.effectiveRole ?? "employee";
-  if (role !== "owner" && role !== "operations_manager" && role !== "office_admin") {
+  if (role !== "owner" && role !== "operations_manager" && role !== "sales_manager" && role !== "office_admin") {
     redirect("/not-authorized?reason=employees_cannot_edit");
   }
 

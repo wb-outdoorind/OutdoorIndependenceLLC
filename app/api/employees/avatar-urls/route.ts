@@ -11,7 +11,7 @@ import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 const PROFILE_PHOTO_BUCKET = "profile_photos";
-const PRIVILEGED_ROLES = new Set(["owner", "operations_manager", "office_admin", "mechanic"]);
+const PRIVILEGED_ROLES = new Set(["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"]);
 
 function parseIds(input: unknown) {
   if (!Array.isArray(input)) return [] as string[];

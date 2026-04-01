@@ -151,7 +151,7 @@ export default function EquipmentListPage() {
         readRoleViewOverride()
       ) as Role;
       setCanCreateEquipment(
-        role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic"
+        role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic"
       );
     })();
 

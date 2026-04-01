@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { canAccessRoute } from "@/lib/routeAccess";
 import { canCreateMaintenanceLog, canManageEmployees, type Role } from "@/lib/supabase/authz";
 
-const managementOrMechanic: Role[] = ["owner", "operations_manager", "office_admin", "mechanic"];
-const managementOnly: Role[] = ["owner", "operations_manager", "office_admin"];
+const managementOrMechanic: Role[] = ["owner", "operations_manager", "sales_manager", "office_admin", "mechanic"];
+const managementOnly: Role[] = ["owner", "operations_manager", "sales_manager", "office_admin"];
 const restrictedRoles: Role[] = ["apprentice", "employee", "team_lead_1", "team_lead_2", "team_member_1", "team_member_2"];
 
 for (const role of managementOrMechanic) {

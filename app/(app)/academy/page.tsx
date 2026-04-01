@@ -262,7 +262,7 @@ function AcademyPageContent() {
     })();
   }, [assetTypeParam, reloadKey, vehicleId]);
 
-  const canUpload = role === "owner" || role === "operations_manager" || role === "office_admin" || role === "mechanic";
+  const canUpload = role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
 
   function addUploadAssetTag(value: string) {
     const normalized = normalizeTag(value);

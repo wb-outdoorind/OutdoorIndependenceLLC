@@ -11,6 +11,7 @@ const DEPARTMENT_OPTIONS = [
   "Landscaping",
   "Fertilizing",
   "Maintenance",
+  "Sales",
 ] as const;
 type Department = (typeof DEPARTMENT_OPTIONS)[number];
 type AssignableRole =
@@ -22,6 +23,7 @@ type AssignableRole =
   | "mechanic"
   | "office_admin"
   | "operations_manager"
+  | "sales_manager"
   | "owner";
 
 export default function NewEmployeeClient() {
@@ -194,6 +196,7 @@ export default function NewEmployeeClient() {
               <option value="mechanic">Mechanic</option>
               <option value="office_admin">Office Admin</option>
               <option value="operations_manager">Operations Manager</option>
+              <option value="sales_manager">Sales Manager</option>
               <option value="owner">Owner</option>
             </select>
           </Field>
