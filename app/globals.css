@@ -339,6 +339,72 @@ body {
   filter: var(--logo-filter);
 }
 
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgba(6, 8, 11, 0.9);
+  backdrop-filter: blur(8px);
+  animation: startup-splash-fade 980ms ease forwards;
+}
+
+[data-theme="light"] .startup-splash {
+  background: rgba(247, 248, 250, 0.9);
+}
+
+.startup-splash-logo {
+  width: clamp(130px, 22vw, 170px);
+  height: auto;
+  opacity: 0;
+  animation: startup-logo-fade 980ms ease forwards;
+}
+
+@keyframes startup-splash-fade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  76% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes startup-logo-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  24% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  76% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.996);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-splash {
+    animation-duration: 260ms;
+  }
+
+  .startup-splash-logo {
+    animation-duration: 260ms;
+  }
+}
+
 button,
 input,
 select,

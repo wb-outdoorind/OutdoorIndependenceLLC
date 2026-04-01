@@ -6,6 +6,7 @@ import MustChangePasswordGate from "@/components/MustChangePasswordGate";
 import NetworkStatusBanner from "@/components/NetworkStatusBanner";
 import FormDraftManager from "@/components/FormDraftManager";
 import CopilotBubble from "@/components/CopilotBubble";
+import StartupSplash from "@/components/StartupSplash";
 import packageJson from "../package.json";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="app-shell">
           <AppPreferences />
+          <StartupSplash />
           <MustChangePasswordGate />
           <NetworkStatusBanner />
           <BackButton />
