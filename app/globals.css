@@ -368,7 +368,7 @@ body {
   0% {
     opacity: 1;
   }
-  82% {
+  88% {
     opacity: 1;
   }
   100% {
@@ -381,14 +381,18 @@ body {
     opacity: 0;
     transform: translateY(4px) scale(0.985);
   }
-  28% {
+  18% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  34% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-  62% {
+  56% {
     opacity: 1;
   }
-  80% {
+  72% {
     opacity: 0;
     transform: translateY(-2px) scale(0.996);
   }
