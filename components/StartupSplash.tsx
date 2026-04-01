@@ -25,10 +25,10 @@ export default function StartupSplash() {
   return (
     <div className="startup-splash" aria-hidden="true">
       <Image
-        src="/App_Logo_Circle.png"
+        src="/App_Logo_Circle_Transparent.png"
         alt=""
-        width={160}
-        height={160}
+        width={432}
+        height={432}
         priority
         className="startup-splash-logo"
       />

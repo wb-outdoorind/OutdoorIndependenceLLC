@@ -356,7 +356,7 @@ body {
 }
 
 .startup-splash-logo {
-  width: clamp(84px, 11vw, 120px);
+  width: clamp(120px, 16vw, 180px);
   height: auto;
   filter: none;
   opacity: 0;
