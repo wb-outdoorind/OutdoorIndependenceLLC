@@ -358,7 +358,8 @@ body {
 .startup-splash-logo {
   width: clamp(120px, 16vw, 180px);
   height: auto;
-  filter: none;
+  filter: contrast(1.16) brightness(1.08);
+  mix-blend-mode: screen;
   opacity: 0;
   animation: startup-logo-fade 1500ms ease forwards;
 }
