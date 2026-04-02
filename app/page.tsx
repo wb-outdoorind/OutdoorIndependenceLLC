@@ -1553,12 +1553,11 @@ function statusChipStyle(tone: HomeStatusChip["tone"] = "default"): React.CSSPro
 function quickActionStyle(primary: boolean): React.CSSProperties {
   if (primary) {
     return {
-      padding: "10px 14px",
+      padding: "9px 13px",
       borderRadius: 12,
-      border: "1px solid rgba(255,215,120,0.7)",
-      background:
-        "linear-gradient(180deg, rgba(120,96,20,0.55) 0%, rgba(120,96,20,0.34) 100%)",
-      boxShadow: "0 12px 28px rgba(0,0,0,0.32)",
+      border: "1px solid rgba(255, 202, 132, 0.42)",
+      background: "rgba(255, 202, 132, 0.14)",
+      boxShadow: "0 8px 20px rgba(0, 0, 0, 0.22)",
       color: "inherit",
       textDecoration: "none",
       fontWeight: 900,
@@ -1569,10 +1568,10 @@ function quickActionStyle(primary: boolean): React.CSSProperties {
     };
   }
   return {
-    padding: "9px 12px",
+    padding: "8px 12px",
     borderRadius: 10,
-    border: "1px solid rgba(255,215,120,0.38)",
-    background: "rgba(120,96,20,0.2)",
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(255,255,255,0.05)",
     color: "inherit",
     textDecoration: "none",
     fontWeight: 800,
@@ -1625,10 +1624,9 @@ const homePriorityGroupStyle: React.CSSProperties = {
 };
 
 const doThisNowSectionStyle: React.CSSProperties = {
-  border: "1px solid rgba(255,215,120,0.5)",
+  border: "1px solid rgba(255,255,255,0.16)",
   borderRadius: 14,
-  padding: 12,
-  background:
-    "linear-gradient(180deg, rgba(120,96,20,0.34) 0%, rgba(120,96,20,0.2) 100%)",
-  boxShadow: "0 12px 30px rgba(0,0,0,0.3)",
+  padding: "10px 12px",
+  background: "rgba(255,255,255,0.035)",
+  boxShadow: "0 8px 18px rgba(0,0,0,0.2)",
 };
