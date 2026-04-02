@@ -160,6 +160,27 @@ type SlaDailySummary = {
   unresolvedTotal: number;
 };
 
+type HomeStatusChip = {
+  key: string;
+  label: string;
+  value: string;
+  href: string;
+  tone?: "default" | "warning" | "danger" | "success";
+};
+
+type HomeQuickActionCandidate = {
+  key: string;
+  label: string;
+  href: string;
+  priority: number;
+};
+
+type HomeQuickAction = {
+  key: string;
+  label: string;
+  href: string;
+};
+
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -321,6 +342,10 @@ export default async function Home() {
   let slaDailySummary: SlaDailySummary | null = null;
   let activeFieldAssignments: ActiveFieldAssignment[] = [];
   let canExpandDashboard = false;
+  let unreadNotificationCount = 0;
+  let statusChips: HomeStatusChip[] = [];
+  const quickActionCandidates: HomeQuickActionCandidate[] = [];
+  let quickActions: HomeQuickAction[] = [];
 
   try {
     const cookieStore = await cookies();
@@ -339,6 +364,19 @@ export default async function Home() {
       profile = (data as ProfileRow | null) ?? null;
       actualRole = profile?.role ?? null;
       role = resolveEffectiveRole(profile?.role ?? null, requestedRole);
+    }
+
+    if (authData.user?.id) {
+      const { count, error: unreadError } = await supabase
+        .from("user_notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", authData.user.id)
+        .eq("is_read", false);
+      if (unreadError) {
+        console.error("[dashboard] failed to load unread notifications:", unreadError);
+      } else {
+        unreadNotificationCount = count ?? 0;
+      }
     }
 
     const { data: inventoryRows, error: inventoryError } = await supabase
@@ -842,6 +880,78 @@ export default async function Home() {
         };
       }
 
+      statusChips = [
+        {
+          key: "open-queue",
+          label: "Open Queue",
+          value: String(openQueue),
+          href: "/maintenance?section=queue&queueTab=Open",
+          tone: openQueue > 0 ? "warning" : "default",
+        },
+        {
+          key: "urgent-queue",
+          label: "High/Urgent",
+          value: String(urgentQueue),
+          href: "/maintenance?section=queue&queueTab=Open&urgency=High,Urgent",
+          tone: urgentQueue > 0 ? "danger" : "default",
+        },
+        {
+          key: "unread-alerts",
+          label: "Unread Alerts",
+          value: String(unreadNotificationCount),
+          href: "/notifications?unread=1&range=today",
+          tone: unreadNotificationCount > 0 ? "danger" : "default",
+        },
+        {
+          key: "low-stock",
+          label: "Low Stock",
+          value: String(lowStockCount),
+          href: "/inventory?filter=low",
+          tone: lowStockCount > 0 ? "warning" : "default",
+        },
+      ];
+
+      if (urgentQueue > 0) {
+        quickActionCandidates.push({
+          key: "resolve-urgent-queue",
+          label: `Resolve ${urgentQueue} High/Urgent Request${urgentQueue === 1 ? "" : "s"}`,
+          href: "/maintenance?section=queue&queueTab=Open&urgency=High,Urgent",
+          priority: 1,
+        });
+      }
+      if ((slaDailySummary?.unresolvedTotal ?? 0) > 0) {
+        quickActionCandidates.push({
+          key: "triage-sla-alerts",
+          label: `Triage ${slaDailySummary?.unresolvedTotal ?? 0} SLA Alert${(slaDailySummary?.unresolvedTotal ?? 0) === 1 ? "" : "s"}`,
+          href: "/notifications?slaStatus=open",
+          priority: 2,
+        });
+      }
+      if (accountabilityFlags > 0) {
+        quickActionCandidates.push({
+          key: "review-accountability-flags",
+          label: `Review ${accountabilityFlags} Accountability Flag${accountabilityFlags === 1 ? "" : "s"}`,
+          href: "/form-reports?flagged=open",
+          priority: 3,
+        });
+      }
+      if (lowStockCount > 0) {
+        quickActionCandidates.push({
+          key: "resolve-low-stock",
+          label: `Reorder ${lowStockCount} Low-Stock Item${lowStockCount === 1 ? "" : "s"}`,
+          href: "/inventory?filter=low",
+          priority: 4,
+        });
+      }
+      if (unreadNotificationCount > 0) {
+        quickActionCandidates.push({
+          key: "review-unread-alerts",
+          label: `Review ${unreadNotificationCount} Unread Alert${unreadNotificationCount === 1 ? "" : "s"}`,
+          href: "/notifications?unread=1&range=today",
+          priority: 5,
+        });
+      }
+
       dashboard = {
         title: "Maintenance Operations Dashboard",
         subtitle:
@@ -855,13 +965,7 @@ export default async function Home() {
           { label: "Avg Form Score", value: `${avgFormScore}%` },
           { label: "Accountability Flags", value: String(accountabilityFlags) },
         ],
-        actions: [
-          { label: "Open Maintenance Operations Dashboard", href: "/maintenance" },
-          { label: "Create Blank PM", href: "/maintenance/pm/new" },
-          { label: "Open Purchases", href: "/purchases" },
-          { label: "Open Accountability Center", href: "/form-reports" },
-          { label: "Open Inventory Alerts", href: "/inventory/alerts" },
-        ],
+        actions: [],
       };
     } else if (isMechanic) {
       const [vehicleReqRes, equipmentReqRes] = await Promise.all([
@@ -883,6 +987,70 @@ export default async function Home() {
         return urgency === "High" || urgency === "Urgent";
       }).length;
 
+      statusChips = [
+        {
+          key: "open-queue",
+          label: "Open Queue",
+          value: String(openQueue),
+          href: "/maintenance?section=queue&queueTab=Open",
+          tone: openQueue > 0 ? "warning" : "default",
+        },
+        {
+          key: "urgent-queue",
+          label: "High/Urgent",
+          value: String(urgentQueue),
+          href: "/maintenance?section=queue&queueTab=Open&urgency=High,Urgent",
+          tone: urgentQueue > 0 ? "danger" : "default",
+        },
+        {
+          key: "unread-alerts",
+          label: "Unread Alerts",
+          value: String(unreadNotificationCount),
+          href: "/notifications?unread=1&range=today",
+          tone: unreadNotificationCount > 0 ? "danger" : "default",
+        },
+        {
+          key: "low-stock",
+          label: "Low Stock",
+          value: String(lowStockCount),
+          href: "/inventory?filter=low",
+          tone: lowStockCount > 0 ? "warning" : "default",
+        },
+      ];
+
+      if (urgentQueue > 0) {
+        quickActionCandidates.push({
+          key: "mechanic-urgent-queue",
+          label: `Resolve ${urgentQueue} High/Urgent Request${urgentQueue === 1 ? "" : "s"}`,
+          href: "/maintenance?section=queue&queueTab=Open&urgency=High,Urgent",
+          priority: 1,
+        });
+      }
+      if (openQueue > 0) {
+        quickActionCandidates.push({
+          key: "mechanic-open-queue",
+          label: `Process ${openQueue} Open Request${openQueue === 1 ? "" : "s"}`,
+          href: "/maintenance?section=queue&queueTab=Open",
+          priority: 2,
+        });
+      }
+      if (lowStockCount > 0) {
+        quickActionCandidates.push({
+          key: "mechanic-low-stock",
+          label: `Reorder ${lowStockCount} Low-Stock Item${lowStockCount === 1 ? "" : "s"}`,
+          href: "/inventory?filter=low",
+          priority: 3,
+        });
+      }
+      if (unreadNotificationCount > 0) {
+        quickActionCandidates.push({
+          key: "mechanic-unread-alerts",
+          label: `Review ${unreadNotificationCount} Unread Alert${unreadNotificationCount === 1 ? "" : "s"}`,
+          href: "/notifications?unread=1&range=today",
+          priority: 4,
+        });
+      }
+
       dashboard = {
         title: "Mechanic Dashboard",
         subtitle: "Active queue, priority issues, and parts risk.",
@@ -891,15 +1059,70 @@ export default async function Home() {
           { label: "High/Urgent", value: String(urgentQueue) },
           { label: "Low Stock Parts", value: String(lowStockCount) },
         ],
-        actions: [
-          { label: "Open Maintenance Operations Dashboard", href: "/maintenance" },
-          { label: "Create Blank PM", href: "/maintenance/pm/new" },
-          { label: "Open Purchases", href: "/purchases" },
-          { label: "Open Inventory", href: "/inventory" },
-          { label: "Open Notifications", href: "/notifications" },
-        ],
+        actions: [],
       };
     } else if (isTeammateOpsRole) {
+      const todayForms = teammateOpsStats?.formVolume.daily ?? 0;
+      const weekForms = teammateOpsStats?.formVolume.weekly ?? 0;
+      const trackedForms = teammateOpsStats?.formCount ?? 0;
+      const todayAvg = teammateOpsStats?.daily ?? 0;
+
+      statusChips = [
+        {
+          key: "today-forms",
+          label: "Forms Today",
+          value: String(todayForms),
+          href: "/forms?type=pre_post&scope=mine",
+          tone: todayForms > 0 ? "success" : "warning",
+        },
+        {
+          key: "week-forms",
+          label: "Forms This Week",
+          value: String(weekForms),
+          href: "/forms?scope=mine",
+          tone: weekForms > 0 ? "success" : "default",
+        },
+        {
+          key: "unread-alerts",
+          label: "Unread Alerts",
+          value: String(unreadNotificationCount),
+          href: "/notifications?unread=1&range=today",
+          tone: unreadNotificationCount > 0 ? "danger" : "default",
+        },
+        {
+          key: "tracked-forms",
+          label: "Tracked Forms",
+          value: String(trackedForms),
+          href: "/forms?scope=mine",
+          tone: "default",
+        },
+      ];
+
+      if (todayForms === 0) {
+        quickActionCandidates.push({
+          key: "start-today-form",
+          label: "Start Today’s First Form",
+          href: "/scan",
+          priority: 1,
+        });
+      }
+      if (todayAvg < 85 && todayForms > 0) {
+        quickActionCandidates.push({
+          key: "review-today-score",
+          label: `Review Today’s ${todayAvg}% Form Score`,
+          href: "/forms?scope=mine",
+          priority: 2,
+        });
+      }
+      if (unreadNotificationCount > 0) {
+        quickActionCandidates.push({
+          key: "teammate-unread-alerts",
+          label: `Review ${unreadNotificationCount} Unread Alert${unreadNotificationCount === 1 ? "" : "s"}`,
+          href: "/notifications?unread=1&range=today",
+          priority: 3,
+        });
+      }
+
       dashboard = {
         title: "Teammate Operations Dashboard",
         subtitle: "Average form score metrics for apprentice through team lead 2 roles.",
@@ -910,11 +1133,7 @@ export default async function Home() {
           { label: "YTD Avg Score", value: `${teammateOpsStats?.ytd ?? 0}%` },
           { label: "Tracked Forms", value: String(teammateOpsStats?.formCount ?? 0) },
         ],
-        actions: [
-          { label: "Open Scan QR", href: "/scan" },
-          { label: "Open Vehicles", href: "/vehicles" },
-          { label: "Open Notifications", href: "/notifications" },
-        ],
+        actions: [],
       };
     } else {
       const teammateName =
@@ -971,6 +1190,71 @@ export default async function Home() {
       const myOpenEquipmentRequests = equipmentReqs.filter((row) =>
         (row.description ?? "").toLowerCase().includes(`teammate: ${teammateNeedle}`)
       ).length;
+      const myOpenRequests = myOpenVehicleRequests + myOpenEquipmentRequests;
+
+      statusChips = [
+        {
+          key: "pretrip-today",
+          label: "Pre-Trips Today",
+          value: String(preTripToday),
+          href: "/forms?type=pre_post&scope=mine",
+          tone: preTripToday > 0 ? "success" : "warning",
+        },
+        {
+          key: "posttrip-today",
+          label: "Post-Trips Today",
+          value: String(postTripToday),
+          href: "/forms?type=pre_post&scope=mine",
+          tone: postTripToday > 0 ? "success" : "warning",
+        },
+        {
+          key: "issues-reported",
+          label: "Issues Reported",
+          value: String(issueReportsToday),
+          href: "/forms?type=pre_post&scope=mine",
+          tone: issueReportsToday > 0 ? "warning" : "default",
+        },
+        {
+          key: "unread-alerts",
+          label: "Unread Alerts",
+          value: String(unreadNotificationCount),
+          href: "/notifications?unread=1&range=today",
+          tone: unreadNotificationCount > 0 ? "danger" : "default",
+        },
+      ];
+
+      if (preTripToday === 0) {
+        quickActionCandidates.push({
+          key: "complete-pretrip",
+          label: "Complete Pre-Trip Inspection",
+          href: "/scan",
+          priority: 1,
+        });
+      }
+      if (preTripToday > 0 && postTripToday === 0) {
+        quickActionCandidates.push({
+          key: "complete-posttrip",
+          label: "Complete Post-Trip Inspection",
+          href: "/forms?type=post_trip&scope=mine",
+          priority: 2,
+        });
+      }
+      if (myOpenRequests > 0) {
+        quickActionCandidates.push({
+          key: "track-open-requests",
+          label: `Track ${myOpenRequests} Open Request${myOpenRequests === 1 ? "" : "s"}`,
+          href: "/notifications?search=maintenance",
+          priority: 3,
+        });
+      }
+      if (unreadNotificationCount > 0) {
+        quickActionCandidates.push({
+          key: "employee-unread-alerts",
+          label: `Review ${unreadNotificationCount} Unread Alert${unreadNotificationCount === 1 ? "" : "s"}`,
+          href: "/notifications?unread=1&range=today",
+          priority: 4,
+        });
+      }
 
       dashboard = {
         title: "Teammate Dashboard",
@@ -981,16 +1265,21 @@ export default async function Home() {
           { label: "Issues Reported Today", value: String(issueReportsToday) },
           {
             label: "Your Open Requests",
-            value: String(myOpenVehicleRequests + myOpenEquipmentRequests),
+            value: String(myOpenRequests),
           },
         ],
-        actions: [
-          { label: "Scan QR to Start", href: "/scan" },
-          { label: "Open Vehicles", href: "/vehicles" },
-          { label: "Open Notifications", href: "/notifications" },
-        ],
+        actions: [],
       };
     }
+
+    quickActions = quickActionCandidates
+      .sort((a, b) => a.priority - b.priority)
+      .slice(0, 3)
+      .map((candidate) => ({
+        key: candidate.key,
+        label: candidate.label,
+        href: candidate.href,
+      }));
 
     const auditIndex = tiles.findIndex((tile) => tile.href === "/audit");
     if (auditIndex >= 0 && auditIndex !== tiles.length - 1) {
@@ -1000,6 +1289,29 @@ export default async function Home() {
   } catch (error) {
     console.error("[dashboard] unexpected dashboard load error:", error);
   }
+
+  const effectiveRole = role ?? "employee";
+  const primaryTitles = new Set<string>([
+    "Scan QR Code",
+    "Vehicles",
+    "Equipment",
+    "Forms",
+    "Inventory",
+    "Maintenance Operations Dashboard",
+  ]);
+  if (effectiveRole === "owner" || effectiveRole === "operations_manager") {
+    primaryTitles.add("Fertilizing Operations");
+  }
+  const primaryTiles = tiles.filter((tile) => primaryTitles.has(tile.title));
+  const secondaryTiles = tiles.filter((tile) => !primaryTitles.has(tile.title));
+  const tier1Titles = new Set<string>([
+    "Vehicles",
+    "Equipment",
+    "Maintenance Operations Dashboard",
+  ]);
+  const tier1PrimaryTiles = primaryTiles.filter((tile) => tier1Titles.has(tile.title));
+  const tier2PrimaryTiles = primaryTiles.filter((tile) => !tier1Titles.has(tile.title));
+  const orderedPrimaryTiles = [...tier1PrimaryTiles, ...tier2PrimaryTiles];
 
   return (
     <main
@@ -1039,84 +1351,152 @@ export default async function Home() {
       </p>
       <RoleViewBanner actualRole={actualRole} effectiveRole={role} />
 
-      {dashboard ? (
-        <HomeDashboardCard
-          dashboard={dashboard}
-          teammateOpsStats={teammateOpsStats}
-          canExpandDashboard={canExpandDashboard}
-          slaObservability={slaObservability}
-          slaDailySummary={slaDailySummary}
-          activeFieldAssignments={activeFieldAssignments}
-        />
-      ) : null}
+      <section style={homePriorityGroupStyle}>
+        {quickActions.length > 0 ? (
+          <section style={doThisNowSectionStyle}>
+            <div style={{ fontSize: 12, opacity: 0.9, fontWeight: 900, marginBottom: 10 }}>Do This Now</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {quickActions.map((action, index) => (
+                <Link
+                  key={action.key}
+                  href={action.href}
+                  style={quickActionStyle(index === 0)}
+                  className={`home-quick-action${index === 0 ? " primary" : ""}`}
+                >
+                  {index === 0 ? <span aria-hidden="true">⚠</span> : <span aria-hidden="true">•</span>}
+                  <span>{action.label}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 16,
-          marginTop: 22,
-        }}
-      >
-        {tiles.map((t) => (
-          <Link
-            key={t.href}
-            href={t.href}
+        {statusChips.length > 0 ? (
+          <section style={{ marginTop: quickActions.length > 0 ? 10 : 2 }}>
+            <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800, marginBottom: 8 }}>Today Status</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {statusChips.map((chip) => (
+                <Link
+                  key={chip.key}
+                  href={chip.href}
+                  style={statusChipStyle(chip.tone)}
+                  className="home-status-chip"
+                >
+                  <span style={{ fontSize: 11, opacity: 0.8 }} aria-hidden="true">↗</span>
+                  <span style={{ opacity: 0.74, fontWeight: 700 }}>{chip.label}</span>
+                  <span style={{ fontWeight: 900, fontSize: 14 }}>{chip.value}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section style={{ marginTop: 10 }}>
+          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 10 }}>Primary Modules</div>
+          <div
             style={{
-              border: "1px solid var(--surface-border)",
-              borderRadius: 16,
-              padding: 18,
-              textDecoration: "none",
-              color: "inherit",
-              background: "var(--surface)",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-              }}
-            >
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{t.title}</div>
-              {t.title === "Inventory" && lowStockCount > 0 ? (
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    color: "#ffdfdf",
-                    background: "rgba(190,40,40,0.45)",
-                    border: "1px solid rgba(255,120,120,0.6)",
-                    borderRadius: 999,
-                    padding: "3px 9px",
-                  }}
+            {orderedPrimaryTiles.map((t) => {
+              const isTier1 = tier1Titles.has(t.title);
+              return (
+                <Link
+                  key={t.href}
+                  href={t.href}
+                  style={moduleTileStyle(isTier1 ? "tier1" : "tier2")}
+                  className={isTier1 ? "home-module-tier1" : "home-module-tier2"}
                 >
-                  {lowStockCount} Low
-                </div>
-              ) : role === "apprentice" && t.title === "Maintenance Operations Dashboard" ? (
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    borderRadius: 999,
-                    border: "1px solid rgba(255,255,255,0.16)",
-                    background: "rgba(255,255,255,0.08)",
-                    padding: "3px 9px",
-                  }}
-                >
-                  View Only
-                </div>
-              ) : null}
-            </div>
-            <div style={{ opacity: 0.82, marginTop: 8, lineHeight: 1.35 }}>
-              {t.desc}
-            </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: isTier1 ? 18 : 16, fontWeight: 800 }}>{t.title}</div>
+                    {t.title === "Inventory" && lowStockCount > 0 ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          color: "#ffdfdf",
+                          background: "rgba(190,40,40,0.45)",
+                          border: "1px solid rgba(255,120,120,0.6)",
+                          borderRadius: 999,
+                          padding: "3px 9px",
+                        }}
+                      >
+                        {lowStockCount} Low
+                      </div>
+                    ) : role === "apprentice" && t.title === "Maintenance Operations Dashboard" ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          borderRadius: 999,
+                          border: "1px solid rgba(255,255,255,0.16)",
+                          background: "rgba(255,255,255,0.08)",
+                          padding: "3px 9px",
+                        }}
+                      >
+                        View Only
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ opacity: 0.8, marginTop: 7, lineHeight: 1.35, fontSize: isTier1 ? 14 : 13 }}>
+                    {t.desc}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      </section>
 
-            <div style={{ marginTop: 14, opacity: 0.85, fontSize: 13 }}>Open →</div>
-          </Link>
-        ))}
-      </div>
+      {dashboard ? (
+        <section style={{ marginTop: 14, opacity: 0.86 }}>
+          <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 6, opacity: 0.72 }}>Operational Insights</div>
+          <HomeDashboardCard
+            dashboard={dashboard}
+            teammateOpsStats={teammateOpsStats}
+            canExpandDashboard={canExpandDashboard}
+            slaObservability={slaObservability}
+            slaDailySummary={slaDailySummary}
+            activeFieldAssignments={activeFieldAssignments}
+            showActions={false}
+            compact
+          />
+        </section>
+      ) : null}
+
+      {secondaryTiles.length > 0 ? (
+        <section style={{ marginTop: 34 }}>
+          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 10, opacity: 0.9 }}>Secondary Modules</div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {secondaryTiles.map((t) => (
+              <Link
+                key={t.href}
+                href={t.href}
+                style={moduleTileStyle("secondary")}
+                className="home-module-secondary"
+              >
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{t.title}</div>
+                <div style={{ opacity: 0.75, marginTop: 6, lineHeight: 1.35, fontSize: 13 }}>{t.desc}</div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
@@ -1129,4 +1509,126 @@ const headerButtonStyle: React.CSSProperties = {
   color: "inherit",
   textDecoration: "none",
   fontWeight: 800,
+};
+
+function statusChipStyle(tone: HomeStatusChip["tone"] = "default"): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    textDecoration: "none",
+    color: "inherit",
+    borderRadius: 999,
+    border: "1px solid var(--surface-border)",
+    background: "rgba(255,255,255,0.05)",
+    padding: "8px 13px",
+    fontSize: 13,
+    minHeight: 36,
+    lineHeight: 1,
+  };
+  if (tone === "danger") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,120,120,0.45)",
+      background: "rgba(120,20,20,0.35)",
+    };
+  }
+  if (tone === "warning") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,215,120,0.45)",
+      background: "rgba(120,96,20,0.28)",
+    };
+  }
+  if (tone === "success") {
+    return {
+      ...base,
+      border: "1px solid rgba(126,255,167,0.45)",
+      background: "rgba(16,84,41,0.3)",
+    };
+  }
+  return base;
+}
+
+function quickActionStyle(primary: boolean): React.CSSProperties {
+  if (primary) {
+    return {
+      padding: "10px 14px",
+      borderRadius: 12,
+      border: "1px solid rgba(255,215,120,0.7)",
+      background:
+        "linear-gradient(180deg, rgba(120,96,20,0.55) 0%, rgba(120,96,20,0.34) 100%)",
+      boxShadow: "0 12px 28px rgba(0,0,0,0.32)",
+      color: "inherit",
+      textDecoration: "none",
+      fontWeight: 900,
+      fontSize: 14,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+    };
+  }
+  return {
+    padding: "9px 12px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,215,120,0.38)",
+    background: "rgba(120,96,20,0.2)",
+    color: "inherit",
+    textDecoration: "none",
+    fontWeight: 800,
+    fontSize: 13,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+  };
+}
+
+function moduleTileStyle(tier: "tier1" | "tier2" | "secondary"): React.CSSProperties {
+  if (tier === "tier1") {
+    return {
+      border: "1px solid var(--surface-border-strong)",
+      borderRadius: 16,
+      padding: 20,
+      textDecoration: "none",
+      color: "inherit",
+      background: "var(--surface-elevated)",
+      boxShadow: "var(--shadow-soft)",
+    };
+  }
+  if (tier === "tier2") {
+    return {
+      border: "1px solid var(--surface-border)",
+      borderRadius: 15,
+      padding: 15,
+      textDecoration: "none",
+      color: "inherit",
+      background: "var(--surface)",
+    };
+  }
+  return {
+    border: "1px solid var(--surface-border)",
+    borderRadius: 14,
+    padding: 13,
+    textDecoration: "none",
+    color: "inherit",
+    background: "rgba(255,255,255,0.02)",
+    opacity: 0.94,
+  };
+}
+
+const homePriorityGroupStyle: React.CSSProperties = {
+  marginTop: 8,
+  border: "1px solid var(--surface-border)",
+  borderRadius: 18,
+  background: "rgba(255,255,255,0.025)",
+  padding: 14,
+};
+
+const doThisNowSectionStyle: React.CSSProperties = {
+  border: "1px solid rgba(255,215,120,0.5)",
+  borderRadius: 14,
+  padding: 12,
+  background:
+    "linear-gradient(180deg, rgba(120,96,20,0.34) 0%, rgba(120,96,20,0.2) 100%)",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.3)",
 };

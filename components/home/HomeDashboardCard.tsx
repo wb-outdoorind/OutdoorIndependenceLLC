@@ -83,6 +83,8 @@ export default function HomeDashboardCard({
   slaObservability,
   slaDailySummary,
   activeFieldAssignments = [],
+  showActions = true,
+  compact = false,
 }: {
   dashboard: DashboardData;
   teammateOpsStats: TeammateOpsStats | null;
@@ -90,15 +92,26 @@ export default function HomeDashboardCard({
   slaObservability: SlaObservabilityStats | null;
   slaDailySummary: SlaDailySummary | null;
   activeFieldAssignments?: ActiveFieldAssignment[];
+  showActions?: boolean;
+  compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <section style={{ ...dashboardCardStyle, marginTop: 18 }}>
+    <section
+      style={{
+        ...dashboardCardStyle,
+        marginTop: compact ? 8 : 18,
+        padding: compact ? 12 : 16,
+        background: compact ? "rgba(255,255,255,0.015)" : "var(--surface)",
+      }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>{dashboard.title}</div>
-          <div style={{ opacity: 0.75, marginTop: 4 }}>{dashboard.subtitle}</div>
+          <div style={{ fontWeight: 900, fontSize: compact ? 16 : 18 }}>{dashboard.title}</div>
+          <div style={{ opacity: compact ? 0.68 : 0.75, marginTop: 4, fontSize: compact ? 13 : 15 }}>
+            {dashboard.subtitle}
+          </div>
         </div>
         {canExpandDashboard ? (
           <button type="button" onClick={() => setExpanded((prev) => !prev)} style={expandButtonStyle}>
@@ -109,7 +122,7 @@ export default function HomeDashboardCard({
 
       <div
         style={{
-          marginTop: 14,
+          marginTop: compact ? 10 : 14,
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
           gap: 10,
@@ -375,13 +388,15 @@ export default function HomeDashboardCard({
         </div>
       ) : null}
 
-      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {dashboard.actions.map((action) => (
-          <Link key={action.href} href={action.href} style={dashboardActionStyle}>
-            {action.label}
-          </Link>
-        ))}
-      </div>
+      {showActions ? (
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {dashboard.actions.map((action) => (
+            <Link key={action.href} href={action.href} style={dashboardActionStyle}>
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

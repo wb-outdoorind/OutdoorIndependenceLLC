@@ -447,6 +447,47 @@ a:focus-visible {
   margin-bottom: 8px;
 }
 
+.home-status-chip,
+.home-quick-action,
+.home-module-tier1,
+.home-module-tier2,
+.home-module-secondary {
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+
+.home-status-chip:hover {
+  transform: translateY(-1px);
+  border-color: var(--surface-border-strong) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+.home-status-chip:active {
+  transform: translateY(0);
+  opacity: 0.94;
+}
+
+.home-quick-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+}
+
+.home-quick-action.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34);
+}
+
+.home-module-tier1:hover,
+.home-module-tier2:hover,
+.home-module-secondary:hover {
+  transform: translateY(-1px);
+  border-color: var(--surface-border-strong) !important;
+}
+
 @media (max-width: 860px) {
   :root {
     --table-sticky-top: calc(156px + env(safe-area-inset-top));
