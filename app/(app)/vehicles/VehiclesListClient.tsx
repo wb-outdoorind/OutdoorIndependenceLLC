@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { buildVehicleAssetIdPrefix } from "@/lib/assetIdFormat";
+import { MAINTENANCE_ACTIVE_STATUSES } from "@/lib/maintenanceStatus";
+import {
+  ASSET_LIFECYCLE_STATUSES,
+  assetLifecycleStatusTone,
+  normalizeAssetLifecycleStatus,
+  sortLifecycleStatusesForFilter,
+} from "@/lib/assetLifecycleStatus";
 
 /* ======================
    Supabase setup
@@ -27,6 +34,59 @@ type VehicleRecord = {
   mileage: number | null;
   asset: string | null;
 };
+
+type PmStatus = "On Track" | "Due Soon" | "Overdue";
+
+type VehicleOperationalSummary = {
+  pmStatus: PmStatus;
+  openRequests: number;
+};
+
+type VehiclePmEventRow = {
+  vehicle_id: string | null;
+  created_at: string;
+  mileage: number | null;
+  result: unknown;
+};
+
+const DEFAULT_OPERATIONAL_SUMMARY: VehicleOperationalSummary = {
+  pmStatus: "On Track",
+  openRequests: 0,
+};
+
+function normalizeVehicleType(t: string | null): "truck" | "car" | "skidsteer" | "loader" {
+  const x = (t ?? "").trim().toLowerCase();
+  if (x === "truck") return "truck";
+  if (x === "car") return "car";
+  if (x === "skidsteer" || x === "skid steer" || x === "skid_steer") return "skidsteer";
+  if (x === "loader") return "loader";
+  return "truck";
+}
+
+function isHoursBasedVehicleType(t: "truck" | "car" | "skidsteer" | "loader") {
+  return t === "skidsteer" || t === "loader";
+}
+
+function vehiclePmInterval(t: "truck" | "car" | "skidsteer" | "loader") {
+  return isHoursBasedVehicleType(t) ? 200 : 5000;
+}
+
+function vehicleDueSoonWindow(t: "truck" | "car" | "skidsteer" | "loader") {
+  const interval = vehiclePmInterval(t);
+  return isHoursBasedVehicleType(t)
+    ? Math.max(10, Math.round(interval * 0.1))
+    : Math.max(100, Math.round(interval * 0.1));
+}
+
+function isOilChangeFromResult(result: unknown) {
+  const root = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+  const truckPm =
+    root && root.truckPm && typeof root.truckPm === "object"
+      ? (root.truckPm as Record<string, unknown>)
+      : null;
+  const rawOilChange = truckPm?.oilChangePerformed ?? root?.oilChangePerformed;
+  return rawOilChange === true || rawOilChange === "yes";
+}
 
 /* ======================
    Styles
@@ -52,6 +112,106 @@ function inputStyle(): CSSProperties {
   };
 }
 
+function statusBadgeStyle(status: string | null | undefined): CSSProperties {
+  const rawStatus = (normalizeAssetLifecycleStatus(status) ?? "").toLowerCase();
+  const base: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  };
+
+  if (rawStatus === "red tagged") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,72,72,0.62)",
+      background: "rgba(120,16,16,0.46)",
+      color: "rgba(255,230,230,0.98)",
+    };
+  }
+  if (rawStatus === "out of service") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,114,114,0.44)",
+      background: "rgba(132,30,30,0.30)",
+      color: "rgba(255,236,236,0.95)",
+    };
+  }
+  if (rawStatus === "inactive") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,210,0,0.22)",
+      background: "rgba(255,210,0,0.08)",
+      color: "rgba(255,242,191,0.9)",
+    };
+  }
+  if (rawStatus === "retired") {
+    return {
+      ...base,
+      border: "1px solid rgba(180,180,180,0.22)",
+      background: "rgba(180,180,180,0.08)",
+      color: "rgba(220,220,220,0.82)",
+    };
+  }
+
+  const tone = assetLifecycleStatusTone(status);
+  if (tone === "active" || rawStatus === "active") {
+    return {
+      ...base,
+      border: "1px solid rgba(130,255,190,0.18)",
+      background: "rgba(130,255,190,0.06)",
+      color: "rgba(210,255,226,0.84)",
+    };
+  }
+  if (tone === "warning") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,80,80,0.28)",
+      background: "rgba(255,80,80,0.10)",
+    };
+  }
+  if (tone === "danger") {
+    return {
+      ...base,
+      border: "1px solid rgba(255,80,80,0.42)",
+      background: "rgba(120,20,20,0.34)",
+    };
+  }
+  if (tone === "retired") {
+    return {
+      ...base,
+      border: "1px solid rgba(180,180,180,0.30)",
+      background: "rgba(180,180,180,0.10)",
+    };
+  }
+  return base;
+}
+
+function pmStateTextStyle(pmStatus: PmStatus): CSSProperties {
+  if (pmStatus === "Overdue") return { color: "#ff8a8a" };
+  if (pmStatus === "Due Soon") return { color: "#ffd88a" };
+  return { color: "rgba(255,255,255,0.75)" };
+}
+
+function compactLine(parts: Array<string | number | null | undefined>) {
+  const compact = parts
+    .map((part) => (part ?? "").toString().trim())
+    .filter((part) => part.length > 0);
+  return compact.length ? compact.join(" · ") : "—";
+}
+
+function lifecycleSortPriority(status: string | null | undefined) {
+  const normalized = normalizeAssetLifecycleStatus(status);
+  if (normalized === "Red Tagged") return 1;
+  if (normalized === "Out of Service") return 2;
+  return 99;
+}
+
 /* ======================
    Page
 ====================== */
@@ -63,6 +223,11 @@ export default function VehiclesListClient({
 }) {
   const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [hoveredVehicleId, setHoveredVehicleId] = useState<string | null>(null);
+  const [operationalByVehicleId, setOperationalByVehicleId] = useState<
+    Record<string, VehicleOperationalSummary>
+  >({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -165,11 +330,107 @@ export default function VehiclesListClient({
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      if (vehicles.length === 0) {
+        if (alive) setOperationalByVehicleId({});
+        return;
+      }
+
+      const supabase = createSupabaseBrowser();
+      const vehicleIds = vehicles.map((v) => v.id);
+
+      const [openRequestsRes, pmEventsRes] = await Promise.all([
+        supabase
+          .from("maintenance_requests")
+          .select("vehicle_id,status")
+          .in("vehicle_id", vehicleIds)
+          .in("status", MAINTENANCE_ACTIVE_STATUSES),
+        supabase
+          .from("vehicle_pm_events")
+          .select("vehicle_id,created_at,mileage,result")
+          .in("vehicle_id", vehicleIds)
+          .order("created_at", { ascending: false })
+          .limit(5000),
+      ]);
+
+      if (!alive) return;
+
+      const openRequestsByVehicleId: Record<string, number> = {};
+      if (!openRequestsRes.error && Array.isArray(openRequestsRes.data)) {
+        for (const row of openRequestsRes.data as Array<{ vehicle_id: string | null }>) {
+          const vehicleId = row.vehicle_id ?? "";
+          if (!vehicleId) continue;
+          openRequestsByVehicleId[vehicleId] = (openRequestsByVehicleId[vehicleId] ?? 0) + 1;
+        }
+      }
+
+      const lastOilChangeMileageByVehicleId: Record<string, number> = {};
+      if (!pmEventsRes.error && Array.isArray(pmEventsRes.data)) {
+        for (const row of pmEventsRes.data as VehiclePmEventRow[]) {
+          const vehicleId = row.vehicle_id ?? "";
+          if (!vehicleId || vehicleId in lastOilChangeMileageByVehicleId) continue;
+          const mileage = Number(row.mileage);
+          if (!Number.isFinite(mileage)) continue;
+          if (!isOilChangeFromResult(row.result)) continue;
+          lastOilChangeMileageByVehicleId[vehicleId] = mileage;
+        }
+      }
+
+      const summaryByVehicleId: Record<string, VehicleOperationalSummary> = {};
+      for (const vehicle of vehicles) {
+        const normalizedType = normalizeVehicleType(vehicle.type ?? null);
+        const interval = vehiclePmInterval(normalizedType);
+        const dueSoonWindow = vehicleDueSoonWindow(normalizedType);
+        const currentReading = Number(vehicle.mileage);
+        const hasReading = Number.isFinite(currentReading) && currentReading >= 0;
+        const lastPmReading = lastOilChangeMileageByVehicleId[vehicle.id] ?? 0;
+
+        let pmStatus: PmStatus = "On Track";
+        if (hasReading) {
+          const dueAt = lastPmReading + interval;
+          const delta = dueAt - currentReading;
+          if (currentReading >= dueAt) pmStatus = "Overdue";
+          else if (delta <= dueSoonWindow) pmStatus = "Due Soon";
+        }
+
+        summaryByVehicleId[vehicle.id] = {
+          pmStatus,
+          openRequests: openRequestsByVehicleId[vehicle.id] ?? 0,
+        };
+      }
+
+      setOperationalByVehicleId(summaryByVehicleId);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [vehicles]);
+
+  const statuses = useMemo(() => {
+    const set = new Set<string>(ASSET_LIFECYCLE_STATUSES);
+    let hasUnknown = false;
+    for (const row of vehicles) {
+      const normalized = normalizeAssetLifecycleStatus(row.status);
+      if (normalized) set.add(normalized);
+      else hasUnknown = true;
+    }
+    const ordered = sortLifecycleStatusesForFilter(Array.from(set));
+    if (hasUnknown && !ordered.includes("Unknown")) ordered.push("Unknown");
+    return ["All", ...ordered];
+  }, [vehicles]);
+
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
-    if (!query) return vehicles;
+    const result = vehicles.filter((v) => {
+      const normalizedStatus = normalizeAssetLifecycleStatus(v.status);
+      const displayStatus = normalizedStatus ?? "Unknown";
+      if (statusFilter !== "All" && displayStatus !== statusFilter) return false;
+      if (!query) return true;
 
-    return vehicles.filter((v) => {
       const hay = [
         v.id,
         v.name,
@@ -185,7 +446,42 @@ export default function VehiclesListClient({
 
       return hay.includes(query);
     });
-  }, [vehicles, q]);
+
+    result.sort((a, b) => {
+      const aOperational = operationalByVehicleId[a.id] ?? DEFAULT_OPERATIONAL_SUMMARY;
+      const bOperational = operationalByVehicleId[b.id] ?? DEFAULT_OPERATIONAL_SUMMARY;
+
+      const aLifecyclePriority = lifecycleSortPriority(a.status);
+      const bLifecyclePriority = lifecycleSortPriority(b.status);
+      if (aLifecyclePriority !== bLifecyclePriority) return aLifecyclePriority - bLifecyclePriority;
+
+      const aBucket =
+        aOperational.pmStatus === "Overdue"
+          ? 3
+          : aOperational.openRequests > 0
+            ? 4
+            : aOperational.pmStatus === "Due Soon"
+              ? 5
+              : 6;
+      const bBucket =
+        bOperational.pmStatus === "Overdue"
+          ? 3
+          : bOperational.openRequests > 0
+            ? 4
+            : bOperational.pmStatus === "Due Soon"
+              ? 5
+              : 6;
+      if (aBucket !== bBucket) return aBucket - bBucket;
+
+      if (aOperational.openRequests !== bOperational.openRequests) {
+        return bOperational.openRequests - aOperational.openRequests;
+      }
+
+      return (a.name ?? "").localeCompare(b.name ?? "", undefined, { sensitivity: "base" });
+    });
+
+    return result;
+  }, [operationalByVehicleId, q, statusFilter, vehicles]);
 
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
@@ -260,6 +556,17 @@ export default function VehiclesListClient({
             placeholder="Search by ID, name, make, model, year..."
             style={{ ...inputStyle(), width: 320, maxWidth: "100%" }}
           />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ ...inputStyle(), width: 180 }}
+          >
+            {statuses.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -308,61 +615,114 @@ export default function VehiclesListClient({
                     href={`/vehicles/${encodeURIComponent(v.id)}`}
                     style={{ textDecoration: "none", color: "inherit" }}
                   >
+                    {(() => {
+                      const operational = operationalByVehicleId[v.id] ?? DEFAULT_OPERATIONAL_SUMMARY;
+                      const lifecycleLabel = normalizeAssetLifecycleStatus(v.status) ?? "Unknown";
+                      const isHovered = hoveredVehicleId === v.id;
+                      const isOverdue = operational.pmStatus === "Overdue";
+                      return (
                     <div
+                      onMouseEnter={() => setHoveredVehicleId(v.id)}
+                      onMouseLeave={() => setHoveredVehicleId((curr) => (curr === v.id ? null : curr))}
                       style={{
-                        border: "1px solid rgba(255,255,255,0.12)",
+                        border: isOverdue
+                          ? isHovered
+                            ? "1px solid rgba(255,120,120,0.46)"
+                            : "1px solid rgba(255,96,96,0.32)"
+                          : isHovered
+                            ? "1px solid rgba(255,255,255,0.24)"
+                            : "1px solid rgba(255,255,255,0.12)",
                         borderRadius: 14,
-                        padding: 12,
-                        background: "rgba(255,255,255,0.02)",
+                        padding: 10,
+                        background: isOverdue
+                          ? isHovered
+                            ? "rgba(76,20,20,0.20)"
+                            : "rgba(58,16,16,0.16)"
+                          : isHovered
+                            ? "rgba(255,255,255,0.032)"
+                            : "rgba(255,255,255,0.02)",
+                        boxShadow: isHovered ? "0 9px 22px rgba(0,0,0,0.30)" : "none",
+                        transform: isHovered ? "translateY(-1px)" : "translateY(0)",
+                        transition:
+                          "transform 0.15s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease",
+                        cursor: "pointer",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
-                          gap: 12,
+                          gap: 10,
                           flexWrap: "wrap",
+                          alignItems: "flex-start",
                         }}
                       >
                         <div>
-                          <div style={{ fontWeight: 900, fontSize: 16 }}>
-                            {displayAssetIdByVehicleId[v.id] ?? v.id} — {v.name}
+                          <div style={{ fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>
+                            {v.name}
                           </div>
                           <div
                             style={{
                               marginTop: 4,
-                              opacity: 0.8,
-                              fontSize: 13,
+                              opacity: 0.62,
+                              fontSize: 12,
                             }}
                           >
-                            {(v.make ?? "—")} • {(v.model ?? "—")} •{" "}
-                            {typeof v.year === "number" ? v.year : "—"}
-                            {v.type ? (
-                              <>
-                                {" "}
-                                • <span style={{ opacity: 0.9 }}>{v.type}</span>
-                              </>
-                            ) : null}
+                            <span style={{ opacity: 0.7 }}>Asset ID:</span>{" "}
+                            <strong style={{ opacity: 0.9 }}>{displayAssetIdByVehicleId[v.id] ?? v.id}</strong>
                           </div>
-                          <div style={{ marginTop: 6, opacity: 0.78, fontSize: 13 }}>
-                            Current mileage:{" "}
-                            <strong>
+                          <div style={{ marginTop: 5, opacity: 0.66, fontSize: 12.5, fontWeight: 500 }}>
+                            {compactLine([v.make, v.model, typeof v.year === "number" ? v.year : null, v.type])}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 5,
+                              fontSize: 12,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span style={{ color: "rgba(255,255,255,0.58)", fontWeight: 600 }}>
                               {typeof v.mileage === "number" ? `${v.mileage.toLocaleString()} mi` : "—"}
-                            </strong>
+                            </span>
+                            <span style={{ color: "rgba(255,255,255,0.32)" }}>·</span>
+                            <span style={{ ...pmStateTextStyle(operational.pmStatus), fontWeight: 900 }}>
+                              PM {operational.pmStatus}
+                            </span>
+                            <span style={{ color: "rgba(255,255,255,0.32)" }}>·</span>
+                            <span style={{ color: "rgba(255,255,255,0.78)", fontWeight: 700 }}>
+                              <span
+                                style={{
+                                  color:
+                                    operational.openRequests > 0
+                                      ? "rgba(255,255,255,0.96)"
+                                      : "rgba(255,255,255,0.74)",
+                                  fontWeight: 900,
+                                }}
+                              >
+                                {operational.openRequests}
+                              </span>{" "}
+                              Open Request{operational.openRequests === 1 ? "" : "s"}
+                            </span>
                           </div>
                         </div>
 
-                        <div
-                          style={{
-                            opacity: 0.75,
-                            fontSize: 13,
-                            alignSelf: "center",
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                            gap: 0,
                           }}
-                        >
-                          View →
-                        </div>
+                    >
+                          <span style={statusBadgeStyle(lifecycleLabel)}>{lifecycleLabel}</span>
+                    </div>
                       </div>
                     </div>
+                      );
+                    })()}
                   </Link>
                 ))}
               </div>
