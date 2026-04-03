@@ -1447,7 +1447,18 @@ export default async function Home() {
                       </div>
                     ) : null}
                   </div>
-                  <div style={{ opacity: 0.8, marginTop: 7, lineHeight: 1.35, fontSize: isTier1 ? 14 : 13 }}>
+                  <div
+                    style={{
+                      opacity: 0.8,
+                      marginTop: 7,
+                      lineHeight: 1.35,
+                      fontSize: isTier1 ? 14 : 13,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
                     {t.desc}
                   </div>
                 </Link>
@@ -1458,7 +1469,7 @@ export default async function Home() {
       </section>
 
       {dashboard ? (
-        <section style={{ marginTop: 14, opacity: 0.86 }}>
+        <section style={{ marginTop: 10, opacity: 0.86 }}>
           <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 6, opacity: 0.72 }}>Operational Insights</div>
           <HomeDashboardCard
             dashboard={dashboard}
@@ -1475,26 +1486,50 @@ export default async function Home() {
 
       {secondaryTiles.length > 0 ? (
         <section style={{ marginTop: 34 }}>
-          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 10, opacity: 0.9 }}>Secondary Modules</div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {secondaryTiles.map((t) => (
-              <Link
-                key={t.href}
-                href={t.href}
-                style={moduleTileStyle("secondary")}
-                className="home-module-secondary"
-              >
-                <div style={{ fontSize: 16, fontWeight: 800 }}>{t.title}</div>
-                <div style={{ opacity: 0.75, marginTop: 6, lineHeight: 1.35, fontSize: 13 }}>{t.desc}</div>
-              </Link>
-            ))}
-          </div>
+          <details style={secondaryModulesDetailsStyle} className="home-secondary-details">
+            <summary style={secondaryModulesSummaryStyle} className="home-secondary-summary">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 900, fontSize: 14, opacity: 0.95 }}>More Tools</span>
+                <span style={{ fontSize: 12, opacity: 0.72 }}>(Secondary Modules)</span>
+              </span>
+              <span className="home-secondary-chevron" aria-hidden="true" style={{ fontSize: 12, opacity: 0.7 }}>
+                ▼
+              </span>
+            </summary>
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {secondaryTiles.map((t) => (
+                <Link
+                  key={t.href}
+                  href={t.href}
+                  style={moduleTileStyle("secondary")}
+                  className="home-module-secondary"
+                >
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>{t.title}</div>
+                  <div
+                    style={{
+                      opacity: 0.75,
+                      marginTop: 6,
+                      lineHeight: 1.35,
+                      fontSize: 13,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {t.desc}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </details>
         </section>
       ) : null}
     </main>
@@ -1588,6 +1623,10 @@ function moduleTileStyle(tier: "tier1" | "tier2" | "secondary"): React.CSSProper
       border: "1px solid var(--surface-border-strong)",
       borderRadius: 16,
       padding: 20,
+      minHeight: 148,
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
       textDecoration: "none",
       color: "inherit",
       background: "var(--surface-elevated)",
@@ -1599,6 +1638,10 @@ function moduleTileStyle(tier: "tier1" | "tier2" | "secondary"): React.CSSProper
       border: "1px solid var(--surface-border)",
       borderRadius: 15,
       padding: 15,
+      minHeight: 148,
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
       textDecoration: "none",
       color: "inherit",
       background: "var(--surface)",
@@ -1608,6 +1651,10 @@ function moduleTileStyle(tier: "tier1" | "tier2" | "secondary"): React.CSSProper
     border: "1px solid var(--surface-border)",
     borderRadius: 14,
     padding: 13,
+    minHeight: 148,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
     textDecoration: "none",
     color: "inherit",
     background: "rgba(255,255,255,0.02)",
@@ -1629,4 +1676,21 @@ const doThisNowSectionStyle: React.CSSProperties = {
   padding: "10px 12px",
   background: "rgba(255,255,255,0.035)",
   boxShadow: "0 8px 18px rgba(0,0,0,0.2)",
+};
+
+const secondaryModulesDetailsStyle: React.CSSProperties = {
+  border: "1px solid var(--surface-border)",
+  borderRadius: 14,
+  background: "rgba(255,255,255,0.02)",
+  padding: 10,
+};
+
+const secondaryModulesSummaryStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  cursor: "pointer",
+  listStyle: "none",
+  padding: "2px 4px",
 };

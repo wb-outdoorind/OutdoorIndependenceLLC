@@ -8,7 +8,7 @@ import { buildNextVehicleAssetId, buildVehicleAssetIdPrefix, nextAssetIdForPrefi
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 type VehicleType = "truck" | "car" | "skidsteer" | "loader";
-type VehicleStatus = "Active" | "Inactive" | "Out of Service" | "Retired";
+type VehicleStatus = "Active" | "Inactive" | "Out of Service" | "Retired" | "Red Tagged";
 type Role = AppRole;
 
 export default function NewVehicleClient() {
@@ -168,6 +168,7 @@ export default function NewVehicleClient() {
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
                 <option value="Out of Service">Out of Service</option>
+                <option value="Red Tagged">Red Tagged</option>
                 <option value="Retired">Retired</option>
               </select>
             </Field>

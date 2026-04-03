@@ -488,6 +488,14 @@ a:focus-visible {
   border-color: var(--surface-border-strong) !important;
 }
 
+.home-secondary-summary::-webkit-details-marker {
+  display: none;
+}
+
+.home-secondary-details[open] .home-secondary-chevron {
+  transform: rotate(180deg);
+}
+
 @media (max-width: 860px) {
   :root {
     --table-sticky-top: calc(156px + env(safe-area-inset-top));

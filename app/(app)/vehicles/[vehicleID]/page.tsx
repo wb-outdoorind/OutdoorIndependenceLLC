@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
@@ -9,6 +9,8 @@ import { MAINTENANCE_ACTIVE_STATUSES, isMaintenanceClosedStatus } from "@/lib/ma
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 import VehicleDocumentsSection from "@/components/assets/VehicleDocumentsSection";
+import AssetCommandHeader from "@/components/assets/AssetCommandHeader";
+import { assetLifecycleStatusTone } from "@/lib/assetLifecycleStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 
 /* =========================
@@ -256,22 +258,6 @@ function cardStyle(): React.CSSProperties {
   };
 }
 
-function pillStyle(): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "8px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.04)",
-    fontSize: 13,
-    fontWeight: 800,
-    textDecoration: "none",
-    color: "inherit",
-  };
-}
-
 function actionBtnStyle(): React.CSSProperties {
   return {
     textDecoration: "none",
@@ -328,9 +314,19 @@ const trendPillStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
+const sectionSummaryStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  cursor: "pointer",
+  listStyle: "none",
+};
+
 const UNIVERSAL_DOT_NUMBER = "3834142";
 
 function badgeStyle(label: string): React.CSSProperties {
+  const tone = assetLifecycleStatusTone(label);
   const base: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -343,23 +339,35 @@ function badgeStyle(label: string): React.CSSProperties {
     whiteSpace: "nowrap",
   };
 
-  if (label === "Active")
+  if (tone === "active")
     return {
       ...base,
       border: "1px solid rgba(0,255,120,0.22)",
       background: "rgba(0,255,120,0.08)",
     };
-  if (label === "Inactive")
+  if (tone === "inactive")
     return {
       ...base,
       border: "1px solid rgba(255,210,0,0.26)",
       background: "rgba(255,210,0,0.10)",
     };
-  if (label === "Retired" || label === "Out of Service")
+  if (tone === "warning")
     return {
       ...base,
       border: "1px solid rgba(255,80,80,0.28)",
       background: "rgba(255,80,80,0.10)",
+    };
+  if (tone === "danger")
+    return {
+      ...base,
+      border: "1px solid rgba(255,80,80,0.42)",
+      background: "rgba(120,20,20,0.34)",
+    };
+  if (tone === "retired")
+    return {
+      ...base,
+      border: "1px solid rgba(180,180,180,0.30)",
+      background: "rgba(180,180,180,0.10)",
     };
 
   return base;
@@ -412,7 +420,9 @@ export default function VehicleDetailPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [userRole, setUserRole] = useState<Role>("employee");
+  const detailsSectionRef = useRef<HTMLDetailsElement | null>(null);
   useEffect(() => {
     let alive = true;
 
@@ -789,6 +799,8 @@ export default function VehicleDetailPage() {
   // ✅ IMPORTANT: stable id for links (never empty)
   const stableVehicleId = vehicle?.id ?? vehicleIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableVehicleId);
+  const formsWorkspaceHref = `/forms?assetType=vehicle&assetId=${encodeURIComponent(stableVehicleId)}`;
+  const formsCreateHref = `${formsWorkspaceHref}&mode=create`;
   const canManageVehicleMaintenance = hasRole(userRole, [
     "owner",
     "operations_manager",
@@ -805,6 +817,73 @@ export default function VehicleDetailPage() {
   const canViewScoreTrends = canViewMechanicScore;
   const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canEditVehicle;
+  const urgentRequestCount = useMemo(() => {
+    return requestPreviewRows.filter((row) => {
+      const urgency = (row.urgency ?? "").trim();
+      const status = (row.status ?? "").trim();
+      return !isMaintenanceClosedStatus(status) && (urgency === "High" || urgency === "Urgent");
+    }).length;
+  }, [requestPreviewRows]);
+  const headerExceptions = useMemo(() => {
+    const items: Array<{ label: string; tone?: "default" | "warning" | "danger" }> = [];
+    const status = (vehicle?.status ?? "").trim();
+    if (status === "Out of Service" || status === "Red Tagged") {
+      items.push({ label: status, tone: "danger" });
+    }
+    if (vehicleHealthSummary.pmStatus === "Overdue") {
+      items.push({ label: "PM Overdue", tone: "danger" });
+    } else if (vehicleHealthSummary.pmStatus === "Due Soon") {
+      items.push({ label: "PM Due Soon", tone: "warning" });
+    }
+    if (urgentRequestCount > 0) {
+      items.push({
+        label: `${urgentRequestCount} High/Urgent Request${urgentRequestCount === 1 ? "" : "s"}`,
+        tone: "danger",
+      });
+    } else if (vehicleHealthSummary.openRequests > 0) {
+      items.push({
+        label: `${vehicleHealthSummary.openRequests} Open Request${vehicleHealthSummary.openRequests === 1 ? "" : "s"}`,
+        tone: "warning",
+      });
+    }
+    return items.slice(0, 4);
+  }, [urgentRequestCount, vehicle?.status, vehicleHealthSummary.openRequests, vehicleHealthSummary.pmStatus]);
+  const headerActions = useMemo(() => {
+    const items = [
+      { label: "Pre-Trip", href: `/vehicles/${routeIdForLinks}/forms/pre-trip` },
+      { label: "Post-Trip", href: `/vehicles/${routeIdForLinks}/forms/post-trip` },
+    ];
+    if (canCreateMaintenanceRequest) {
+      items.push({ label: "Maintenance Request", href: `/vehicles/${routeIdForLinks}/forms/maintenance-request` });
+    }
+    if (canCreateMaintenanceLog) {
+      items.push({ label: "Maintenance Log", href: `/vehicles/${routeIdForLinks}/forms/maintenance-log` });
+    }
+    if (canShowVehiclePmButton) {
+      items.push({ label: "Preventative Maintenance", href: `/vehicles/${routeIdForLinks}/forms/preventative-maintenance` });
+    }
+    return items.slice(0, 5);
+  }, [canCreateMaintenanceLog, canCreateMaintenanceRequest, canShowVehiclePmButton, routeIdForLinks]);
+  const headerMeters = useMemo(
+    () => [
+      {
+        label: readingLabel,
+        value:
+          typeof currentMileage === "number"
+            ? `${currentMileage.toLocaleString()} ${readingUnit}`
+            : "—",
+      },
+      {
+        label: "PM State",
+        value: vehicleHealthSummary.pmStatus,
+      },
+      {
+        label: "Open Requests",
+        value: String(vehicleHealthSummary.openRequests),
+      },
+    ],
+    [currentMileage, readingLabel, readingUnit, vehicleHealthSummary.openRequests, vehicleHealthSummary.pmStatus]
+  );
 
   const scoreTrend = useMemo(() => {
     const chronological = [...logPreviewRows]
@@ -997,33 +1076,13 @@ export default function VehicleDetailPage() {
 
   return (
     <main style={{ paddingBottom: 40 }}>
-      {/* Top row */}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{displayName}</h1>
-          <div style={{ marginTop: 6, opacity: 0.75 }}>
-            Vehicle ID: <strong>{vehicle?.id ?? vehicleIdFromRoute}</strong>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Link href="/vehicles" style={pillStyle()}>
-            ← Back to Vehicles
-          </Link>
-
-          <Link href={`/vehicles/${routeIdForLinks}/history`} style={pillStyle()}>
-            Full History →
-          </Link>
-        </div>
-      </div>
-
       {/* Load/error banner */}
       {vehicleLoading ? (
-        <div style={{ marginTop: 14, opacity: 0.75 }}>Loading vehicle from Supabase…</div>
+        <div style={{ marginBottom: 14, opacity: 0.75 }}>Loading vehicle from Supabase…</div>
       ) : vehicleErr ? (
         <div
           style={{
-            marginTop: 14,
+            marginBottom: 14,
             border: "1px solid rgba(255,80,80,0.30)",
             background: "rgba(255,80,80,0.06)",
             padding: 12,
@@ -1035,8 +1094,28 @@ export default function VehicleDetailPage() {
         </div>
       ) : null}
 
-      {/* General info card */}
-      <div style={{ marginTop: 18, ...cardStyle(), position: "relative" }}>
+      <AssetCommandHeader
+        assetName={displayName}
+        assetId={displayAssetId}
+        status={displayStatus}
+        fullHistoryHref={`/vehicles/${routeIdForLinks}/history`}
+        exceptions={headerExceptions}
+        actions={headerActions}
+        meters={headerMeters}
+      />
+
+      <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 18 }}>
+      <details
+        ref={detailsSectionRef}
+        open={detailsOpen}
+        onToggle={(event) => setDetailsOpen((event.currentTarget as HTMLDetailsElement).open)}
+        style={{ ...cardStyle(), order: 2 }}
+      >
+        <summary style={sectionSummaryStyle}>
+          <span style={{ fontWeight: 900 }}>Details</span>
+          <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+        </summary>
+        <div style={{ marginTop: 12, position: "relative" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900, fontSize: 16 }}>General Information</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -1068,6 +1147,7 @@ export default function VehicleDetailPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    setDetailsOpen(true);
                     setIsEditing(true);
                     setEditError(null);
                   }}
@@ -1120,6 +1200,7 @@ export default function VehicleDetailPage() {
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
                   <option value="Out of Service">Out of Service</option>
+                  <option value="Red Tagged">Red Tagged</option>
                   <option value="Retired">Retired</option>
                 </select>
               </div>
@@ -1245,10 +1326,15 @@ export default function VehicleDetailPage() {
             </div>
           </div>
         )}
-      </div>
+        </div>
+      </details>
 
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Asset Health Score</div>
+      <details style={{ ...cardStyle(), order: 5 }}>
+        <summary style={sectionSummaryStyle}>
+          <span style={{ fontWeight: 900 }}>Asset Health Score</span>
+          <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
         <div
           style={{
             display: "grid",
@@ -1353,109 +1439,115 @@ export default function VehicleDetailPage() {
             <div style={{ fontWeight: 900, fontSize: 20 }}>{vehicleHealthSummary.pmStatus}</div>
           </div>
         </div>
-      </div>
-
-      {canViewScoreTrends ? (
-        <div style={{ marginTop: 18, ...cardStyle() }}>
-          <div style={{ fontWeight: 900, marginBottom: 12 }}>Score Trend (Last Logs)</div>
-          {scoreTrend.mechanicPoints.length < 2 ? (
-            <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {scoreTrend.healthPoints.map((point, idx) => (
-                    <span key={`health-point-${idx}`} style={trendPillStyle}>{point}%</span>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {scoreTrend.mechanicPoints.map((point, idx) => (
-                    <span key={`mechanic-point-${idx}`} style={trendPillStyle}>{point}%</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
-      ) : null}
+      </details>
 
-      <TrendActionsPanel
-        assetType="vehicle"
-        assetId={stableVehicleId}
-        canView={canViewScoreTrends}
-        healthPoints={scoreTrend.healthPoints}
-        mechanicPoints={scoreTrend.mechanicPoints}
-      />
+      <details style={{ ...cardStyle(), order: 6 }}>
+        <summary style={sectionSummaryStyle}>
+          <span style={{ fontWeight: 900 }}>Score Trend &amp; Actions</span>
+          <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
+          {canViewScoreTrends ? (
+            <div>
+              {scoreTrend.mechanicPoints.length < 2 ? (
+                <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
+                    <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
+                    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {scoreTrend.healthPoints.map((point, idx) => (
+                        <span key={`health-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
+                    <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
+                    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {scoreTrend.mechanicPoints.map((point, idx) => (
+                        <span key={`mechanic-point-${idx}`} style={trendPillStyle}>{point}%</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ opacity: 0.75 }}>Score trends are visible to mechanics only.</div>
+          )}
+          <div style={{ marginTop: 12 }}>
+            <TrendActionsPanel
+              assetType="vehicle"
+              assetId={stableVehicleId}
+              canView={canViewScoreTrends}
+              healthPoints={scoreTrend.healthPoints}
+              mechanicPoints={scoreTrend.mechanicPoints}
+            />
+          </div>
+        </div>
+      </details>
 
       {/* Actions */}
-      <div style={{ marginTop: 18, ...cardStyle() }}>
+      <div style={{ ...cardStyle(), order: 3, background: "rgba(255,255,255,0.02)" }}>
         <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
-        {userRole === "apprentice" ? (
-          <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.78 }}>
-            Maintenance requests and logs are restricted for Apprentice role.
-          </div>
-        ) : null}
+        <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.78 }}>
+          Quick operational forms are in the header. Use this area for history, blank forms, and deeper access.
+        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
-          <Link href={`/vehicles/${routeIdForLinks}/forms/pre-trip`} style={actionBtnStyle()}>
-            <span>Pre-Trip Inspection</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-
-          <Link href={`/vehicles/${routeIdForLinks}/forms/post-trip`} style={actionBtnStyle()}>
-            <span>Post-Trip Inspection</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-
-          {canCreateMaintenanceRequest ? (
-            <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
-              <span>Maintenance Request</span>
-              <span style={{ opacity: 0.75 }}>→</span>
-            </Link>
-          ) : null}
-
-          {canCreateMaintenanceLog ? (
-            <Link href={`/vehicles/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
-              <span>Maintenance Log</span>
-              <span style={{ opacity: 0.75 }}>→</span>
-            </Link>
-          ) : null}
-
-          {canShowVehiclePmButton ? (
-            <Link href={`/vehicles/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
-              <span>Preventative Maintenance</span>
-              <span style={{ opacity: 0.75 }}>→</span>
-            </Link>
-          ) : null}
-
           <Link href={`/vehicles/${routeIdForLinks}/history`} style={actionBtnStyle()}>
             <span>Full History</span>
             <span style={{ opacity: 0.75 }}>→</span>
           </Link>
+
+          <Link href={formsCreateHref} style={actionBtnStyle()}>
+            <span>Create Blank Form</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+
+          <Link href={formsWorkspaceHref} style={actionBtnStyle()}>
+            <span>Forms Workspace</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
+
+          <Link href="/maintenance" style={actionBtnStyle()}>
+            <span>Maintenance Operations</span>
+            <span style={{ opacity: 0.75 }}>→</span>
+          </Link>
         </div>
       </div>
 
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Asset Documents</div>
-        <VehicleDocumentsSection vehicleId={stableVehicleId} canManage={canEditVehicle} />
-      </div>
+      <details style={{ ...cardStyle(), order: 7 }}>
+        <summary style={sectionSummaryStyle}>
+          <span style={{ fontWeight: 900 }}>Asset Documents</span>
+          <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
+          <VehicleDocumentsSection vehicleId={stableVehicleId} canManage={canEditVehicle} />
+        </div>
+      </details>
 
-      <AcademyAssetSection vehicleId={stableVehicleId} assetType={vehicle?.type ?? ""} />
+      <details style={{ ...cardStyle(), order: 8 }}>
+        <summary style={sectionSummaryStyle}>
+          <span style={{ fontWeight: 900 }}>OI Academy</span>
+          <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+        </summary>
+        <div style={{ marginTop: 12 }}>
+          <AcademyAssetSection vehicleId={stableVehicleId} assetType={vehicle?.type ?? ""} />
+        </div>
+      </details>
 
       {/* Maintenance history preview */}
-      <div style={{ marginTop: 18, ...cardStyle() }}>
+      <div style={{ ...cardStyle(), order: 4 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>Recent Maintenance History</div>
           <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance events</div>
@@ -1512,6 +1604,7 @@ export default function VehicleDetailPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </main>
   );

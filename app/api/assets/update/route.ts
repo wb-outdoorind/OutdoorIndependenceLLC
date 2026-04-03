@@ -4,6 +4,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
 import { isMechanicOrHigher } from "@/lib/roles";
 import { normalizeEquipmentSeason } from "@/lib/equipmentSeason";
+import { normalizeAssetLifecycleStatus } from "@/lib/assetLifecycleStatus";
 
 export const runtime = "nodejs";
 
@@ -122,9 +123,14 @@ function normalizeVehiclePatch(value: unknown): { patch: MutableVehiclePatch; in
   if (mileage !== undefined) patch.mileage = mileage;
   else if ("mileage" in raw) invalid.push("mileage");
 
-  const status = parseTextField(raw.status, { maxLen: 80, allowNull: false });
-  if (status !== undefined) patch.status = status;
-  else if ("status" in raw) invalid.push("status");
+  const statusRaw = parseTextField(raw.status, { maxLen: 80, allowNull: false });
+  if (statusRaw !== undefined) {
+    const status = normalizeAssetLifecycleStatus(statusRaw);
+    if (!status) invalid.push("status");
+    else patch.status = status;
+  } else if ("status" in raw) {
+    invalid.push("status");
+  }
 
   const asset = parseTextField(raw.asset, { maxLen: 120 });
   if (asset !== undefined) patch.asset = asset;
@@ -189,9 +195,14 @@ function normalizeEquipmentPatch(value: unknown): { patch: MutableEquipmentPatch
   if (currentHours !== undefined) patch.current_hours = currentHours;
   else if ("current_hours" in raw) invalid.push("current_hours");
 
-  const status = parseTextField(raw.status, { maxLen: 80, allowNull: false });
-  if (status !== undefined) patch.status = status;
-  else if ("status" in raw) invalid.push("status");
+  const statusRaw = parseTextField(raw.status, { maxLen: 80, allowNull: false });
+  if (statusRaw !== undefined) {
+    const status = normalizeAssetLifecycleStatus(statusRaw);
+    if (!status) invalid.push("status");
+    else patch.status = status;
+  } else if ("status" in raw) {
+    invalid.push("status");
+  }
 
   const externalId = parseTextField(raw.external_id, { maxLen: 120 });
   if (externalId !== undefined) patch.external_id = externalId;

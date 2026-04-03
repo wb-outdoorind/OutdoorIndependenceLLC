@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { writeAudit } from "@/lib/audit";
@@ -9,6 +9,8 @@ import { MAINTENANCE_ACTIVE_STATUSES, isMaintenanceClosedStatus } from "@/lib/ma
 import AcademyAssetSection from "@/components/academy/AcademyAssetSection";
 import TrendActionsPanel from "@/components/trends/TrendActionsPanel";
 import EquipmentDocumentsSection from "@/components/assets/EquipmentDocumentsSection";
+import AssetCommandHeader from "@/components/assets/AssetCommandHeader";
+import { assetLifecycleStatusTone } from "@/lib/assetLifecycleStatus";
 import { readRoleViewOverride, resolveEffectiveRole, type AppRole } from "@/lib/roleView";
 import {
   EQUIPMENT_SEASONS,
@@ -191,22 +193,6 @@ function cardStyle(): React.CSSProperties {
   };
 }
 
-function pillStyle(): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "8px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.04)",
-    fontSize: 13,
-    fontWeight: 800,
-    textDecoration: "none",
-    color: "inherit",
-  };
-}
-
 function actionBtnStyle(): React.CSSProperties {
   return {
     textDecoration: "none",
@@ -264,6 +250,63 @@ const trendPillStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
+const sectionSummaryStyle: React.CSSProperties = {
+  listStyle: "none",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  cursor: "pointer",
+  userSelect: "none",
+  fontSize: 14,
+};
+
+function badgeStyle(label: string): React.CSSProperties {
+  const tone = assetLifecycleStatusTone(label);
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  };
+  if (tone === "active")
+    return {
+      ...base,
+      border: "1px solid rgba(0,255,120,0.22)",
+      background: "rgba(0,255,120,0.08)",
+    };
+  if (tone === "inactive")
+    return {
+      ...base,
+      border: "1px solid rgba(255,210,0,0.26)",
+      background: "rgba(255,210,0,0.10)",
+    };
+  if (tone === "warning")
+    return {
+      ...base,
+      border: "1px solid rgba(255,80,80,0.28)",
+      background: "rgba(255,80,80,0.10)",
+    };
+  if (tone === "danger")
+    return {
+      ...base,
+      border: "1px solid rgba(255,80,80,0.42)",
+      background: "rgba(120,20,20,0.34)",
+    };
+  if (tone === "retired")
+    return {
+      ...base,
+      border: "1px solid rgba(180,180,180,0.30)",
+      background: "rgba(180,180,180,0.10)",
+    };
+  return base;
+}
+
 function isTrailerEquipmentType(value: string | null | undefined) {
   return (value ?? "").toLowerCase().includes("trailer");
 }
@@ -302,6 +345,8 @@ export default function EquipmentDetailPage() {
   const [mechanicScoreDraft, setMechanicScoreDraft] = useState("");
   const [mechanicScoreSaving, setMechanicScoreSaving] = useState(false);
   const [mechanicScoreError, setMechanicScoreError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsSectionRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -511,6 +556,8 @@ export default function EquipmentDetailPage() {
 
   const stableEquipmentId = equipment?.id ?? equipmentIdFromRoute;
   const routeIdForLinks = encodeURIComponent(stableEquipmentId);
+  const formsWorkspaceHref = `/forms?assetType=equipment&assetId=${encodeURIComponent(stableEquipmentId)}`;
+  const formsCreateHref = `${formsWorkspaceHref}&mode=create`;
   const isTrailerEquipment = isTrailerEquipmentType(equipment?.equipment_type);
   const isMowerEquipment = isMowerEquipmentType(equipment?.equipment_type);
   const isApplicatorEquipment = isApplicatorEquipmentType(equipment?.equipment_type);
@@ -532,7 +579,22 @@ export default function EquipmentDetailPage() {
   const canCreateMaintenanceRequest = !hasRole(userRole, ["apprentice"]);
   const canCreateMaintenanceLog = canViewMechanicScore;
   const displayAssetId = normalizeTruckAssetId(equipment?.external_id) || "-";
-
+  const displayName = equipment?.name ?? "Equipment";
+  const displayStatus = (equipment?.status ?? "Unknown").trim() || "Unknown";
+  const pmActionLabel = isTrailerEquipment
+    ? "Trailer PM Inspection"
+    : isMowerEquipment
+      ? "Mower PM Checklist"
+      : isApplicatorEquipment
+        ? "Applicator PM Inspection"
+        : "Preventative Maintenance";
+  const urgentRequestCount = useMemo(() => {
+    return requestPreviewRows.filter((row) => {
+      const urgency = (row.urgency ?? "").trim();
+      const status = (row.status ?? "").trim();
+      return !isMaintenanceClosedStatus(status) && (urgency === "High" || urgency === "Urgent");
+    }).length;
+  }, [requestPreviewRows]);
   function updateDraft<K extends keyof EquipmentEditDraft>(key: K, value: EquipmentEditDraft[K]) {
     setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
@@ -752,6 +814,64 @@ export default function EquipmentDetailPage() {
     };
   }, [equipment?.current_hours, equipment?.status, equipment?.year, latestPmHours, logPreviewRows, openRequestCountForHealth]);
 
+  const headerExceptions = useMemo(() => {
+    const items: Array<{ label: string; tone?: "default" | "warning" | "danger" }> = [];
+    if (displayStatus === "Out of Service" || displayStatus === "Red Tagged") {
+      items.push({ label: displayStatus, tone: "danger" });
+    }
+    if (equipmentHealthSummary.pmStatus === "Overdue") {
+      items.push({ label: "PM Overdue", tone: "danger" });
+    } else if (equipmentHealthSummary.pmStatus === "Due Soon") {
+      items.push({ label: "PM Due Soon", tone: "warning" });
+    }
+    if (urgentRequestCount > 0) {
+      items.push({
+        label: `${urgentRequestCount} High/Urgent Request${urgentRequestCount === 1 ? "" : "s"}`,
+        tone: "danger",
+      });
+    } else if (equipmentHealthSummary.openRequests > 0) {
+      items.push({
+        label: `${equipmentHealthSummary.openRequests} Open Request${
+          equipmentHealthSummary.openRequests === 1 ? "" : "s"
+        }`,
+        tone: "warning",
+      });
+    }
+    return items.slice(0, 4);
+  }, [displayStatus, equipmentHealthSummary.openRequests, equipmentHealthSummary.pmStatus, urgentRequestCount]);
+
+  const headerActions = useMemo(() => {
+    const items: Array<{ label: string; href: string }> = [];
+    if (canCreateMaintenanceRequest) {
+      items.push({
+        label: "Maintenance Request",
+        href: `/equipment/${routeIdForLinks}/forms/maintenance-request`,
+      });
+    }
+    if (canCreateMaintenanceLog) {
+      items.push({
+        label: "Maintenance Log",
+        href: `/equipment/${routeIdForLinks}/forms/maintenance-log`,
+      });
+    }
+    if (canShowPmButton) {
+      items.push({
+        label: pmActionLabel,
+        href: `/equipment/${routeIdForLinks}/forms/preventative-maintenance`,
+      });
+    }
+    return items.slice(0, 4);
+  }, [canCreateMaintenanceLog, canCreateMaintenanceRequest, canShowPmButton, pmActionLabel, routeIdForLinks]);
+
+  const headerMeters = [
+    {
+      label: "Current Hours",
+      value: typeof equipment?.current_hours === "number" ? equipment.current_hours.toLocaleString() : "—",
+    },
+    { label: "PM State", value: equipmentHealthSummary.pmStatus },
+    { label: "Open Requests", value: String(equipmentHealthSummary.openRequests) },
+  ];
+
   const scoreTrend = useMemo(() => {
     const chronological = [...logPreviewRows]
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -797,31 +917,12 @@ export default function EquipmentDetailPage() {
 
   return (
     <main style={{ paddingBottom: 40 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{equipment?.name ?? "Equipment"}</h1>
-          <div style={{ marginTop: 6, opacity: 0.75 }}>
-            Equipment ID: <strong>{stableEquipmentId}</strong>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Link href="/equipment" style={pillStyle()}>
-            ← Back to Equipment
-          </Link>
-
-          <Link href={`/equipment/${routeIdForLinks}/history`} style={pillStyle()}>
-            Full History →
-          </Link>
-        </div>
-      </div>
-
       {loading ? (
-        <div style={{ marginTop: 14, opacity: 0.75 }}>Loading equipment from Supabase...</div>
+        <div style={{ marginBottom: 14, opacity: 0.75 }}>Loading equipment from Supabase...</div>
       ) : errorMessage ? (
         <div
           style={{
-            marginTop: 14,
+            marginBottom: 14,
             border: "1px solid rgba(255,80,80,0.30)",
             background: "rgba(255,80,80,0.06)",
             padding: 12,
@@ -833,422 +934,541 @@ export default function EquipmentDetailPage() {
         </div>
       ) : null}
 
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Specs</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {canEditEquipment ? (
-              isEditing ? (
-                <>
-                  <button type="button" onClick={saveEquipmentEdits} style={editPrimaryButtonStyle} disabled={editSaving}>
-                    {editSaving ? "Saving..." : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditing(false);
-                      setEditError(null);
-                      resetDraftFromEquipment();
-                    }}
-                    style={editSecondaryButtonStyle}
-                    disabled={editSaving}
-                  >
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditing(true);
-                    setEditError(null);
-                  }}
-                  style={editSecondaryButtonStyle}
-                >
-                  Edit Equipment
-                </button>
-              )
-            ) : null}
-            <div style={{ opacity: 0.8, fontWeight: 800 }}>{equipment?.status ?? "-"}</div>
-          </div>
-        </div>
-
-        {isEditing && editDraft ? (
-          <>
-            {editError ? (
-              <div style={{ marginTop: 12, color: "#ff9d9d", fontSize: 13 }}>{editError}</div>
-            ) : null}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
-                marginTop: 14,
-              }}
-            >
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Name *</div>
-                <input value={editDraft.name} onChange={(e) => updateDraft("name", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Type *</div>
-                <input value={editDraft.equipment_type} onChange={(e) => updateDraft("equipment_type", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Status *</div>
-                <select value={editDraft.status} onChange={(e) => updateDraft("status", e.target.value)} style={detailInputStyle}>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                  <option value="Out of Service">Out of Service</option>
-                  <option value="Retired">Retired</option>
-                </select>
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
-                <input value={editDraft.make} onChange={(e) => updateDraft("make", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
-                <input value={editDraft.model} onChange={(e) => updateDraft("model", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
-                <input value={editDraft.year} onChange={(e) => updateDraft("year", e.target.value)} style={detailInputStyle} inputMode="numeric" />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Serial Number</div>
-                <input value={editDraft.serial_number} onChange={(e) => updateDraft("serial_number", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
-                <input value={editDraft.license_plate} onChange={(e) => updateDraft("license_plate", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
-                <input value={editDraft.fuel_type} onChange={(e) => updateDraft("fuel_type", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
-                <input value={editDraft.oil_type} onChange={(e) => updateDraft("oil_type", e.target.value)} style={detailInputStyle} />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Season</div>
-                <select value={editDraft.season} onChange={(e) => updateDraft("season", e.target.value as EquipmentSeason)} style={detailInputStyle}>
-                  {EQUIPMENT_SEASONS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Current Hours</div>
-                <input value={editDraft.current_hours} onChange={(e) => updateDraft("current_hours", e.target.value)} style={detailInputStyle} inputMode="decimal" />
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
-                <input
-                  value={canEditAssetId ? editDraft.external_id : normalizeTruckAssetId(editDraft.external_id)}
-                  onChange={(e) => updateDraft("external_id", e.target.value)}
-                  style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
-                  disabled={!canEditAssetId}
-                />
-              </div>
-            </div>
-          </>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 12,
-              marginTop: 14,
-            }}
-          >
-            <Spec label="Type" value={equipment?.equipment_type ?? "-"} />
-            <Spec label="Make" value={equipment?.make ?? "-"} />
-            <Spec label="Model" value={equipment?.model ?? "-"} />
-            <Spec label="Year" value={typeof equipment?.year === "number" ? String(equipment.year) : "-"} />
-            <Spec label="Serial Number" value={equipment?.serial_number ?? "-"} />
-            <Spec label="License Plate" value={equipment?.license_plate ?? "-"} />
-            <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
-            <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
-            <Spec
-              label="Season"
-              value={
-                normalizeEquipmentSeason(equipment?.season) ??
-                inferEquipmentSeason(equipment?.equipment_type, equipment?.name, equipment?.id)
-              }
-            />
-            <Spec
-              label="Current Hours"
-              value={
-                typeof equipment?.current_hours === "number"
-                  ? equipment.current_hours.toLocaleString()
-                  : "-"
-              }
-            />
-            <Spec label="Asset ID" value={displayAssetId} />
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Asset Health Score</div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-            gap: 10,
-          }}
-        >
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Health Score</div>
-            <div style={{ fontWeight: 900, fontSize: 24 }}>{equipmentHealthSummary.healthScore}%</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
-            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.operationalScore}%</div>
-          </div>
-          {canViewMechanicScore ? (
-            <>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Objective)</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>
-                  {equipmentHealthSummary.objectiveMechanicScore}%
-                </div>
-                <div style={{ opacity: 0.75, fontSize: 12 }}>
-                  {mechanicScoreBand(equipmentHealthSummary.objectiveMechanicScore)}
-                </div>
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Opinion</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>
-                  {canEditMechanicScore ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMechanicScoreError(null);
-                        setMechanicScoreDraft(String(equipmentHealthSummary.mechanicOpinionScore));
-                        setIsEditingMechanicScore((prev) => !prev);
-                      }}
-                      style={{
-                        border: "none",
-                        background: "transparent",
-                        color: "inherit",
-                        font: "inherit",
-                        fontWeight: 900,
-                        cursor: "pointer",
-                        padding: 0,
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {equipmentHealthSummary.mechanicOpinionScore}%
-                    </button>
-                  ) : (
-                    `${equipmentHealthSummary.mechanicOpinionScore}%`
-                  )}
-                </div>
-                <div style={{ opacity: 0.75, fontSize: 12 }}>
-                  {canEditMechanicScore ? "click score to edit" : "set by mechanic"}
-                </div>
-                {canEditMechanicScore && isEditingMechanicScore ? (
-                  <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <input
-                      value={mechanicScoreDraft}
-                      onChange={(e) => setMechanicScoreDraft(e.target.value)}
-                      inputMode="numeric"
-                      placeholder="0-100"
-                      style={{
-                        width: "100%",
-                        maxWidth: 120,
-                        padding: 8,
-                        borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        background: "rgba(255,255,255,0.03)",
-                        color: "inherit",
-                      }}
-                    />
-                    <button type="button" onClick={saveMechanicScore} style={actionBtnStyle()} disabled={mechanicScoreSaving}>
-                      {mechanicScoreSaving ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsEditingMechanicScore(false);
-                        setMechanicScoreError(null);
-                      }}
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        borderRadius: 10,
-                        background: "transparent",
-                        color: "inherit",
-                        padding: "8px 10px",
-                        cursor: "pointer",
-                      }}
-                      disabled={mechanicScoreSaving}
-                    >
-                      Cancel
-                    </button>
-                    {mechanicScoreError ? (
-                      <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              <div>
-                <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Blended)</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
-                <div style={{ opacity: 0.75, fontSize: 12 }}>
-                  {mechanicScoreBand(equipmentHealthSummary.mechanicScore)}
-                </div>
-              </div>
-            </>
-          ) : null}
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
-            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.openRequests}</div>
-          </div>
-          <div>
-            <div style={{ opacity: 0.7, fontSize: 12 }}>PM Status</div>
-            <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.pmStatus}</div>
-          </div>
-        </div>
-      </div>
-
-      {canViewScoreTrends ? (
-        <div style={{ marginTop: 18, ...cardStyle() }}>
-          <div style={{ fontWeight: 900, marginBottom: 12 }}>Score Trend (Last Logs)</div>
-          {scoreTrend.mechanicPoints.length < 2 ? (
-            <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {scoreTrend.healthPoints.map((point, idx) => (
-                    <span key={`health-point-${idx}`} style={trendPillStyle}>{point}%</span>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
-                <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
-                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {scoreTrend.mechanicPoints.map((point, idx) => (
-                    <span key={`mechanic-point-${idx}`} style={trendPillStyle}>{point}%</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
-
-      <TrendActionsPanel
-        assetType="equipment"
-        assetId={stableEquipmentId}
-        canView={canViewScoreTrends}
-        healthPoints={scoreTrend.healthPoints}
-        mechanicPoints={scoreTrend.mechanicPoints}
+      <AssetCommandHeader
+        assetName={displayName}
+        assetId={displayAssetId}
+        status={displayStatus}
+        fullHistoryHref={`/equipment/${routeIdForLinks}/history`}
+        exceptions={headerExceptions}
+        actions={headerActions}
+        meters={headerMeters}
       />
 
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
-        {userRole === "apprentice" ? (
+      <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ ...cardStyle(), background: "rgba(255,255,255,0.02)", order: 3 }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>Forms</div>
           <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.78 }}>
-            Maintenance requests and logs are restricted for Apprentice role.
+            Quick operational forms are in the header. Use this area for history, blank forms, and deeper access.
           </div>
-        ) : null}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
-          {canCreateMaintenanceRequest ? (
-            <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-request`} style={actionBtnStyle()}>
-              <span>Maintenance Request</span>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+            <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
+              <span>Full History</span>
               <span style={{ opacity: 0.75 }}>→</span>
             </Link>
-          ) : null}
 
-          {canCreateMaintenanceLog ? (
-            <Link href={`/equipment/${routeIdForLinks}/forms/maintenance-log`} style={actionBtnStyle()}>
-              <span>Maintenance Log</span>
+            <Link href={formsCreateHref} style={actionBtnStyle()}>
+              <span>Create Blank Form</span>
               <span style={{ opacity: 0.75 }}>→</span>
             </Link>
-          ) : null}
 
-          {canShowPmButton ? (
-            <Link href={`/equipment/${routeIdForLinks}/forms/preventative-maintenance`} style={actionBtnStyle()}>
-              <span>{isTrailerEquipment ? "Trailer PM Inspection" : isMowerEquipment ? "Mower PM Checklist" : isApplicatorEquipment ? "Applicator PM Inspection" : "Preventative Maintenance"}</span>
+            <Link href={formsWorkspaceHref} style={actionBtnStyle()}>
+              <span>Forms Workspace</span>
               <span style={{ opacity: 0.75 }}>→</span>
             </Link>
-          ) : null}
 
-          <Link href={`/equipment/${routeIdForLinks}/history`} style={actionBtnStyle()}>
-            <span>Full History</span>
-            <span style={{ opacity: 0.75 }}>→</span>
-          </Link>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Asset Documents</div>
-        <EquipmentDocumentsSection equipmentId={stableEquipmentId} canManage={canEditEquipment} />
-      </div>
-
-      <AcademyAssetSection vehicleId={stableEquipmentId} assetType={equipment?.equipment_type ?? ""} />
-
-      <div style={{ marginTop: 18, ...cardStyle() }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 900 }}>Recent Maintenance History</div>
-          <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance requests</div>
+            <Link href="/maintenance" style={actionBtnStyle()}>
+              <span>Maintenance Operations</span>
+              <span style={{ opacity: 0.75 }}>→</span>
+            </Link>
+          </div>
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          {requestPreviewError || logPreviewError ? (
-            <div style={{ opacity: 0.9, color: "#ff9d9d" }}>Failed to load all maintenance history preview sources.</div>
-          ) : historyPreview.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No maintenance requests yet.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {historyPreview.map((r, idx) => (
-                <Link
-                  key={`${r.createdAt}:${idx}`}
-                  href={historyItemHref(r)}
+        <div style={{ ...cardStyle(), order: 4 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 900 }}>Recent Maintenance History</div>
+            <div style={{ opacity: 0.75, fontSize: 13 }}>Last 4 maintenance requests</div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            {requestPreviewError || logPreviewError ? (
+              <div style={{ opacity: 0.9, color: "#ff9d9d" }}>
+                Failed to load all maintenance history preview sources.
+              </div>
+            ) : historyPreview.length === 0 ? (
+              <div style={{ opacity: 0.75 }}>No maintenance requests yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {historyPreview.map((r, idx) => (
+                  <Link
+                    key={`${r.createdAt}:${idx}`}
+                    href={historyItemHref(r)}
+                    style={{
+                      display: "block",
+                      textDecoration: "none",
+                      color: "inherit",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 14,
+                      padding: 12,
+                      background: "rgba(255,255,255,0.02)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 900 }}>{r.title}</div>
+                      <div style={{ opacity: 0.75, fontSize: 13 }}>{formatDateTime(r.createdAt)}</div>
+                    </div>
+
+                    <div style={{ marginTop: 6, opacity: 0.82, fontSize: 13 }}>{r.status ?? "-"}</div>
+
+                    {r.notes?.trim() ? (
+                      <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{r.notes}</div>
+                    ) : null}
+                    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
+                      See Form →
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <details style={{ ...cardStyle(), order: 5 }}>
+          <summary style={sectionSummaryStyle}>
+            <span style={{ fontWeight: 900 }}>Asset Health Score</span>
+            <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                gap: 10,
+              }}
+            >
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Health Score</div>
+                <div style={{ fontWeight: 900, fontSize: 24 }}>{equipmentHealthSummary.healthScore}%</div>
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Operational Score</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.operationalScore}%</div>
+              </div>
+              {canViewMechanicScore ? (
+                <>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Objective)</div>
+                    <div style={{ fontWeight: 900, fontSize: 20 }}>
+                      {equipmentHealthSummary.objectiveMechanicScore}%
+                    </div>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>
+                      {mechanicScoreBand(equipmentHealthSummary.objectiveMechanicScore)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Opinion</div>
+                    <div style={{ fontWeight: 900, fontSize: 20 }}>
+                      {canEditMechanicScore ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMechanicScoreError(null);
+                            setMechanicScoreDraft(String(equipmentHealthSummary.mechanicOpinionScore));
+                            setIsEditingMechanicScore((prev) => !prev);
+                          }}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "inherit",
+                            font: "inherit",
+                            fontWeight: 900,
+                            cursor: "pointer",
+                            padding: 0,
+                            textDecoration: "underline",
+                          }}
+                        >
+                          {equipmentHealthSummary.mechanicOpinionScore}%
+                        </button>
+                      ) : (
+                        `${equipmentHealthSummary.mechanicOpinionScore}%`
+                      )}
+                    </div>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>
+                      {canEditMechanicScore ? "click score to edit" : "set by mechanic"}
+                    </div>
+                    {canEditMechanicScore && isEditingMechanicScore ? (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <input
+                          value={mechanicScoreDraft}
+                          onChange={(e) => setMechanicScoreDraft(e.target.value)}
+                          inputMode="numeric"
+                          placeholder="0-100"
+                          style={{
+                            width: "100%",
+                            maxWidth: 120,
+                            padding: 8,
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            background: "rgba(255,255,255,0.03)",
+                            color: "inherit",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={saveMechanicScore}
+                          style={actionBtnStyle()}
+                          disabled={mechanicScoreSaving}
+                        >
+                          {mechanicScoreSaving ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingMechanicScore(false);
+                            setMechanicScoreError(null);
+                          }}
+                          style={{
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            borderRadius: 10,
+                            background: "transparent",
+                            color: "inherit",
+                            padding: "8px 10px",
+                            cursor: "pointer",
+                          }}
+                          disabled={mechanicScoreSaving}
+                        >
+                          Cancel
+                        </button>
+                        {mechanicScoreError ? (
+                          <div style={{ color: "#ff9d9d", fontSize: 12 }}>{mechanicScoreError}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Mechanic Score (Blended)</div>
+                    <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.mechanicScore}%</div>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>
+                      {mechanicScoreBand(equipmentHealthSummary.mechanicScore)}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>Open Requests</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.openRequests}</div>
+              </div>
+              <div>
+                <div style={{ opacity: 0.7, fontSize: 12 }}>PM Status</div>
+                <div style={{ fontWeight: 900, fontSize: 20 }}>{equipmentHealthSummary.pmStatus}</div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details style={{ ...cardStyle(), order: 6 }}>
+          <summary style={sectionSummaryStyle}>
+            <span style={{ fontWeight: 900 }}>Score Trend &amp; Actions</span>
+            <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            {canViewScoreTrends ? (
+              <>
+                {scoreTrend.mechanicPoints.length < 2 ? (
+                  <div style={{ opacity: 0.75 }}>Not enough maintenance logs yet for trend analysis.</div>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <div style={{ opacity: 0.72, fontSize: 12 }}>Asset Health Trend</div>
+                      <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.healthTrend}</div>
+                      <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {scoreTrend.healthPoints.map((point, idx) => (
+                          <span key={`health-point-${idx}`} style={trendPillStyle}>
+                            {point}%
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ opacity: 0.72, fontSize: 12 }}>Mechanic Trend</div>
+                      <div style={{ fontWeight: 900, fontSize: 20 }}>{scoreTrend.mechanicTrend}</div>
+                      <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {scoreTrend.mechanicPoints.map((point, idx) => (
+                          <span key={`mechanic-point-${idx}`} style={trendPillStyle}>
+                            {point}%
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ opacity: 0.75 }}>Score trends are visible to mechanics only.</div>
+            )}
+            <div style={{ marginTop: 12 }}>
+              <TrendActionsPanel
+                assetType="equipment"
+                assetId={stableEquipmentId}
+                canView={canViewScoreTrends}
+                healthPoints={scoreTrend.healthPoints}
+                mechanicPoints={scoreTrend.mechanicPoints}
+              />
+            </div>
+          </div>
+        </details>
+
+        <details style={{ ...cardStyle(), order: 7 }}>
+          <summary style={sectionSummaryStyle}>
+            <span style={{ fontWeight: 900 }}>Asset Documents</span>
+            <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <EquipmentDocumentsSection equipmentId={stableEquipmentId} canManage={canEditEquipment} />
+          </div>
+        </details>
+
+        <details style={{ ...cardStyle(), order: 8 }}>
+          <summary style={sectionSummaryStyle}>
+            <span style={{ fontWeight: 900 }}>OI Academy</span>
+            <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <AcademyAssetSection vehicleId={stableEquipmentId} assetType={equipment?.equipment_type ?? ""} />
+          </div>
+        </details>
+
+        <details
+          ref={detailsSectionRef}
+          open={detailsOpen}
+          onToggle={(event) => setDetailsOpen((event.currentTarget as HTMLDetailsElement).open)}
+          style={{ ...cardStyle(), order: 2 }}
+        >
+          <summary style={sectionSummaryStyle}>
+            <span style={{ fontWeight: 900 }}>Details</span>
+            <span style={{ opacity: 0.65, fontSize: 12 }}>▼</span>
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>Specs</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {canEditEquipment ? (
+                  isEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={saveEquipmentEdits}
+                        style={editPrimaryButtonStyle}
+                        disabled={editSaving}
+                      >
+                        {editSaving ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditing(false);
+                          setEditError(null);
+                          resetDraftFromEquipment();
+                        }}
+                        style={editSecondaryButtonStyle}
+                        disabled={editSaving}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailsOpen(true);
+                        setIsEditing(true);
+                        setEditError(null);
+                      }}
+                      style={editSecondaryButtonStyle}
+                    >
+                      Edit Equipment
+                    </button>
+                  )
+                ) : null}
+                <div style={badgeStyle(displayStatus)}>{displayStatus}</div>
+              </div>
+            </div>
+
+            {isEditing && editDraft ? (
+              <>
+                {editError ? (
+                  <div style={{ marginTop: 12, color: "#ff9d9d", fontSize: 13 }}>{editError}</div>
+                ) : null}
+                <div
                   style={{
-                    display: "block",
-                    textDecoration: "none",
-                    color: "inherit",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    borderRadius: 14,
-                    padding: 12,
-                    background: "rgba(255,255,255,0.02)",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 12,
+                    marginTop: 14,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                    <div style={{ fontWeight: 900 }}>{r.title}</div>
-                    <div style={{ opacity: 0.75, fontSize: 13 }}>{formatDateTime(r.createdAt)}</div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Name *</div>
+                    <input
+                      value={editDraft.name}
+                      onChange={(e) => updateDraft("name", e.target.value)}
+                      style={detailInputStyle}
+                    />
                   </div>
-
-                  <div style={{ marginTop: 6, opacity: 0.82, fontSize: 13 }}>{r.status ?? "-"}</div>
-
-                  {r.notes?.trim() ? (
-                    <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{r.notes}</div>
-                  ) : null}
-                  <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.9 }}>
-                    See Form →
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Equipment Type *</div>
+                    <input
+                      value={editDraft.equipment_type}
+                      onChange={(e) => updateDraft("equipment_type", e.target.value)}
+                      style={detailInputStyle}
+                    />
                   </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Status *</div>
+                    <select
+                      value={editDraft.status}
+                      onChange={(e) => updateDraft("status", e.target.value)}
+                      style={detailInputStyle}
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                      <option value="Out of Service">Out of Service</option>
+                      <option value="Red Tagged">Red Tagged</option>
+                      <option value="Retired">Retired</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Make</div>
+                    <input
+                      value={editDraft.make}
+                      onChange={(e) => updateDraft("make", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Model</div>
+                    <input
+                      value={editDraft.model}
+                      onChange={(e) => updateDraft("model", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Year</div>
+                    <input
+                      value={editDraft.year}
+                      onChange={(e) => updateDraft("year", e.target.value)}
+                      style={detailInputStyle}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Serial Number</div>
+                    <input
+                      value={editDraft.serial_number}
+                      onChange={(e) => updateDraft("serial_number", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>License Plate</div>
+                    <input
+                      value={editDraft.license_plate}
+                      onChange={(e) => updateDraft("license_plate", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Fuel Type</div>
+                    <input
+                      value={editDraft.fuel_type}
+                      onChange={(e) => updateDraft("fuel_type", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Oil Type</div>
+                    <input
+                      value={editDraft.oil_type}
+                      onChange={(e) => updateDraft("oil_type", e.target.value)}
+                      style={detailInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Season</div>
+                    <select
+                      value={editDraft.season}
+                      onChange={(e) => updateDraft("season", e.target.value as EquipmentSeason)}
+                      style={detailInputStyle}
+                    >
+                      {EQUIPMENT_SEASONS.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Current Hours</div>
+                    <input
+                      value={editDraft.current_hours}
+                      onChange={(e) => updateDraft("current_hours", e.target.value)}
+                      style={detailInputStyle}
+                      inputMode="decimal"
+                    />
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>Asset ID</div>
+                    <input
+                      value={canEditAssetId ? editDraft.external_id : normalizeTruckAssetId(editDraft.external_id)}
+                      onChange={(e) => updateDraft("external_id", e.target.value)}
+                      style={{ ...detailInputStyle, opacity: canEditAssetId ? 1 : 0.72 }}
+                      disabled={!canEditAssetId}
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: 12,
+                  marginTop: 14,
+                }}
+              >
+                <Spec label="Type" value={equipment?.equipment_type ?? "-"} />
+                <Spec label="Make" value={equipment?.make ?? "-"} />
+                <Spec label="Model" value={equipment?.model ?? "-"} />
+                <Spec label="Year" value={typeof equipment?.year === "number" ? String(equipment.year) : "-"} />
+                <Spec label="Serial Number" value={equipment?.serial_number ?? "-"} />
+                <Spec label="License Plate" value={equipment?.license_plate ?? "-"} />
+                <Spec label="Fuel Type" value={equipment?.fuel_type ?? "-"} />
+                <Spec label="Oil Type" value={equipment?.oil_type ?? "-"} />
+                <Spec
+                  label="Season"
+                  value={
+                    normalizeEquipmentSeason(equipment?.season) ??
+                    inferEquipmentSeason(equipment?.equipment_type, equipment?.name, equipment?.id)
+                  }
+                />
+                <Spec
+                  label="Current Hours"
+                  value={
+                    typeof equipment?.current_hours === "number"
+                      ? equipment.current_hours.toLocaleString()
+                      : "-"
+                  }
+                />
+                <Spec label="Asset ID" value={displayAssetId} />
+              </div>
+            )}
+          </div>
+        </details>
       </div>
     </main>
   );
