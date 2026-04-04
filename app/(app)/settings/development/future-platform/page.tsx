@@ -20,6 +20,9 @@ export default function FuturePlatformOverviewPage() {
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <Link href="/settings/development/future-platform/home" style={labButtonStyle}>
+            Open Future Home
+          </Link>
           <Link href="/settings/development/future-platform/modules" style={labButtonStyle}>
             Audit Modules
           </Link>

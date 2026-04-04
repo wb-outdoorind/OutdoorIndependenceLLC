@@ -20,6 +20,64 @@ const LAB_TABS = [
 export default function LabLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { summary } = useFuturePlatformLab();
+  const isProductSurface =
+    pathname?.startsWith("/settings/development/future-platform/home") ||
+    pathname?.startsWith("/settings/development/future-platform/people-hub");
+
+  if (isProductSurface) {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <section
+          style={{
+            ...labSubtleCardStyle,
+            background: "rgba(255,255,255,0.025)",
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+            <Link href="/settings" style={{ ...labButtonStyle, padding: "8px 12px" }}>
+              Back to Settings
+            </Link>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, opacity: 0.7 }}>
+              Development / Future Platform Lab
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.35, opacity: 0.68 }}>
+                Planning Layer
+              </div>
+              <div style={{ ...labMutedTextStyle, marginTop: 6, maxWidth: 760 }}>
+                Use the Lab to evaluate future product direction, then move into Future Home and the
+                hub previews without the planning shell competing for attention.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              <Link href="/settings/development/future-platform" style={labButtonStyle}>
+                Open Lab Overview
+              </Link>
+              <Link href="/settings/development/future-platform/home" style={labButtonStyle}>
+                Open Future Home
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <div>{children}</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
