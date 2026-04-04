@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import ClientEditorDialog from "@/components/crm/ClientEditorDialog";
 import CrmShell from "@/components/crm/CrmShell";
@@ -45,6 +45,7 @@ const activeSearchInputStyle: React.CSSProperties = {
 
 export default function CrmClientsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { clients, propertiesForClient, saveClient, deleteClient } = useCrm();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<CrmClient | null>(null);
@@ -53,8 +54,13 @@ export default function CrmClientsPage() {
   const [hoveredClientId, setHoveredClientId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
+    () => (searchParams.get("status") === "active" ? "active" : "all")
+  );
   const [typeFilter, setTypeFilter] = useState<"all" | "municipal" | "hoa" | "commercial">("all");
+  const [structureFilter, setStructureFilter] = useState(
+    () => searchParams.get("structure") === "missing-properties"
+  );
 
   const sortedClients = clients.slice().sort((left, right) => left.displayName.localeCompare(right.displayName));
   const normalizedSearchQuery = debouncedSearchQuery.trim().toLowerCase();
@@ -79,11 +85,12 @@ export default function CrmClientsPage() {
           : client.status === "inactive" || client.status === "archived";
 
     const matchesType = typeFilter === "all" ? true : client.clientType === typeFilter;
+    const matchesStructure = structureFilter ? propertiesForClient(client.id).length === 0 : true;
 
-    return matchesSearch && matchesStatus && matchesType;
+    return matchesSearch && matchesStatus && matchesType && matchesStructure;
   });
   const hasActiveFilters =
-    searchQuery.trim().length > 0 || statusFilter !== "all" || typeFilter !== "all";
+    searchQuery.trim().length > 0 || statusFilter !== "all" || typeFilter !== "all" || structureFilter;
   const filteredSummary = {
     totalClients: filteredClients.length,
     totalProperties: filteredClients.reduce((total, client) => total + propertiesForClient(client.id).length, 0),
@@ -117,6 +124,8 @@ export default function CrmClientsPage() {
     setDebouncedSearchQuery("");
     setStatusFilter("all");
     setTypeFilter("all");
+    setStructureFilter(false);
+    router.replace("/crm/clients");
   }
 
   return (
