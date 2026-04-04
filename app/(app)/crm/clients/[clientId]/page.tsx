@@ -195,86 +195,19 @@ export default function CrmClientDetailPage() {
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
                 {properties.map((property) => (
-                  <article
+                  <PropertyCard
                     key={property.id}
-                    style={{ ...crmSubtleCardStyle, display: "grid", gap: 12, cursor: "pointer" }}
-                    role="link"
-                    tabIndex={0}
-                    onClick={() => router.push(`/crm/properties/${encodeURIComponent(property.id)}`)}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) return;
-                      if (event.key !== "Enter") return;
-                      router.push(`/crm/properties/${encodeURIComponent(property.id)}`);
+                    property={property}
+                    pendingDelete={pendingPropertyDeleteId === property.id}
+                    onOpen={() => router.push(`/crm/properties/${encodeURIComponent(property.id)}`)}
+                    onEdit={() => {
+                      setEditingProperty(property);
+                      setPropertyDialogOpen(true);
                     }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, fontSize: 17 }}>{property.propertyName}</div>
-                        <div style={{ marginTop: 4, ...crmMutedTextStyle, fontSize: 14 }}>
-                          {crmPropertyAddress(property)}
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <TypePill label={CRM_PROPERTY_TYPE_LABELS[property.propertyType]} />
-                        {!property.isActive ? <TypePill label="Inactive" /> : null}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {property.routeGroup ? <RoutePill label={property.routeGroup} /> : null}
-                      {property.gatePresent ? <IndicatorPill label="Gate" /> : null}
-                      {property.lockedGate ? <IndicatorPill label="Locked Gate" /> : null}
-                      {property.petsPresent ? <IndicatorPill label="Pets" /> : null}
-                      {property.entryNotes ? <IndicatorPill label="Entry Notes" /> : null}
-                      {property.siteNotes ? <IndicatorPill label="Site Notes" /> : null}
-                    </div>
-
-                    <div
-                      style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <Link href={`/crm/properties/${encodeURIComponent(property.id)}`} style={crmSecondaryButtonStyle}>
-                        View
-                      </Link>
-                      <button
-                        type="button"
-                        style={crmSecondaryButtonStyle}
-                        onClick={() => {
-                          setEditingProperty(property);
-                          setPropertyDialogOpen(true);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      {pendingPropertyDeleteId === property.id ? (
-                        <>
-                          <button
-                            type="button"
-                            style={crmDangerButtonStyle}
-                            onClick={() => handleDeleteProperty(property)}
-                          >
-                            Confirm Delete
-                          </button>
-                          <button
-                            type="button"
-                            style={crmSecondaryButtonStyle}
-                            onClick={() => setPendingPropertyDeleteId(null)}
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          style={crmDangerButtonStyle}
-                          onClick={() => setPendingPropertyDeleteId(property.id)}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </article>
+                    onDelete={() => handleDeleteProperty(property)}
+                    onArmDelete={() => setPendingPropertyDeleteId(property.id)}
+                    onCancelDelete={() => setPendingPropertyDeleteId(null)}
+                  />
                 ))}
               </div>
             )}
@@ -468,44 +401,189 @@ function TypePill({ label }: { label: string }) {
   );
 }
 
-function RoutePill({ label }: { label: string }) {
+function PropertyCard({
+  property,
+  pendingDelete,
+  onOpen,
+  onEdit,
+  onDelete,
+  onArmDelete,
+  onCancelDelete,
+}: {
+  property: CrmProperty;
+  pendingDelete: boolean;
+  onOpen: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onArmDelete: () => void;
+  onCancelDelete: () => void;
+}) {
+  const accessLabel = getPropertyAccessLabel(property);
+  const notesCount = getPropertyNotesCount(property);
+  const propertyTypeLabel = CRM_PROPERTY_TYPE_LABELS[property.propertyType];
+  const isMultiSite = property.propertyType === "multi_site";
+
   return (
-    <span
+    <article
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 28,
-        padding: "5px 10px",
-        borderRadius: 999,
-        border: "1px solid rgba(255, 214, 130, 0.22)",
-        background: "rgba(118, 82, 18, 0.2)",
-        color: "#ffe0ab",
-        fontSize: 12,
-        fontWeight: 800,
+        ...crmSubtleCardStyle,
+        display: "grid",
+        gap: 10,
+        padding: 16,
+        cursor: "pointer",
+      }}
+      role="link"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter") return;
+        onOpen();
       }}
     >
-      Route {label}
-    </span>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "start",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "grid", gap: 8, minWidth: 0, flex: "1 1 320px" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.2 }}>{property.propertyName}</div>
+            {isMultiSite ? <QuietBadge label="Multi-Site" /> : null}
+            {!property.isActive ? <StatusBadge label="Inactive" /> : null}
+          </div>
+
+          <div style={{ fontSize: 14, lineHeight: 1.45 }}>{crmPropertyAddress(property)}</div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            {!isMultiSite ? <PrimaryMeta label={propertyTypeLabel} /> : null}
+            {property.routeGroup ? <PrimaryMeta label={`Route: ${property.routeGroup}`} /> : null}
+            {accessLabel ? <SecondaryMeta label={`Access: ${accessLabel}`} /> : null}
+            {notesCount > 0 ? (
+              <SecondaryMeta label={notesCount === 1 ? "Notes" : `${notesCount} notes`} />
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Link href={`/crm/properties/${encodeURIComponent(property.id)}`} style={smallActionButtonStyle}>
+            View
+          </Link>
+          <button type="button" style={smallActionButtonStyle} onClick={onEdit}>
+            Edit
+          </button>
+          {pendingDelete ? (
+            <>
+              <button type="button" style={smallDangerButtonStyle} onClick={onDelete}>
+                Confirm Delete
+              </button>
+              <button type="button" style={smallActionButtonStyle} onClick={onCancelDelete}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" style={smallDangerButtonStyle} onClick={onArmDelete}>
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 
-function IndicatorPill({ label }: { label: string }) {
+function PrimaryMeta({ label }: { label: string }) {
+  return <span style={{ fontWeight: 700 }}>{label}</span>;
+}
+
+function SecondaryMeta({ label }: { label: string }) {
+  return <span style={{ opacity: 0.72 }}>{label}</span>;
+}
+
+function QuietBadge({ label }: { label: string }) {
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
-        minHeight: 28,
-        padding: "5px 10px",
+        minHeight: 24,
+        padding: "3px 8px",
         borderRadius: 999,
-        border: "1px solid rgba(116, 168, 255, 0.24)",
-        background: "rgba(33, 74, 141, 0.2)",
-        color: "#cfe3ff",
-        fontSize: 12,
-        fontWeight: 800,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)",
+        fontSize: 11,
+        fontWeight: 700,
+        opacity: 0.78,
       }}
     >
       {label}
     </span>
   );
 }
+
+function StatusBadge({ label }: { label: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 24,
+        padding: "3px 8px",
+        borderRadius: 999,
+        border: "1px solid rgba(255, 126, 126, 0.2)",
+        background: "rgba(126, 29, 29, 0.16)",
+        color: "#ffd0d0",
+        fontSize: 11,
+        fontWeight: 700,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function getPropertyAccessLabel(property: CrmProperty) {
+  const accessBits: string[] = [];
+
+  if (property.gatePresent) accessBits.push("Gate");
+  if (property.lockedGate) accessBits.push("Locked Gate");
+  if (property.petsPresent) accessBits.push("Pets");
+
+  return accessBits.join(", ");
+}
+
+function getPropertyNotesCount(property: CrmProperty) {
+  return Number(Boolean(property.entryNotes?.trim())) + Number(Boolean(property.siteNotes?.trim()));
+}
+
+const smallActionButtonStyle: React.CSSProperties = {
+  ...crmSecondaryButtonStyle,
+  minHeight: 34,
+  padding: "7px 10px",
+  borderRadius: 10,
+  fontSize: 12,
+};
+
+const smallDangerButtonStyle: React.CSSProperties = {
+  ...crmDangerButtonStyle,
+  minHeight: 34,
+  padding: "7px 10px",
+  borderRadius: 10,
+  fontSize: 12,
+};
