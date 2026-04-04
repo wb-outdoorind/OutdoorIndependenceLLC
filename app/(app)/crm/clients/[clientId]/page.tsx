@@ -24,49 +24,6 @@ import {
   type CrmProperty,
 } from "@/lib/crm";
 
-const CLIENT_ACTIVITY_BY_ID: Record<
-  string,
-  {
-    openJobs: number;
-    upcomingServices: number;
-    lastServiceDate: string;
-    outstandingBalance: string;
-  }
-> = {
-  client_maple_ridge_hoa: {
-    openJobs: 3,
-    upcomingServices: 4,
-    lastServiceDate: "2026-03-22",
-    outstandingBalance: "$4,860.00",
-  },
-  client_keller_residence: {
-    openJobs: 1,
-    upcomingServices: 2,
-    lastServiceDate: "2026-03-24",
-    outstandingBalance: "$185.00",
-  },
-  client_brookfield_parks: {
-    openJobs: 5,
-    upcomingServices: 6,
-    lastServiceDate: "2026-03-20",
-    outstandingBalance: "$12,440.00",
-  },
-  client_northside_commerce: {
-    openJobs: 0,
-    upcomingServices: 0,
-    lastServiceDate: "2025-11-18",
-    outstandingBalance: "$0.00",
-  },
-};
-
-const PROPERTY_LAST_SERVICE_BY_ID: Record<string, string> = {
-  property_maple_ridge_clubhouse: "2026-03-22",
-  property_maple_ridge_north: "2026-03-18",
-  property_keller_home: "2026-03-24",
-  property_brookfield_admin: "2026-03-20",
-  property_northside_lot_a: "2025-11-18",
-};
-
 export default function CrmClientDetailPage() {
   const params = useParams<{ clientId: string }>();
   const router = useRouter();
@@ -90,10 +47,7 @@ export default function CrmClientDetailPage() {
 
   if (!client) {
     return (
-      <CrmShell
-        title="Client Not Found"
-        description="This client record is no longer available."
-      >
+      <CrmShell title="Client Not Found" description="This client record is no longer available.">
         <section style={crmCardStyle}>
           <div style={crmMutedTextStyle}>
             The client may have been removed. Return to the clients hub to continue.
@@ -104,13 +58,8 @@ export default function CrmClientDetailPage() {
   }
 
   const currentClient = client;
-  const activity = CLIENT_ACTIVITY_BY_ID[currentClient.id] ?? {
-    openJobs: 0,
-    upcomingServices: 0,
-    lastServiceDate: currentClient.updatedAt,
-    outstandingBalance: "$0.00",
-  };
   const activeProperties = properties.filter((property) => property.isActive);
+  const inactiveProperties = properties.length - activeProperties.length;
   const gatedProperties = properties.filter((property) => property.gatePresent || property.lockedGate);
   const routeGroups = Array.from(new Set(properties.map((property) => property.routeGroup).filter(Boolean)));
   const serviceMix = Array.from(new Set(properties.flatMap((property) => getPropertyServiceTypes(property))));
@@ -128,7 +77,7 @@ export default function CrmClientDetailPage() {
   return (
     <CrmShell
       title={currentClient.displayName}
-      description="Contacts, properties, and operational context for this account."
+      description="Manage this account, confirm its service locations, and prepare it for the next workflow step."
       breadcrumb={
         <>
           <Link href="/crm/clients" style={{ color: "inherit", textDecoration: "none" }}>
@@ -182,61 +131,68 @@ export default function CrmClientDetailPage() {
       }
     >
       <div style={{ display: "grid", gap: 16 }}>
-        <section
-          style={{
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          }}
-        >
-          <SummaryCard label="Status" value={CRM_CLIENT_STATUS_LABELS[currentClient.status]} />
-          <SummaryCard label="Client Type" value={CRM_CLIENT_TYPE_LABELS[currentClient.clientType]} />
-          <SummaryCard label="Properties" value={`${properties.length}`} />
-        </section>
-
         <section style={crmCardStyle}>
-          <div style={{ display: "grid", gap: 14 }}>
-            <div>
-              <h2 style={{ margin: "0 0 6px" }}>Operational Snapshot</h2>
-              <div style={crmMutedTextStyle}>A quick view of current workload, service timing, and account balance.</div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <TypePill label={CRM_CLIENT_TYPE_LABELS[currentClient.clientType]} />
+              <TypePill label={CRM_CLIENT_STATUS_LABELS[currentClient.status]} />
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gap: 12,
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-              }}
-            >
-              <MetricTile label="Open Jobs" value={`${activity.openJobs}`} />
-              <MetricTile label="Upcoming Services" value={`${activity.upcomingServices}`} />
-              <MetricTile label="Last Service" value={formatDateLabel(activity.lastServiceDate)} />
-              <MetricTile label="Outstanding Balance" value={activity.outstandingBalance} />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <HeaderFact label="Properties" value={`${properties.length}`} />
+              <HeaderFact label="Active" value={`${activeProperties.length}`} />
             </div>
           </div>
         </section>
 
-        <section
-          style={{
-            display: "grid",
-            gap: 16,
-            gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 0.9fr)",
-            alignItems: "start",
-          }}
-        >
-          <div style={{ display: "grid", gap: 16 }}>
-            <div style={crmCardStyle}>
-              <h2 style={{ marginTop: 0, marginBottom: 10 }}>Contact</h2>
-              <div style={{ display: "grid", gap: 8, fontSize: 14 }}>
-                <div><strong>Primary Phone:</strong> {currentClient.primaryPhone || "Not set"}</div>
-                <div><strong>Secondary Phone:</strong> {currentClient.secondaryPhone || "Not set"}</div>
-                <div><strong>Primary Email:</strong> {currentClient.primaryEmail || "Not set"}</div>
-                <div><strong>Billing Email:</strong> {currentClient.billingEmail || "Not set"}</div>
+        <section style={crmCardStyle}>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "end",
+              }}
+            >
+              <div>
+                <h2 style={{ margin: "0 0 6px" }}>Properties</h2>
+                <div style={crmMutedTextStyle}>
+                  {properties.length === 0
+                    ? "This account needs at least one property before downstream estimate work can start."
+                    : `${activeProperties.length} active of ${properties.length} total service location${properties.length === 1 ? "" : "s"}.`}
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.35, opacity: 0.66 }}>
+                {properties.length} {properties.length === 1 ? "property" : "properties"}
               </div>
             </div>
 
-            <div style={crmCardStyle}>
-              <h2 style={{ marginTop: 0, marginBottom: 10 }}>Properties</h2>
+            {properties.length === 0 ? (
+              <div
+                style={{
+                  ...crmSubtleCardStyle,
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 18, fontWeight: 900 }}>No properties yet</div>
+                <div style={{ ...crmMutedTextStyle, maxWidth: 680 }}>
+                  Add the first service property for this account so estimates and future downstream work stay tied to
+                  the correct location.
+                </div>
+              </div>
+            ) : (
               <div style={{ display: "grid", gap: 12 }}>
                 {properties.map((property) => (
                   <article
@@ -252,7 +208,7 @@ export default function CrmClientDetailPage() {
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 800, fontSize: 17 }}>{property.propertyName}</div>
                         <div style={{ marginTop: 4, ...crmMutedTextStyle, fontSize: 14 }}>
                           {crmPropertyAddress(property)}
@@ -266,14 +222,7 @@ export default function CrmClientDetailPage() {
                     </div>
 
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {getPropertyServiceTypes(property).map((serviceType) => (
-                        <ServicePill key={`${property.id}-${serviceType}`} label={serviceType} />
-                      ))}
                       {property.routeGroup ? <RoutePill label={property.routeGroup} /> : null}
-                      <IndicatorPill label={`Last Serviced ${formatDateLabel(getPropertyLastService(property))}`} />
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {property.gatePresent ? <IndicatorPill label="Gate" /> : null}
                       {property.lockedGate ? <IndicatorPill label="Locked Gate" /> : null}
                       {property.petsPresent ? <IndicatorPill label="Pets" /> : null}
@@ -328,46 +277,75 @@ export default function CrmClientDetailPage() {
                   </article>
                 ))}
               </div>
+            )}
+          </div>
+        </section>
+
+        <section
+          style={{
+            display: "grid",
+            gap: 16,
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            alignItems: "start",
+          }}
+        >
+          <div style={crmCardStyle}>
+            <h2 style={{ marginTop: 0, marginBottom: 14 }}>Contact + Billing Basics</h2>
+            <div style={{ display: "grid", gap: 12 }}>
+              <DetailRow label="Primary Phone" value={currentClient.primaryPhone || "Not set"} />
+              <DetailRow label="Secondary Phone" value={currentClient.secondaryPhone || "Not set"} />
+              <DetailRow label="Primary Email" value={currentClient.primaryEmail || "Not set"} />
+              <DetailRow label="Billing Email" value={currentClient.billingEmail || "Not set"} />
+              <DetailRow
+                label="Preferred Contact"
+                value={
+                  currentClient.preferredContactMethod
+                    ? CRM_CONTACT_METHOD_LABELS[currentClient.preferredContactMethod]
+                    : "Not set"
+                }
+              />
+              {currentClient.companyName ? <DetailRow label="Company" value={currentClient.companyName} /> : null}
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: 16 }}>
-            <div style={crmCardStyle}>
-              <h2 style={{ marginTop: 0, marginBottom: 14 }}>Billing & Notes</h2>
-              <div style={{ display: "grid", gap: 16 }}>
-                <SectionBlock title="Billing Info">
-                  <DetailRow label="Billing Email" value={currentClient.billingEmail || "Not set"} />
-                  <DetailRow label="Company" value={currentClient.companyName || "N/A"} />
-                  <DetailRow label="Outstanding Balance" value={activity.outstandingBalance} />
-                </SectionBlock>
+          <div style={crmCardStyle}>
+            <h2 style={{ marginTop: 0, marginBottom: 14 }}>Notes / Preferences</h2>
+            <div style={{ display: "grid", gap: 16 }}>
+              <SectionBlock title="Account Notes">
+                <div style={crmMutedTextStyle}>{currentClient.notes || "No service-relevant notes yet."}</div>
+              </SectionBlock>
 
-                <SectionBlock title="Contact Preferences">
-                  <DetailRow
-                    label="Preferred Method"
-                    value={
-                      currentClient.preferredContactMethod
-                        ? CRM_CONTACT_METHOD_LABELS[currentClient.preferredContactMethod]
-                        : "Not set"
-                    }
-                  />
-                  <DetailRow label="Primary Contact" value={currentClient.primaryEmail || currentClient.primaryPhone || "Not set"} />
-                  <DetailRow label="Status" value={CRM_CLIENT_STATUS_LABELS[currentClient.status]} />
-                </SectionBlock>
+              <SectionBlock title="Primary Contact">
+                <DetailRow
+                  label="Best Contact"
+                  value={currentClient.primaryEmail || currentClient.primaryPhone || "Not set"}
+                />
+              </SectionBlock>
+            </div>
+          </div>
+        </section>
 
-                <SectionBlock title="Notes">
-                  <div style={crmMutedTextStyle}>{currentClient.notes || "No client notes yet."}</div>
-                </SectionBlock>
+        <section style={crmCardStyle}>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div>
+              <h2 style={{ margin: "0 0 6px" }}>Structural Summary</h2>
+              <div style={crmMutedTextStyle}>
+                A compact readiness view of this account’s service-location structure.
               </div>
             </div>
 
-            <div style={crmCardStyle}>
-              <h2 style={{ marginTop: 0, marginBottom: 14 }}>Service Coverage</h2>
-              <div style={{ display: "grid", gap: 12 }}>
-                <DetailRow label="Active Properties" value={`${activeProperties.length} of ${properties.length}`} />
-                <DetailRow label="Gated Sites" value={`${gatedProperties.length}`} />
-                <DetailRow label="Route Groups" value={routeGroups.length ? routeGroups.join(", ") : "Not assigned"} />
-                <DetailRow label="Service Mix" value={serviceMix.length ? serviceMix.join(", ") : "Not assigned"} />
-              </div>
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              }}
+            >
+              <DetailRow label="Total Properties" value={`${properties.length}`} />
+              <DetailRow label="Active / Inactive" value={`${activeProperties.length} / ${inactiveProperties}`} />
+              <DetailRow label="Gated Sites" value={`${gatedProperties.length}`} />
+              <DetailRow label="Route Groups" value={routeGroups.length ? routeGroups.join(", ") : "Not assigned"} />
+              <DetailRow label="Service Mix" value={serviceMix.length ? serviceMix.join(", ") : "Not assigned"} />
             </div>
           </div>
         </section>
@@ -402,18 +380,6 @@ export default function CrmClientDetailPage() {
   );
 }
 
-function formatDateLabel(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
-function getPropertyLastService(property: CrmProperty) {
-  return PROPERTY_LAST_SERVICE_BY_ID[property.id] ?? property.updatedAt;
-}
-
 function getPropertyServiceTypes(property: CrmProperty) {
   const serviceTypes = new Set<string>();
 
@@ -436,27 +402,21 @@ function getPropertyServiceTypes(property: CrmProperty) {
   return Array.from(serviceTypes);
 }
 
-function MetricTile({ label, value }: { label: string; value: string }) {
+function HeaderFact({ label, value }: { label: string; value: string }) {
   return (
     <div
       style={{
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.035)",
-        padding: "14px 16px",
+        display: "grid",
+        gap: 4,
+        minWidth: 92,
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)",
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.35, opacity: 0.66 }}>{label}</div>
-      <div style={{ marginTop: 8, fontSize: 22, fontWeight: 900 }}>{value}</div>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={crmCardStyle}>
-      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.35, opacity: 0.66 }}>{label}</div>
-      <div style={{ marginTop: 10, fontSize: 24, fontWeight: 900 }}>{value}</div>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.35, opacity: 0.62 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 900 }}>{value}</div>
     </div>
   );
 }
@@ -499,27 +459,6 @@ function TypePill({ label }: { label: string }) {
         borderRadius: 999,
         border: "1px solid var(--surface-border)",
         background: "rgba(255,255,255,0.05)",
-        fontSize: 12,
-        fontWeight: 800,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ServicePill({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 28,
-        padding: "5px 10px",
-        borderRadius: 999,
-        border: "1px solid rgba(126,255,167,0.24)",
-        background: "rgba(53, 156, 84, 0.16)",
-        color: "#d3ffe0",
         fontSize: 12,
         fontWeight: 800,
       }}
