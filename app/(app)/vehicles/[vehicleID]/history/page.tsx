@@ -174,6 +174,29 @@ function formatDateTime(iso: string) {
   return d.toLocaleString();
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function humanizeKey(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .trim()
+    .replace(/\b\w/g, (s) => s.toUpperCase());
+}
+
+function formatChoiceValue(value: string | undefined) {
+  if (value === "pass") return "Pass";
+  if (value === "fail") return "Fail";
+  if (value === "na") return "N/A";
+  return "Not Answered";
+}
+
 function normalizeVehicleType(value: string | null | undefined): VehicleType {
   const type = (value ?? "").trim().toLowerCase();
   if (type === "car") return "car";
@@ -222,6 +245,14 @@ function cardStyle(): React.CSSProperties {
     background: "rgba(255,255,255,0.03)",
   };
 }
+
+const INSPECTION_SECTION_LABELS: Record<string, string> = {
+  truck: "Truck Inspection",
+  trailer: "Trailer Inspection",
+  plow: "Attachment Selection",
+  salter: "Salter Selection",
+  skid_loader: "Skid / Loader Inspection",
+};
 
 function chipStyle(active: boolean): React.CSSProperties {
   return {
@@ -324,6 +355,7 @@ export default function VehicleHistoryPage() {
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [vehicleType, setVehicleType] = useState<VehicleType>("truck");
   const [actionBusyKey, setActionBusyKey] = useState<string | null>(null);
+  const [expandedInspectionId, setExpandedInspectionId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -361,6 +393,12 @@ export default function VehicleHistoryPage() {
     };
   }, [vehicleId]);
 
+  const inspectionById = useMemo(() => {
+    const map = new Map<string, TripInspectionRecord>();
+    for (const row of inspectionRows) map.set(row.id, row);
+    return map;
+  }, [inspectionRows]);
+
   useEffect(() => {
     let alive = true;
 
@@ -371,7 +409,7 @@ export default function VehicleHistoryPage() {
       const { data, error } = await supabase
         .from("inspections")
         .select("id,created_at,vehicle_id,inspection_type,checklist,overall_status,mileage")
-        .eq("vehicle_id", params.vehicleID)
+        .eq("vehicle_id", vehicleId)
         .order("created_at", { ascending: false });
 
       if (!alive) return;
@@ -415,7 +453,7 @@ export default function VehicleHistoryPage() {
     return () => {
       alive = false;
     };
-  }, [params.vehicleID]);
+  }, [vehicleId]);
 
   useEffect(() => {
     let alive = true;
@@ -432,7 +470,7 @@ export default function VehicleHistoryPage() {
         .select(
           "id,vehicle_id,created_at,status,urgency,system_affected,drivability,issue_identified_during,unit_status,description"
         )
-        .eq("vehicle_id", params.vehicleID)
+        .eq("vehicle_id", vehicleId)
         .order("created_at", { ascending: false });
 
       if (!alive) return;
@@ -472,7 +510,7 @@ export default function VehicleHistoryPage() {
     return () => {
       alive = false;
     };
-  }, [vehicleId, params.vehicleID]);
+  }, [vehicleId]);
 
   useEffect(() => {
     let alive = true;
@@ -484,7 +522,7 @@ export default function VehicleHistoryPage() {
       const { data, error } = await supabase
         .from("maintenance_logs")
         .select("id,created_at,mileage,status_update,notes,vehicle_id")
-        .eq("vehicle_id", params.vehicleID)
+        .eq("vehicle_id", vehicleId)
         .order("created_at", { ascending: false });
 
       if (!alive) return;
@@ -511,7 +549,7 @@ export default function VehicleHistoryPage() {
     return () => {
       alive = false;
     };
-  }, [params.vehicleID]);
+  }, [vehicleId]);
 
   useEffect(() => {
     let alive = true;
@@ -523,7 +561,7 @@ export default function VehicleHistoryPage() {
       const { data, error } = await supabase
         .from("vehicle_pm_events")
         .select("id,vehicle_id,created_at,mileage,notes,result")
-        .eq("vehicle_id", params.vehicleID)
+        .eq("vehicle_id", vehicleId)
         .order("created_at", { ascending: false });
 
       if (!alive) return;
@@ -542,7 +580,7 @@ export default function VehicleHistoryPage() {
     return () => {
       alive = false;
     };
-  }, [params.vehicleID]);
+  }, [vehicleId]);
 
   const items = useMemo(() => {
     const preTrips = inspectionRows.filter((x) => x.type !== "post-trip").map(
@@ -736,6 +774,141 @@ export default function VehicleHistoryPage() {
     );
   }
 
+  function exportInspectionPdf(inspectionId: string, timelineType: "Pre-Trip" | "Post-Trip") {
+    const inspection = inspectionById.get(inspectionId);
+    if (!inspection) {
+      alert("Could not load this inspection record for export.");
+      return;
+    }
+    const createdAt = formatDateTime(inspection.createdAt);
+    const title = `${timelineType} Inspection Record`;
+    const headerMeta = [
+      `Vehicle ID: ${vehicleId}`,
+      inspection.employee ? `Teammate: ${inspection.employee}` : "",
+      inspection.inspectionDate ? `Inspection Date: ${inspection.inspectionDate}` : "",
+      inspection.inspectionStatus ? `Status: ${inspection.inspectionStatus}` : "",
+      typeof inspection.mileage === "number" ? `Reading: ${inspection.mileage.toLocaleString()} ${readingUnit}` : "",
+      `Submitted: ${createdAt}`,
+    ]
+      .filter(Boolean)
+      .map((x) => `<div>${escapeHtml(x)}</div>`)
+      .join("");
+
+    const sectionHtml = Object.entries(inspection.sections ?? {})
+      .filter(([, section]) => section?.applicable)
+      .map(([sectionId, section]) => {
+        const sectionLabel = INSPECTION_SECTION_LABELS[sectionId] ?? humanizeKey(sectionId);
+        const rows = Object.entries(section.items ?? {})
+          .map(
+            ([itemKey, value]) => `
+              <tr>
+                <td>${escapeHtml(humanizeKey(itemKey))}</td>
+                <td>${escapeHtml(formatChoiceValue(value))}</td>
+              </tr>
+            `
+          )
+          .join("");
+        return `
+          <div class="section">
+            <h3>${escapeHtml(sectionLabel)}</h3>
+            ${
+              section.name && section.name.trim()
+                ? `<div class="section-meta"><strong>Selection:</strong> ${escapeHtml(section.name.trim())}</div>`
+                : ""
+            }
+            <table>
+              <thead>
+                <tr><th>Checklist Item</th><th>Result</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      })
+      .join("");
+
+    const exitingHtml =
+      timelineType === "Post-Trip" && inspection.exiting
+        ? `
+          <div class="section">
+            <h3>End-of-Shift Checklist</h3>
+            <table>
+              <thead><tr><th>Checklist Item</th><th>Result</th></tr></thead>
+              <tbody>
+                ${Object.entries(inspection.exiting)
+                  .map(
+                    ([itemKey, value]) => `
+                      <tr>
+                        <td>${escapeHtml(humanizeKey(itemKey))}</td>
+                        <td>${escapeHtml(formatChoiceValue(value))}</td>
+                      </tr>
+                    `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        `
+        : "";
+
+    const notesHtml =
+      inspection.notes && inspection.notes.trim()
+        ? `<div class="section"><h3>Notes</h3><div class="notes">${escapeHtml(inspection.notes.trim())}</div></div>`
+        : "";
+
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)} - ${escapeHtml(vehicleId)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+      h1 { margin: 0 0 8px 0; font-size: 22px; }
+      h3 { margin: 0 0 8px 0; font-size: 15px; }
+      .header { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 14px; }
+      .brand { display: flex; align-items: center; gap: 10px; }
+      .brand img { height: 44px; width: auto; object-fit: contain; }
+      .brand-title { font-weight: 700; font-size: 14px; }
+      .meta { border: 1px solid #bbb; border-radius: 8px; padding: 10px; font-size: 12px; margin-bottom: 14px; }
+      .section { border: 1px solid #bbb; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+      .section-meta { margin-bottom: 8px; font-size: 12px; color: #333; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { border: 1px solid #bbb; padding: 6px; text-align: left; vertical-align: top; }
+      th { background: #efefef; }
+      .notes { white-space: pre-wrap; line-height: 1.35; }
+      .footer { margin-top: 16px; font-size: 11px; color: #444; }
+      @media print { @page { size: auto; margin: 10mm; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="brand">
+        <img src="${escapeHtml(`${window.location.origin}/App_Logo.png`)}" alt="Outdoor Independence LLC logo" />
+        <div class="brand-title">Outdoor Independence LLC Operations App</div>
+      </div>
+      <div style="font-size: 12px; text-align: right;">${escapeHtml(title)}</div>
+    </div>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">${headerMeta}</div>
+    ${sectionHtml || '<div class="section">No checklist sections were available for this form.</div>'}
+    ${exitingHtml}
+    ${notesHtml}
+    <div class="footer">Generated: ${escapeHtml(formatDateTime(new Date().toISOString()))}</div>
+  </body>
+</html>`;
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1200,height=900");
+    if (!printWindow) {
+      alert("Popup blocked. Allow popups to export this PDF.");
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
   useEffect(() => {
     if (!focusId) return;
     const timer = window.setTimeout(() => {
@@ -834,6 +1007,9 @@ export default function VehicleHistoryPage() {
             {filtered.map((x) => {
               const isManageableType = x.type === "Maintenance Request" || x.type === "Maintenance Log";
               const canEditDelete = canManage && isManageableType;
+              const isInspectionType = x.type === "Pre-Trip" || x.type === "Post-Trip";
+              const isExpandedInspection = isInspectionType && expandedInspectionId === x.id;
+              const inspectionDetail = isInspectionType ? inspectionById.get(x.id) : null;
               const focusQuery = new URLSearchParams({
                 focusType: x.type,
                 focusId: x.id,
@@ -880,22 +1056,166 @@ export default function VehicleHistoryPage() {
                   {x.notes ? <div style={{ marginTop: 8, opacity: 0.75, lineHeight: 1.35 }}>{x.notes}</div> : null}
 
                   <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <Link
-                      href={backToHistory}
+                    {isInspectionType ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedInspectionId((prev) => (prev === x.id ? null : x.id))}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            background: "rgba(255,255,255,0.04)",
+                            color: "inherit",
+                            fontSize: 13,
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {isExpandedInspection ? "Hide Form" : "See Form"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            exportInspectionPdf(x.id, x.type as "Pre-Trip" | "Post-Trip")
+                          }
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            border: "1px solid rgba(126,255,167,0.28)",
+                            background: "rgba(126,255,167,0.10)",
+                            color: "inherit",
+                            fontSize: 13,
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Export PDF
+                        </button>
+                      </>
+                    ) : (
+                      <Link
+                        href={backToHistory}
+                        style={{
+                          textDecoration: "none",
+                          color: "inherit",
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(255,255,255,0.04)",
+                          fontSize: 13,
+                          fontWeight: 800,
+                        }}
+                      >
+                        See Form
+                      </Link>
+                    )}
+                  </div>
+
+                  {isExpandedInspection && inspectionDetail ? (
+                    <div
                       style={{
-                        textDecoration: "none",
-                        color: "inherit",
-                        padding: "8px 10px",
-                        borderRadius: 10,
+                        marginTop: 12,
                         border: "1px solid rgba(255,255,255,0.14)",
-                        background: "rgba(255,255,255,0.04)",
-                        fontSize: 13,
-                        fontWeight: 800,
+                        borderRadius: 12,
+                        background: "rgba(255,255,255,0.02)",
+                        padding: 12,
+                        display: "grid",
+                        gap: 10,
                       }}
                     >
-                      See Form
-                    </Link>
-                  </div>
+                      <div style={{ fontWeight: 900 }}>
+                        {x.type} Form Detail
+                      </div>
+                      <div style={{ fontSize: 13, opacity: 0.82 }}>
+                        {[inspectionDetail.employee ? `Teammate: ${inspectionDetail.employee}` : null, inspectionDetail.inspectionDate ? `Inspection Date: ${inspectionDetail.inspectionDate}` : null, inspectionDetail.inspectionStatus ? `Status: ${inspectionDetail.inspectionStatus}` : null]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </div>
+
+                      {inspectionDetail.sections ? (
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {Object.entries(inspectionDetail.sections)
+                            .filter(([, section]) => section?.applicable)
+                            .map(([sectionId, section]) => (
+                              <div
+                                key={`${x.id}:${sectionId}`}
+                                style={{
+                                  border: "1px solid rgba(255,255,255,0.12)",
+                                  borderRadius: 10,
+                                  padding: 10,
+                                  background: "rgba(255,255,255,0.02)",
+                                  display: "grid",
+                                  gap: 8,
+                                }}
+                              >
+                                <div style={{ fontWeight: 800 }}>
+                                  {INSPECTION_SECTION_LABELS[sectionId] ?? humanizeKey(sectionId)}
+                                </div>
+                                {section.name ? (
+                                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                                    Selection: <strong>{section.name}</strong>
+                                  </div>
+                                ) : null}
+                                <div style={{ display: "grid", gap: 6 }}>
+                                  {Object.entries(section.items ?? {}).map(([itemKey, value]) => (
+                                    <div
+                                      key={`${x.id}:${sectionId}:${itemKey}`}
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        fontSize: 13,
+                                        borderBottom: "1px solid rgba(255,255,255,0.07)",
+                                        paddingBottom: 4,
+                                      }}
+                                    >
+                                      <span style={{ opacity: 0.82 }}>{humanizeKey(itemKey)}</span>
+                                      <span style={{ fontWeight: 800 }}>{formatChoiceValue(value)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      ) : null}
+
+                      {x.type === "Post-Trip" && inspectionDetail.exiting ? (
+                        <div
+                          style={{
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: 10,
+                            padding: 10,
+                            background: "rgba(255,255,255,0.02)",
+                            display: "grid",
+                            gap: 8,
+                          }}
+                        >
+                          <div style={{ fontWeight: 800 }}>End-of-Shift Checklist</div>
+                          <div style={{ display: "grid", gap: 6 }}>
+                            {Object.entries(inspectionDetail.exiting).map(([itemKey, value]) => (
+                              <div
+                                key={`${x.id}:exiting:${itemKey}`}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  fontSize: 13,
+                                  borderBottom: "1px solid rgba(255,255,255,0.07)",
+                                  paddingBottom: 4,
+                                }}
+                              >
+                                <span style={{ opacity: 0.82 }}>{humanizeKey(itemKey)}</span>
+                                <span style={{ fontWeight: 800 }}>{formatChoiceValue(value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {canEditDelete ? (
                     <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
