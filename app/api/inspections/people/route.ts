@@ -33,7 +33,9 @@ type PersonOption = {
 const LEAD_ROLES = new Set<AppRole>([
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
+  "mechanic",
   "team_lead_1",
   "team_lead_2",
 ]);

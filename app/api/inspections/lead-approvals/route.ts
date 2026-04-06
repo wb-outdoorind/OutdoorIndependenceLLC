@@ -9,7 +9,9 @@ export const runtime = "nodejs";
 const LEAD_ROLES = new Set([
   "owner",
   "operations_manager",
+  "sales_manager",
   "office_admin",
+  "mechanic",
   "team_lead_1",
   "team_lead_2",
 ]);
@@ -188,10 +190,7 @@ export async function POST(req: Request) {
     if (decision !== "approved" && decision !== "rejected") {
       return NextResponse.json({ error: "decision must be approved or rejected" }, { status: 400 });
     }
-    const canOverride = Boolean(
-      role &&
-        (role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin")
-    );
+    const canOverride = Boolean(role && LEAD_ROLES.has(role));
     if (!leadApproverId || (leadApproverId !== userId && !canOverride)) {
       return NextResponse.json({ error: "Not authorized to decide this sign-off." }, { status: 403 });
     }

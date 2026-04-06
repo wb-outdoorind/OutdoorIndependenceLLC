@@ -22,6 +22,7 @@ export const TEAMMATE_ROLES: readonly AppRole[] = [
 
 export const LEAD_APPROVAL_ROLES: readonly AppRole[] = [
   ...MANAGEMENT_ROLES,
+  "mechanic",
   "team_lead_1",
   "team_lead_2",
 ];

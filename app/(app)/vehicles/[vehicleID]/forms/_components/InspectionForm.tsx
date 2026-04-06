@@ -123,8 +123,15 @@ const SECTION_EQUIPMENT_PICKERS: Record<string, string> = {
   salter: "Salter Selection",
 };
 
-const TEAM_LEAD_ROLES = new Set<Role>(["team_lead_1", "team_lead_2"]);
-const MANAGEMENT_ROLES = new Set<Role>(["owner", "operations_manager", "office_admin"]);
+const SIGNOFF_APPROVER_ROLES = new Set<Role>([
+  "owner",
+  "operations_manager",
+  "sales_manager",
+  "office_admin",
+  "mechanic",
+  "team_lead_1",
+  "team_lead_2",
+]);
 const LOCKED_TEAMMATE_ROLES = new Set<Role>([
   "employee",
   "apprentice",
@@ -136,12 +143,8 @@ const LOCKED_TEAMMATE_ROLES = new Set<Role>([
 ]);
 const SPECIFIED_ASSET_TYPES_FOR_LEAD_APPROVAL = new Set<VehicleType>(["truck", "car"]);
 
-function isTeamLeadRole(role: string | null | undefined) {
-  return role != null && TEAM_LEAD_ROLES.has(role as Role);
-}
-
-function isManagementRole(role: string | null | undefined) {
-  return role != null && MANAGEMENT_ROLES.has(role as Role);
+function isSignoffApproverRole(role: string | null | undefined) {
+  return role != null && SIGNOFF_APPROVER_ROLES.has(role as Role);
 }
 
 function shouldLockTeammateName(role: string | null | undefined) {
@@ -150,8 +153,7 @@ function shouldLockTeammateName(role: string | null | undefined) {
 
 function requiresLeadApprovalForRole(role: string | null | undefined) {
   if (!role) return true;
-  if (isManagementRole(role)) return false;
-  if (isTeamLeadRole(role)) return false;
+  if (isSignoffApproverRole(role)) return false;
   return true;
 }
 
@@ -502,7 +504,6 @@ export default function InspectionForm({
   const [currentUserDisplayName, setCurrentUserDisplayName] = useState("");
   const [teammateOptions, setTeammateOptions] = useState<PersonOption[]>([]);
   const [crewMemberIds, setCrewMemberIds] = useState<string[]>([]);
-  const [crewPickerId, setCrewPickerId] = useState("");
   const [leadApproverOptions, setLeadApproverOptions] = useState<PersonOption[]>([]);
   const [leadApproverId, setLeadApproverId] = useState("");
   const [peopleLoadError, setPeopleLoadError] = useState<string | null>(null);
@@ -840,23 +841,12 @@ export default function InspectionForm({
     [crewMemberIds, teammateOptions]
   );
 
-  const availableCrewOptions = useMemo(
-    () =>
-      teammateOptions.filter(
-        (row) => row.id !== currentUserId && !crewMemberIds.includes(row.id)
-      ),
-    [teammateOptions, currentUserId, crewMemberIds]
+  const crewSelectionOptions = useMemo(
+    () => teammateOptions.filter((row) => row.id !== currentUserId),
+    [teammateOptions, currentUserId]
   );
 
-  const teamLeadApproverOptions = useMemo(
-    () => leadApproverOptions.filter((row) => isTeamLeadRole(row.role)),
-    [leadApproverOptions]
-  );
-
-  const selectableLeadApproverOptions = useMemo(() => {
-    if (teamLeadApproverOptions.length > 0) return teamLeadApproverOptions;
-    return leadApproverOptions;
-  }, [teamLeadApproverOptions, leadApproverOptions]);
+  const selectableLeadApproverOptions = useMemo(() => leadApproverOptions, [leadApproverOptions]);
 
   const requiresLeadApproval = useMemo(() => {
     if (!SPECIFIED_ASSET_TYPES_FOR_LEAD_APPROVAL.has(vehicleType)) return false;
@@ -913,6 +903,14 @@ export default function InspectionForm({
 
   function removeCrewMember(id: string) {
     setCrewMemberIds((prev) => prev.filter((rowId) => rowId !== id));
+  }
+
+  function toggleCrewMember(id: string, checked: boolean) {
+    if (checked) {
+      addCrewMember(id);
+      return;
+    }
+    removeCrewMember(id);
   }
 
   function setItemExtraValue(sectionId: string, itemKey: string, value: string) {
@@ -1177,13 +1175,13 @@ export default function InspectionForm({
     if (!inspectionStatus) return alert("Inspection status is required.");
     if (requiresLeadApproval) {
       if (!selectableLeadApproverOptions.length) {
-        return alert("This asset requires team lead approval, but no approver is available.");
+        return alert("This asset requires sign-off by a role above Team Member 2, but no approver is available.");
       }
       if (!effectiveLeadApproverId) {
-        return alert("Select a Team Lead approver before submitting.");
+        return alert("Select an approver above Team Member 2 before submitting.");
       }
       if (!selectableLeadApproverOptions.some((row) => row.id === effectiveLeadApproverId)) {
-        return alert("Selected Team Lead approver is no longer available. Select another approver.");
+        return alert("Selected approver is no longer available. Select another approver.");
       }
     }
 
@@ -1584,37 +1582,52 @@ export default function InspectionForm({
                 ))}
               </div>
             )}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(220px, 1fr) auto",
-                gap: 8,
-                alignItems: "center",
-              }}
-            >
-              <select
-                value={crewPickerId}
-                onChange={(e) => setCrewPickerId(e.target.value)}
-                style={inputStyle()}
-              >
-                <option value="">Select teammate...</option>
-                {availableCrewOptions.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {employeeBadgePrimary(row)} - {employeeBadgeSecondary(row)}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                style={buttonStyle()}
-                onClick={() => {
-                  if (!crewPickerId) return;
-                  addCrewMember(crewPickerId);
-                  setCrewPickerId("");
-                }}
-              >
-                Add Teammate
-              </button>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.78, fontWeight: 700 }}>
+                Select all that apply:
+              </div>
+              {crewSelectionOptions.length === 0 ? (
+                <div style={{ fontSize: 12, opacity: 0.72 }}>No additional teammates available.</div>
+              ) : (
+                <div
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 10,
+                    padding: 10,
+                    display: "grid",
+                    gap: 8,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  {crewSelectionOptions.map((row) => {
+                    const checked = crewMemberIds.includes(row.id);
+                    return (
+                      <label
+                        key={row.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          cursor: "pointer",
+                          padding: "4px 2px",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => toggleCrewMember(row.id, e.target.checked)}
+                        />
+                        <span>
+                          <strong>{employeeBadgePrimary(row)}</strong>
+                          <span style={{ opacity: 0.72 }}> · {employeeBadgeSecondary(row)}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1628,16 +1641,16 @@ export default function InspectionForm({
                 background: "rgba(255,180,120,0.08)",
               }}
             >
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Team Lead Approval Required</div>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Approver Sign-Off Required</div>
               <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
-                One or more accountable teammates are below Team Lead on a specified asset. Select a Team Lead approver before submitting.
+                One or more accountable teammates are Team Member 2 or below on a specified asset. Select any approver above Team Member 2 before submitting.
               </div>
               <select
                 value={effectiveLeadApproverId}
                 onChange={(e) => setLeadApproverId(e.target.value)}
                 style={inputStyle()}
               >
-                <option value="">Select team lead approver...</option>
+                <option value="">Select approver...</option>
                 {selectableLeadApproverOptions.map((row) => (
                   <option key={row.id} value={row.id}>
                     {employeeBadgePrimary(row)} - {employeeBadgeSecondary(row)}
