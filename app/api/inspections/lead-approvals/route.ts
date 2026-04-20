@@ -15,6 +15,7 @@ const LEAD_ROLES = new Set([
   "team_lead_1",
   "team_lead_2",
 ]);
+const LEAD_ROLE_LIST = Array.from(LEAD_ROLES);
 
 type InspectionRow = {
   id: string | number;
@@ -58,7 +59,6 @@ export async function GET(req: Request) {
     .select(
       "id,vehicle_id,inspection_type,mileage,created_at,lead_approver_id,lead_approval_status,lead_approval_requested_at,lead_approved_at,lead_approved_by,lead_approval_note,checklist"
     )
-    .eq("lead_approver_id", userId)
     .in("lead_approval_status", ["pending", "approved", "rejected"])
     .order("lead_approval_requested_at", { ascending: false })
     .limit(summaryOnly ? 10 : 100);
@@ -148,28 +148,35 @@ export async function POST(req: Request) {
   const leadApproverId = row.lead_approver_id;
 
   if (body.action === "request") {
-    if (!leadApproverId) {
-      return NextResponse.json({ error: "No lead approver selected on this inspection." }, { status: 400 });
-    }
-
     const title = `${row.inspection_type === "Post-Trip" ? "Post-Trip" : "Pre-Trip"} sign-off requested`;
     const checklistObj = row.checklist && typeof row.checklist === "object" ? row.checklist : {};
     const teammate = asString((checklistObj as Record<string, unknown>).employee) || "Unknown teammate";
+    const { data: reviewerRows, error: reviewerError } = await admin
+      .from("profiles")
+      .select("id")
+      .in("role", LEAD_ROLE_LIST);
+    if (reviewerError) return NextResponse.json({ error: reviewerError.message }, { status: 500 });
 
-    const { error: notifyError } = await admin.from("user_notifications").upsert(
-      {
-        recipient_id: leadApproverId,
+    const recipientIds = ((reviewerRows ?? []) as Array<{ id: string | null }>)
+      .map((row) => (typeof row.id === "string" ? row.id : ""))
+      .filter((id) => id && id !== userId);
+
+    if (recipientIds.length > 0) {
+      const notificationRows = recipientIds.map((recipientId) => ({
+        recipient_id: recipientId,
         title,
-        body: `${teammate} submitted ${labelForInspection(row)} and requested your sign-off.`,
+        body: `${teammate} submitted ${labelForInspection(row)} and requested sign-off.`,
         severity: "warning",
         kind: "trip_lead_signoff_request",
         entity_type: "inspection",
         entity_id: String(row.id),
-        dedupe_key: `trip_lead_signoff_request:${row.id}:${leadApproverId}`,
-      },
-      { onConflict: "recipient_id,dedupe_key" }
-    );
-    if (notifyError) return NextResponse.json({ error: notifyError.message }, { status: 500 });
+        dedupe_key: `trip_lead_signoff_request:${row.id}:${recipientId}`,
+      }));
+      const { error: notifyError } = await admin
+        .from("user_notifications")
+        .upsert(notificationRows, { onConflict: "recipient_id,dedupe_key" });
+      if (notifyError) return NextResponse.json({ error: notifyError.message }, { status: 500 });
+    }
 
     await writeServerAudit(admin, {
       actorId: userId,
@@ -180,7 +187,7 @@ export async function POST(req: Request) {
       eventType: "inspection_lead_signoff_requested",
       entityType: "inspection",
       entityId: inspectionId,
-      meta: { leadApproverId },
+      meta: { leadApproverId, recipientCount: recipientIds.length },
     });
     return NextResponse.json({ ok: true });
   }
@@ -190,8 +197,8 @@ export async function POST(req: Request) {
     if (decision !== "approved" && decision !== "rejected") {
       return NextResponse.json({ error: "decision must be approved or rejected" }, { status: 400 });
     }
-    const canOverride = Boolean(role && LEAD_ROLES.has(role));
-    if (!leadApproverId || (leadApproverId !== userId && !canOverride)) {
+    const canDecide = Boolean(role && LEAD_ROLES.has(role));
+    if (!canDecide) {
       return NextResponse.json({ error: "Not authorized to decide this sign-off." }, { status: 403 });
     }
 

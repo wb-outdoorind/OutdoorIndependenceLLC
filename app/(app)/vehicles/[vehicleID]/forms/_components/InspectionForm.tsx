@@ -61,7 +61,6 @@ type StoredInspectionRecord = {
   notes: string;
 
   employeeSignature: string;
-  managerSignature?: string;
 };
 
 type ExtraFieldConfig = {
@@ -497,7 +496,6 @@ export default function InspectionForm({
   >("");
   const [notes, setNotes] = useState("");
   const [employeeSignature, setEmployeeSignature] = useState("");
-  const [managerSignature, setManagerSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -505,7 +503,6 @@ export default function InspectionForm({
   const [teammateOptions, setTeammateOptions] = useState<PersonOption[]>([]);
   const [crewMemberIds, setCrewMemberIds] = useState<string[]>([]);
   const [leadApproverOptions, setLeadApproverOptions] = useState<PersonOption[]>([]);
-  const [leadApproverId, setLeadApproverId] = useState("");
   const [peopleLoadError, setPeopleLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -623,7 +620,6 @@ export default function InspectionForm({
         setTeammateOptions(nextCrew);
         setLeadApproverOptions(nextLead);
         setCrewMemberIds((prev) => prev.filter((id) => nextCrew.some((row) => row.id === id)));
-        setLeadApproverId((prev) => (prev && nextLead.some((row) => row.id === prev) ? prev : ""));
         if (shouldLockTeammateName(effectiveRole)) {
           setEmployee(actorDisplayName);
         } else if (actorDisplayName) {
@@ -846,22 +842,12 @@ export default function InspectionForm({
     [teammateOptions, currentUserId]
   );
 
-  const selectableLeadApproverOptions = useMemo(() => leadApproverOptions, [leadApproverOptions]);
-
   const requiresLeadApproval = useMemo(() => {
     if (!SPECIFIED_ASSET_TYPES_FOR_LEAD_APPROVAL.has(vehicleType)) return false;
     const submitterNeedsApproval = requiresLeadApprovalForRole(currentUserRole);
     const crewNeedsApproval = selectedCrewMembers.some((row) => requiresLeadApprovalForRole(row.role));
     return submitterNeedsApproval || crewNeedsApproval;
   }, [vehicleType, currentUserRole, selectedCrewMembers]);
-
-  const effectiveLeadApproverId = useMemo(() => {
-    if (!requiresLeadApproval) return "";
-    const trimmed = leadApproverId.trim();
-    if (trimmed && selectableLeadApproverOptions.some((row) => row.id === trimmed)) return trimmed;
-    if (selectableLeadApproverOptions.length === 1) return selectableLeadApproverOptions[0].id;
-    return "";
-  }, [requiresLeadApproval, leadApproverId, selectableLeadApproverOptions]);
 
   function setApplicable(secId: string, applicable: boolean) {
     setSectionState((prev) => ({
@@ -1173,18 +1159,6 @@ export default function InspectionForm({
     if (!Number.isFinite(m) || m <= 0) return alert("Enter a valid mileage.");
     if (!teammateName) return alert("Teammate is required.");
     if (!inspectionStatus) return alert("Inspection status is required.");
-    if (requiresLeadApproval) {
-      if (!selectableLeadApproverOptions.length) {
-        return alert("This asset requires sign-off by a role above Team Member 2, but no approver is available.");
-      }
-      if (!effectiveLeadApproverId) {
-        return alert("Select an approver above Team Member 2 before submitting.");
-      }
-      if (!selectableLeadApproverOptions.some((row) => row.id === effectiveLeadApproverId)) {
-        return alert("Selected approver is no longer available. Select another approver.");
-      }
-    }
-
     if (hasInspectionFailures && !notes.trim())
       return alert("Notes are required when any item is marked Fail or mileage consistency fails.");
 
@@ -1211,12 +1185,6 @@ export default function InspectionForm({
       }
       if (sec.id === "truck" && st?.applicable && dashLightsOn.length === 0) {
         return alert("Please select all dash lights on for Truck Inspection.");
-      }
-      if (st?.applicable && sectionUsesLoadoutBucket(sec.id) && sec.id !== "truck") {
-        const selected = sectionEquipmentIds[sec.id] ?? [];
-        if (selected.length === 0) {
-          return alert(`Select at least one item for ${sec.title}.`);
-        }
       }
       if (sec.id === "trailer" && st?.applicable) {
         for (const linkedVehicleId of trailerVehicleIds) {
@@ -1273,9 +1241,6 @@ export default function InspectionForm({
       employee: teammateName,
       inspectionDate,
       employeeSignature: employeeSignature.trim(),
-      managerSignature: managerSignature.trim()
-        ? managerSignature.trim()
-        : undefined,
       crewMembers: selectedCrewMembers.map((row) => ({
         id: row.id,
         nickname: row.nickname,
@@ -1288,7 +1253,7 @@ export default function InspectionForm({
       })),
       leadApproval: {
         required: requiresLeadApproval,
-        approverId: requiresLeadApproval ? effectiveLeadApproverId : null,
+        approverId: null,
       },
       dashLightsOn,
       itemExtraValues,
@@ -1361,7 +1326,7 @@ export default function InspectionForm({
         checklist,
         overall_status: inspectionStatus,
         mileage: m,
-        lead_approver_id: requiresLeadApproval ? effectiveLeadApproverId : null,
+        lead_approver_id: null,
         lead_approval_status: leadStatus,
         lead_approval_requested_at: leadRequestedAt,
         lead_approved_at: leadApprovedAt,
@@ -1416,6 +1381,10 @@ export default function InspectionForm({
     }
 
     await clearDraft();
+    const uploadedFormLabel = type === "pre-trip" ? "Pre-Trip Inspection" : "Post-Trip Inspection";
+    if (typeof window !== "undefined") {
+      window.alert(`Successfully uploaded ${teammateName}'s ${uploadedFormLabel}`);
+    }
 
     const returnTo = (searchParams.get("returnTo") || "").trim();
     const linkedVehicleId = (searchParams.get("linkedVehicleId") || "").trim();
@@ -1643,20 +1612,11 @@ export default function InspectionForm({
             >
               <div style={{ fontWeight: 800, marginBottom: 6 }}>Approver Sign-Off Required</div>
               <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
-                One or more accountable teammates are Team Member 2 or below on a specified asset. Select any approver above Team Member 2 before submitting.
+                One or more accountable teammates are Team Member 2 or below on a specified asset. Submit normally and this inspection will enter the shared audit bucket for any reviewer above Team Member 2.
               </div>
-              <select
-                value={effectiveLeadApproverId}
-                onChange={(e) => setLeadApproverId(e.target.value)}
-                style={inputStyle()}
-              >
-                <option value="">Select approver...</option>
-                {selectableLeadApproverOptions.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {employeeBadgePrimary(row)} - {employeeBadgeSecondary(row)}
-                  </option>
-                ))}
-              </select>
+              <div style={{ fontSize: 12, opacity: 0.72 }}>
+                Available reviewers: <strong>{leadApproverOptions.length}</strong>
+              </div>
             </div>
           ) : null}
 
@@ -1953,9 +1913,9 @@ export default function InspectionForm({
                       background: "rgba(255,255,255,0.02)",
                     }}
                   >
-                    <div style={{ fontWeight: 700 }}>{SECTION_EQUIPMENT_PICKERS[sec.id]} *</div>
+                    <div style={{ fontWeight: 700 }}>{SECTION_EQUIPMENT_PICKERS[sec.id]} (optional)</div>
                     <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
-                      Add equipment one-by-one to the selected bucket for this section.
+                      Add equipment one-by-one to the selected bucket for this section if needed.
                     </div>
                     <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                       {(sectionEquipmentIds[sec.id] ?? []).length === 0 ? (
@@ -2377,9 +2337,9 @@ export default function InspectionForm({
                             background: "rgba(255,255,255,0.02)",
                           }}
                         >
-                          <div style={{ fontWeight: 700 }}>Truck Loadout Equipment</div>
+                          <div style={{ fontWeight: 700 }}>Truck Loadout Equipment (optional)</div>
                           <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
-                            Add equipment one-by-one to the selected bucket for this section.
+                            Add equipment one-by-one to the selected bucket for this section if needed.
                           </div>
                           <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                             {(sectionEquipmentIds[sec.id] ?? []).length === 0 ? (
@@ -2569,9 +2529,9 @@ export default function InspectionForm({
                             background: "rgba(255,255,255,0.02)",
                           }}
                         >
-                          <div style={{ fontWeight: 700 }}>Trailer Identification - Equipment and Vehicles *</div>
+                          <div style={{ fontWeight: 700 }}>Trailer Identification - Equipment and Vehicles (optional)</div>
                           <div style={{ marginTop: 4, fontSize: 12, opacity: 0.72 }}>
-                            Add loadout equipment and loadout vehicles. Linked vehicles must complete their own{" "}
+                            Add loadout equipment and optionally linked vehicles. If linked vehicles are added, they must complete their own{" "}
                             {type === "pre-trip" ? "Pre-Trip" : "Post-Trip"} inspection before this form can submit.
                           </div>
                           <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, opacity: 0.8 }}>Equipment</div>
@@ -3178,7 +3138,7 @@ export default function InspectionForm({
             style={{
               marginTop: 14,
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gridTemplateColumns: "minmax(260px, 420px)",
               gap: 12,
             }}
           >
@@ -3194,17 +3154,6 @@ export default function InspectionForm({
               />
             </div>
 
-            <div>
-              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
-                Manager Signature (optional)
-              </div>
-              <input
-                value={managerSignature}
-                onChange={(e) => setManagerSignature(e.target.value)}
-                placeholder="Type full name"
-                style={inputStyle()}
-              />
-            </div>
           </div>
         </div>
 
