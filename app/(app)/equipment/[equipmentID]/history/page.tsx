@@ -140,6 +140,18 @@ function badgeStyle(type: TimelineType): React.CSSProperties {
   };
 }
 
+function historyPdfHref(equipmentId: string, item: TimelineItem) {
+  const encodedEquipmentId = encodeURIComponent(equipmentId);
+  const encodedItemId = encodeURIComponent(item.id);
+  if (item.type === "Maintenance Request") {
+    return `/equipment/${encodedEquipmentId}/history/maintenance-request/${encodedItemId}/pdf`;
+  }
+  if (item.type === "Maintenance Log") {
+    return `/equipment/${encodedEquipmentId}/history/maintenance-log/${encodedItemId}/pdf`;
+  }
+  return `/equipment/${encodedEquipmentId}/history/preventative-maintenance/${encodedItemId}/pdf`;
+}
+
 export default function EquipmentHistoryPage() {
   const params = useParams<{ equipmentID: string }>();
   const searchParams = useSearchParams();
@@ -521,6 +533,7 @@ export default function EquipmentHistoryPage() {
                 focusId: x.id,
               }).toString();
               const backToHistory = `/equipment/${encodeURIComponent(equipmentId)}/history?${focusQuery}`;
+              const pdfHref = historyPdfHref(equipmentId, x);
               const editHref =
                 x.type === "Maintenance Request"
                   ? `/equipment/${encodeURIComponent(equipmentId)}/forms/maintenance-request?editId=${encodeURIComponent(x.id)}&returnTo=${encodeURIComponent(backToHistory)}`
@@ -563,91 +576,91 @@ export default function EquipmentHistoryPage() {
 
                   <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <Link
-                      href={backToHistory}
+                      href={pdfHref}
                       style={{
                         textDecoration: "none",
-                        color: "inherit",
                         padding: "8px 10px",
                         borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        background: "rgba(255,255,255,0.04)",
-                        fontSize: 13,
-                        fontWeight: 800,
-                      }}
-                    >
-                      See Form
-                    </Link>
-                  {canEditDelete ? (
-                    <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <Link
-                        href={editHref}
-                        style={{
-                          textDecoration: "none",
                           color: "inherit",
-                          padding: "8px 10px",
-                          borderRadius: 10,
-                          border: "1px solid rgba(255,255,255,0.14)",
-                          background: "rgba(255,255,255,0.04)",
                           fontSize: 13,
                           fontWeight: 800,
+                          border: "1px solid rgba(126,255,167,0.28)",
+                          background: "rgba(126,255,167,0.10)",
                         }}
                       >
-                        Edit
+                        PDF View
                       </Link>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (x.type === "Maintenance Request") {
-                            void deleteEquipmentRequest(x.id);
-                          } else {
-                            void deleteEquipmentLog(x.id);
-                          }
-                        }}
-                        disabled={actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`}
-                        style={{
-                          padding: "8px 10px",
-                          borderRadius: 10,
-                          border: "1px solid rgba(255,120,120,0.35)",
-                          background: "rgba(255,120,120,0.10)",
-                          color: "inherit",
-                          fontSize: 13,
-                          fontWeight: 800,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
-                    </div>
-                  ) : null}
+                      {canEditDelete ? (
+                        <>
+                          <Link
+                            href={editHref}
+                            style={{
+                              textDecoration: "none",
+                              color: "inherit",
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid rgba(255,255,255,0.14)",
+                              background: "rgba(255,255,255,0.04)",
+                              fontSize: 13,
+                              fontWeight: 800,
+                            }}
+                          >
+                            Edit
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (x.type === "Maintenance Request") {
+                                void deleteEquipmentRequest(x.id);
+                              } else {
+                                void deleteEquipmentLog(x.id);
+                              }
+                            }}
+                            disabled={actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid rgba(255,120,120,0.35)",
+                              background: "rgba(255,120,120,0.10)",
+                              color: "inherit",
+                              fontSize: 13,
+                              fontWeight: 800,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {actionBusyKey === `${x.type === "Maintenance Request" ? "request" : "log"}:${x.id}`
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </>
+                      ) : null}
 
-                  {canManage && x.type === "Preventative Maintenance" ? (
-                    <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => void editEquipmentPmDate(x.id, x.createdAt)}
-                        disabled={actionBusyKey === `pm:${x.id}`}
-                        style={{
-                          padding: "8px 10px",
-                          borderRadius: 10,
-                          border: "1px solid rgba(255,255,255,0.14)",
-                          background: "rgba(255,255,255,0.04)",
-                          color: "inherit",
-                          fontSize: 13,
-                          fontWeight: 800,
-                          cursor: "pointer",
-                          opacity: actionBusyKey === `pm:${x.id}` ? 0.65 : 1,
-                        }}
-                      >
-                        {actionBusyKey === `pm:${x.id}` ? "Saving..." : "Edit PM Date"}
-                      </button>
+                      {canManage && x.type === "Preventative Maintenance" ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void editEquipmentPmDate(x.id, x.createdAt)}
+                            disabled={actionBusyKey === `pm:${x.id}`}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid rgba(255,255,255,0.14)",
+                              background: "rgba(255,255,255,0.04)",
+                              color: "inherit",
+                              fontSize: 13,
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              opacity: actionBusyKey === `pm:${x.id}` ? 0.65 : 1,
+                            }}
+                          >
+                            {actionBusyKey === `pm:${x.id}` ? "Saving..." : "Edit PM Date"}
+                          </button>
+                        </>
+                      ) : null}
                     </div>
-                  ) : null}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         )}
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
@@ -1388,9 +1389,9 @@ export default function MaintenanceLogPage() {
             style={secondaryButtonStyle}
           >Discard & Return</button>
 
-          <a href="/maintenance" style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+          <Link href="/maintenance" style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
             Maintenance Operations Dashboard
-          </a>
+          </Link>
         </div>
       </form>
     </main>

@@ -3,8 +3,18 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  emitNotificationPreferencesUpdated,
+  subscribeToUserNotificationChanges,
+  type NotificationRealtimeRow,
+} from "@/lib/notificationRealtime";
 import { canAccessRoute } from "@/lib/routeAccess";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
+import {
+  coerceUserNotificationPreferences,
+  DEFAULT_USER_NOTIFICATION_PREFERENCES,
+  type UserNotificationPreferences,
+} from "@/lib/userNotificationPreferences";
 
 type NotificationRow = {
   id: number;
@@ -360,6 +370,33 @@ function severityColor(severity: NotificationRow["severity"]) {
   return "rgba(120,180,255,0.18)";
 }
 
+function toNotificationRow(row: NotificationRealtimeRow): NotificationRow {
+  return {
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    severity: row.severity,
+    kind: row.kind,
+    entity_type: row.entity_type,
+    entity_id: row.entity_id,
+    is_read: row.is_read,
+    created_at: row.created_at,
+    read_at: row.read_at,
+    acknowledged_at: row.acknowledged_at,
+    resolved_at: row.resolved_at,
+  };
+}
+
+function sortByNewest(rows: NotificationRow[]) {
+  return [...rows].sort((a, b) => {
+    const aMs = new Date(a.created_at).getTime();
+    const bMs = new Date(b.created_at).getTime();
+    const safeA = Number.isFinite(aMs) ? aMs : 0;
+    const safeB = Number.isFinite(bMs) ? bMs : 0;
+    return safeB - safeA;
+  });
+}
+
 function notificationHref(row: NotificationRow, canViewMaintenanceCenter: boolean) {
   if (row.kind === "trend_actions_digest" && row.entity_id) {
     return `/notifications/digest/${encodeURIComponent(row.entity_id)}`;
@@ -375,13 +412,19 @@ function notificationHref(row: NotificationRow, canViewMaintenanceCenter: boolea
   }
   if (row.kind === "sla_maintenance_request_overdue" && row.entity_id) {
     if (!canViewMaintenanceCenter) return null;
-    if (row.entity_type === "equipment_maintenance_request") {
-      return `/maintenance?section=queue&equipmentRequest=${encodeURIComponent(row.entity_id)}`;
-    }
-    return `/maintenance?section=queue&vehicleRequest=${encodeURIComponent(row.entity_id)}`;
+    return `/maintenance?requestId=${encodeURIComponent(row.entity_id)}`;
   }
   if (row.kind === "sla_flagged_queue_overdue" && row.entity_id) {
     return `/form-reports?flagged=${encodeURIComponent(row.entity_id)}`;
+  }
+  if (
+    (row.kind === "maintenance_assigned" ||
+      row.kind === "maintenance_parts_ready" ||
+      row.kind === "maintenance_overdue") &&
+    row.entity_id
+  ) {
+    if (!canViewMaintenanceCenter) return null;
+    return `/maintenance?requestId=${encodeURIComponent(row.entity_id)}`;
   }
   return null;
 }
@@ -408,7 +451,7 @@ function notificationActions(row: NotificationRow, canViewMaintenanceCenter: boo
   }
 
   if (row.kind === "vehicle_maintenance_request_created" && canViewMaintenanceCenter) {
-    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance?section=queue" });
+    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance" });
     const vehicleId = parseVehicleIdFromBody(row.body);
     if (vehicleId) {
       actions.push({
@@ -419,7 +462,7 @@ function notificationActions(row: NotificationRow, canViewMaintenanceCenter: boo
   }
 
   if (row.kind === "equipment_maintenance_request_created" && canViewMaintenanceCenter) {
-    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance?section=queue" });
+    actions.push({ label: "Open Maintenance Operations Dashboard", href: "/maintenance" });
     const equipmentId = parseEquipmentIdFromBody(row.body);
     if (equipmentId) {
       actions.push({
@@ -464,6 +507,8 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [queueEventsEnabled, setQueueEventsEnabled] = useState(true);
+  const [maintenanceNotificationPrefs, setMaintenanceNotificationPrefs] =
+    useState<UserNotificationPreferences>(() => ({ ...DEFAULT_USER_NOTIFICATION_PREFERENCES }));
   const [inviteTemplateSubject, setInviteTemplateSubject] = useState("");
   const [inviteTemplateBody, setInviteTemplateBody] = useState("");
   const [inviteTemplateDefaultSubject, setInviteTemplateDefaultSubject] = useState("");
@@ -473,6 +518,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
   const [inviteTemplateSaving, setInviteTemplateSaving] = useState(false);
   const [inviteTemplateMessage, setInviteTemplateMessage] = useState<string | null>(null);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  const [maintenancePrefsSaving, setMaintenancePrefsSaving] = useState(false);
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [runNowMessage, setRunNowMessage] = useState<string | null>(null);
   const [runSlaBusy, setRunSlaBusy] = useState(false);
@@ -582,13 +628,14 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     const shouldLoadRuns = role === "owner" || role === "mechanic";
     const shouldLoadSlaRuns =
       role === "owner" || role === "operations_manager" || role === "sales_manager" || role === "office_admin" || role === "mechanic";
-    const [notificationsRes, prefsRes, runsRes, slaRunsRes] = await Promise.all([
+    const [notificationsRes, prefsRes, maintenancePrefsRes, runsRes, slaRunsRes] = await Promise.all([
       fetch("/api/notifications", { method: "GET" }),
       fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "get_prefs" }),
       }),
+      fetch("/api/notifications/preferences", { method: "GET", cache: "no-store" }),
       shouldLoadRuns
         ? fetch("/api/trend-actions/digest/runs", { method: "GET" })
         : Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 })),
@@ -599,6 +646,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
 
     const notificationsJson = await notificationsRes.json().catch(() => ({}));
     const prefsJson = await prefsRes.json().catch(() => ({}));
+    const maintenancePrefsJson = await maintenancePrefsRes.json().catch(() => ({}));
     const runsJson = await runsRes.json().catch(() => ({}));
     const slaRunsJson = await slaRunsRes.json().catch(() => ({}));
 
@@ -615,6 +663,9 @@ export default function NotificationsClient({ role }: { role: string | null }) {
       setSmsEnabled(prefsJson.prefs.smsEnabled === true);
       setQueueEventsEnabled(prefsJson.prefs.queueEventsEnabled !== false);
     }
+    const nextMaintenancePrefs = coerceUserNotificationPreferences(maintenancePrefsJson?.prefs);
+    setMaintenanceNotificationPrefs(nextMaintenancePrefs);
+    emitNotificationPreferencesUpdated(currentUserId, nextMaintenancePrefs);
     if (shouldLoadRuns && runsRes.ok) {
       setDigestRuns((runsJson.runs ?? []) as DigestRunRow[]);
     } else {
@@ -627,7 +678,7 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }
     setLastRefreshedAt(new Date().toISOString());
     setLoading(false);
-  }, [role]);
+  }, [currentUserId, role]);
 
   useEffect(() => {
     let active = true;
@@ -650,6 +701,37 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }, intervalMs);
     return () => window.clearInterval(interval);
   }, [autoRefreshEnabled, autoRefreshMinutes, autoRefreshSettingsReady, loadAll]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    const supabase = createSupabaseBrowser();
+    const unsubscribe = subscribeToUserNotificationChanges({
+      supabase,
+      userId: currentUserId,
+      onInsert: (row) => {
+        setRows((prev) => {
+          if (prev.some((entry) => entry.id === row.id)) return prev;
+          const next = sortByNewest([toNotificationRow(row), ...prev]);
+          return next.slice(0, 200);
+        });
+        setLastRefreshedAt(new Date().toISOString());
+      },
+      onUpdate: (row) => {
+        setRows((prev) => {
+          if (!prev.some((entry) => entry.id === row.id)) return prev;
+          const next = prev.map((entry) => (entry.id === row.id ? toNotificationRow(row) : entry));
+          return sortByNewest(next);
+        });
+        setLastRefreshedAt(new Date().toISOString());
+      },
+      onDelete: (id) => {
+        setRows((prev) => prev.filter((entry) => entry.id !== id));
+        setLastRefreshedAt(new Date().toISOString());
+      },
+    });
+
+    return unsubscribe;
+  }, [currentUserId]);
 
   useEffect(() => {
     let active = true;
@@ -980,6 +1062,33 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     setPrefsSaving(false);
   }
 
+  async function saveMaintenancePrefs(nextPrefs: UserNotificationPreferences) {
+    if (!currentUserId) return;
+    const normalizedNextPrefs = coerceUserNotificationPreferences(nextPrefs);
+    const previousPrefs = maintenanceNotificationPrefs;
+    setMaintenanceNotificationPrefs(normalizedNextPrefs);
+    emitNotificationPreferencesUpdated(currentUserId, normalizedNextPrefs);
+    setMaintenancePrefsSaving(true);
+
+    const res = await fetch("/api/notifications/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(normalizedNextPrefs),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMaintenanceNotificationPrefs(previousPrefs);
+      emitNotificationPreferencesUpdated(currentUserId, previousPrefs);
+      setMaintenancePrefsSaving(false);
+      return;
+    }
+
+    const savedPrefs = coerceUserNotificationPreferences(json?.prefs);
+    setMaintenanceNotificationPrefs(savedPrefs);
+    emitNotificationPreferencesUpdated(currentUserId, savedPrefs);
+    setMaintenancePrefsSaving(false);
+  }
+
   async function saveInviteEmailTemplate() {
     if (!canManageEmailTemplatesRole) return;
     setInviteTemplateSaving(true);
@@ -1281,6 +1390,13 @@ export default function NotificationsClient({ role }: { role: string | null }) {
     }
   }
 
+  const assignedToastDisabled =
+    maintenancePrefsSaving || !currentUserId || !maintenanceNotificationPrefs.maintenanceAssigned;
+  const partsReadyToastDisabled =
+    maintenancePrefsSaving || !currentUserId || !maintenanceNotificationPrefs.maintenancePartsReady;
+  const overdueToastDisabled =
+    maintenancePrefsSaving || !currentUserId || !maintenanceNotificationPrefs.maintenanceOverdue;
+
   return (
     <main style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 32 }}>
       <h1 style={{ marginBottom: 6 }}>Notifications</h1>
@@ -1363,7 +1479,152 @@ export default function NotificationsClient({ role }: { role: string | null }) {
 
       <div style={{ marginTop: 12, ...cardStyle() }}>
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Notification Preferences</div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, opacity: 0.68, marginBottom: 12 }}>
+          Choose which events notify you and whether they appear as real-time popups.
+        </div>
+        <div style={{ opacity: 0.75, fontSize: 13, marginBottom: 10 }}>
+          Maintenance Notifications
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+            <thead>
+              <tr style={{ textAlign: "left", opacity: 0.78, fontSize: 12 }}>
+                <th style={{ padding: "0 0 8px 0" }}>Event</th>
+                <th style={{ padding: "0 0 8px 0", textAlign: "center" }}>Receive Notifications</th>
+                <th style={{ padding: "0 0 8px 0", textAlign: "center" }}>Show Toast</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <td style={{ padding: "10px 0" }}>Assigned to you</td>
+                <td style={{ padding: "10px 0", textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.maintenanceAssigned}
+                    disabled={maintenancePrefsSaving || !currentUserId}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        maintenanceAssigned: e.target.checked,
+                        toastAssigned: e.target.checked ? maintenanceNotificationPrefs.toastAssigned : false,
+                      })
+                    }
+                  />
+                </td>
+                <td
+                  style={{
+                    padding: "10px 0",
+                    textAlign: "center",
+                    opacity: assignedToastDisabled ? 0.5 : 1,
+                    transition: "opacity 140ms ease",
+                  }}
+                  title={assignedToastDisabled ? "Enable notifications to use toast alerts" : ""}
+                >
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.toastAssigned}
+                    disabled={assignedToastDisabled}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        toastAssigned: e.target.checked,
+                      })
+                    }
+                  />
+                </td>
+              </tr>
+              <tr style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <td style={{ padding: "10px 0" }}>Parts ready (can start work)</td>
+                <td style={{ padding: "10px 0", textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.maintenancePartsReady}
+                    disabled={maintenancePrefsSaving || !currentUserId}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        maintenancePartsReady: e.target.checked,
+                        toastPartsReady: e.target.checked ? maintenanceNotificationPrefs.toastPartsReady : false,
+                      })
+                    }
+                  />
+                </td>
+                <td
+                  style={{
+                    padding: "10px 0",
+                    textAlign: "center",
+                    opacity: partsReadyToastDisabled ? 0.5 : 1,
+                    transition: "opacity 140ms ease",
+                  }}
+                  title={partsReadyToastDisabled ? "Enable notifications to use toast alerts" : ""}
+                >
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.toastPartsReady}
+                    disabled={partsReadyToastDisabled}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        toastPartsReady: e.target.checked,
+                      })
+                    }
+                  />
+                </td>
+              </tr>
+              <tr style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <td style={{ padding: "10px 0" }}>Task is overdue</td>
+                <td style={{ padding: "10px 0", textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.maintenanceOverdue}
+                    disabled={maintenancePrefsSaving || !currentUserId}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        maintenanceOverdue: e.target.checked,
+                        toastOverdue: e.target.checked ? maintenanceNotificationPrefs.toastOverdue : false,
+                      })
+                    }
+                  />
+                </td>
+                <td
+                  style={{
+                    padding: "10px 0",
+                    textAlign: "center",
+                    opacity: overdueToastDisabled ? 0.5 : 1,
+                    transition: "opacity 140ms ease",
+                  }}
+                  title={overdueToastDisabled ? "Enable notifications to use toast alerts" : ""}
+                >
+                  <input
+                    type="checkbox"
+                    checked={maintenanceNotificationPrefs.toastOverdue}
+                    disabled={overdueToastDisabled}
+                    onChange={(e) =>
+                      void saveMaintenancePrefs({
+                        ...maintenanceNotificationPrefs,
+                        toastOverdue: e.target.checked,
+                      })
+                    }
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            paddingTop: 12,
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: 13, opacity: 0.75, marginRight: 6 }}>Delivery Preferences</span>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               type="checkbox"

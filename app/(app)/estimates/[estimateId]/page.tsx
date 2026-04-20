@@ -1,11 +1,15 @@
 import { notFound } from "next/navigation";
 import EstimateShell from "@/components/estimates/EstimateShell";
+import EstimateLocalDraftPlaceholder from "@/components/estimates/EstimateLocalDraftPlaceholder";
 import EstimateScopeWorkspace from "@/components/estimates/EstimateScopeWorkspace";
 import {
   CRM_CLIENT_SELECT,
   CRM_PROPERTY_SELECT,
   type CrmClientRow,
   type CrmPropertyRow,
+  loadCrmClients,
+  loadCrmProperties,
+  logCrmPersistenceError,
   mapCrmClientRow,
   mapCrmPropertyRow,
 } from "@/lib/crmPersistence";
@@ -18,10 +22,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
 
 type EstimateDraftPageProps = {
   params: Promise<{ estimateId: string }>;
+  searchParams: Promise<{ local?: string }>;
 };
 
-export default async function EstimateDraftPage({ params }: EstimateDraftPageProps) {
+export default async function EstimateDraftPage({ params, searchParams }: EstimateDraftPageProps) {
   const { estimateId } = await params;
+  const resolvedSearchParams = await searchParams;
   const supabase = await createServerSupabase();
 
   const draftLoad = await loadEstimateDraftById(supabase as unknown as EstimateSupabaseReader, estimateId);
@@ -33,6 +39,48 @@ export default async function EstimateDraftPage({ params }: EstimateDraftPagePro
   }
 
   if (!draftLoad.draft) {
+    if (resolvedSearchParams.local === "1") {
+      const clientLoad = await loadCrmClients(supabase);
+      const propertyLoad = await loadCrmProperties(supabase);
+
+      if (clientLoad.error) {
+        logCrmPersistenceError("Failed to load CRM clients for local estimate draft.", clientLoad.error, {
+          surface: "estimate_detail_local",
+          table: "crm_clients",
+          estimateId,
+        });
+      }
+
+      if (propertyLoad.error) {
+        logCrmPersistenceError("Failed to load CRM properties for local estimate draft.", propertyLoad.error, {
+          surface: "estimate_detail_local",
+          table: "crm_properties",
+          estimateId,
+        });
+      }
+
+      const crmLoadError = clientLoad.error || propertyLoad.error
+        ? [clientLoad.error?.message, propertyLoad.error?.message].filter(Boolean).join(" | ")
+        : null;
+
+      return (
+        <EstimateShell
+          title="Estimate Draft"
+          description="Edit this lightweight estimate draft saved in the current browser."
+          backHref="/estimates"
+          backLabel="Back to Estimates"
+          breadcrumb="Estimate Workspace > Edit Draft"
+        >
+          <EstimateLocalDraftPlaceholder
+            estimateId={estimateId}
+            clients={clientLoad.clients}
+            properties={propertyLoad.properties}
+            crmLoadError={crmLoadError}
+          />
+        </EstimateShell>
+      );
+    }
+
     notFound();
   }
 

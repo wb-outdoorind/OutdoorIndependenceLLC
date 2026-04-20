@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { writeServerAudit } from "@/lib/auditServer";
 import { evaluateRateLimit, rateLimitExceededResponse, readClientIp } from "@/lib/apiRateLimit";
+import { notifyMaintenancePartsReadyFromCompletedPurchases } from "@/lib/maintenanceNotifications";
 import { getCurrentUserProfileStrict } from "@/lib/supabase/server";
 import {
   aggregateReviewStatus,
@@ -54,6 +55,8 @@ type PurchaseRequestRow = {
   ap_status: string;
   ap_reviewed_at: string | null;
   ap_reviewed_by: string | null;
+  ap_processed_at: string | null;
+  ap_processed_by: string | null;
   ap_signature: string | null;
   ap_note: string | null;
   funds_available_date: string | null;
@@ -170,7 +173,7 @@ type MaintenanceLogLookupRow = {
 };
 
 const PURCHASE_REQUEST_SELECT =
-  "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,detail_purchase_date,detail_total_amount,detail_purchase_method,detail_purchase_method_other,detail_purpose,detail_reimbursable,detail_receipt_attached,detail_comments,detail_manager_signature,detail_manager_approved_date,detail_submitted_at,overall_status,created_at,updated_at";
+  "id,request_date,requested_by,requested_for_id,requested_for_name,department,vendor_name,estimated_total,timeline,reason,reimbursable,purchase_method_requested,purchase_method_other,maintenance_request_type,maintenance_request_id,maintenance_log_type,maintenance_log_id,asset_type,asset_id,manager_status,manager_approved_at,manager_approved_by,manager_signature,manager_note,ap_status,ap_reviewed_at,ap_reviewed_by,ap_processed_at,ap_processed_by,ap_signature,ap_note,funds_available_date,ap_payment_method,ap_payment_method_other,ap_po_number,detail_purchase_date,detail_total_amount,detail_purchase_method,detail_purchase_method_other,detail_purpose,detail_reimbursable,detail_receipt_attached,detail_comments,detail_manager_signature,detail_manager_approved_date,detail_submitted_at,overall_status,created_at,updated_at";
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -717,9 +720,10 @@ async function reconcilePastPurchasesWithMaintenanceLog(
     }
   }
 
-  const closedRequestIds = pendingClose
-    .filter((row) => closedLogKeys.has(`${row.maintenance_log_type}:${row.maintenance_log_id}`))
-    .map((row) => row.id);
+  const completedRows = pendingClose.filter((row) =>
+    closedLogKeys.has(`${row.maintenance_log_type}:${row.maintenance_log_id}`)
+  );
+  const closedRequestIds = completedRows.map((row) => row.id);
   if (!closedRequestIds.length) return requests;
 
   const { error: closeUpdateError } = await admin
@@ -730,6 +734,22 @@ async function reconcilePastPurchasesWithMaintenanceLog(
   if (closeUpdateError) {
     console.error("Failed to finalize closed past purchases:", closeUpdateError);
     return requests;
+  }
+
+  try {
+    await notifyMaintenancePartsReadyFromCompletedPurchases({
+      admin,
+      purchases: completedRows.map((row) => ({
+        id: row.id,
+        overall_status: "completed",
+        maintenance_request_type: row.maintenance_request_type,
+        maintenance_request_id: row.maintenance_request_id,
+        maintenance_log_type: row.maintenance_log_type,
+        maintenance_log_id: row.maintenance_log_id,
+      })),
+    });
+  } catch (error) {
+    console.error("Failed to send maintenance parts-ready notifications:", error);
   }
 
   const closedIds = new Set(closedRequestIds);
@@ -1394,10 +1414,14 @@ export async function PATCH(req: Request) {
     }
 
     const nextOverall = overallStatusFromReviews(managerStatus, apStatus);
+    const apProcessedAt = apStatus === "pending" ? null : new Date().toISOString();
+    const apProcessedBy = apStatus === "pending" ? null : userId;
     const updatePayload = {
       ap_status: apStatus,
-      ap_reviewed_at: apStatus === "pending" ? null : new Date().toISOString(),
-      ap_reviewed_by: apStatus === "pending" ? null : userId,
+      ap_reviewed_at: apProcessedAt,
+      ap_reviewed_by: apProcessedBy,
+      ap_processed_at: apProcessedAt,
+      ap_processed_by: apProcessedBy,
       ap_signature: apStatus === "pending" ? null : asNullableString(body.apSignature),
       ap_note: asNullableString(body.apNote),
       funds_available_date: fundsAvailableDate,

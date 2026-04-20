@@ -8,7 +8,7 @@ export default async function NewPmLauncherPage() {
   const role = session?.effectiveRole ?? "employee";
 
   if (!canAccessRoute(role, "ops_dashboard")) {
-    redirect("/not-authorized?reason=pm_launcher_requires_manager_or_mechanic&next=/maintenance?section=operations");
+    redirect("/not-authorized?reason=pm_launcher_requires_manager_or_mechanic&next=/maintenance/operations");
   }
 
   return <NewPmLauncherClient role={role} />;

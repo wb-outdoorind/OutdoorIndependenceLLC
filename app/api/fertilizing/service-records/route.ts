@@ -391,112 +391,128 @@ export async function POST(req: Request) {
   if (recordError) return NextResponse.json({ error: recordError.message }, { status: 500 });
 
   const recordId = (recordData as RecordInsertRow).id;
-  const { error: chemicalsError } = await admin.from("fert_service_chemicals").insert(
-    chemicals.map((row) => ({
-      service_record_id: recordId,
-      product_id: row.productId,
-      chemical_name: row.chemicalName,
-      epa_registration_number: row.epaRegistrationNumber,
-      batch_lot_number: row.batchLotNumber,
-      concentration: row.concentration,
-      target_pest: row.targetPest,
-      total_applied: row.totalApplied,
-      units: row.units,
-      application_area_sqft: row.applicationAreaSqft,
-      application_rate: row.applicationRate,
-      reentry_interval_ppe_notes: row.reentryIntervalPpeNotes,
-    }))
-  );
-  if (chemicalsError) {
-    return NextResponse.json({ error: chemicalsError.message }, { status: 500 });
-  }
-
-  const pdfBytes = await buildServicePdf({
-    recordId,
-    property: propertyData as PropertyRow,
-    client: clientData,
-    applicatorName: applicatorName || session.profile?.full_name || session.profile?.email || session.user.id,
-    applicatorLicense: applicatorLicenseNumber,
-    serviceDate,
-    startTime,
-    endTime,
-    weatherTemperatureF,
-    weatherWindSpeedMph,
-    weatherWindDirection,
-    weatherConditions,
-    weatherObservedAt,
-    weatherSource,
-    equipmentUsed,
-    chemicals,
-    signatureText,
-  });
-
-  const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
-  const pdfFilename = `fert-service-${recordId}.pdf`;
-
-  const resendApiKey = process.env.RESEND_API_KEY?.trim() || "";
-  const fromEmail =
-    process.env.FERTILIZING_FROM_EMAIL?.trim() ||
-    process.env.TREND_DIGEST_FROM_EMAIL?.trim() ||
-    process.env.ALERTS_FROM_EMAIL?.trim() ||
-    "onboarding@resend.dev";
-
-  const recipientSet = new Set<string>();
-  const applicatorEmail = asString(session.profile?.email) || asString(session.user.email);
-  const clientEmail = asString(clientData?.email);
-  if (applicatorEmail) recipientSet.add(applicatorEmail);
-  if (clientEmail) recipientSet.add(clientEmail);
-
-  let emailAttempted = 0;
-  let emailSent = 0;
-  let emailFailed = 0;
-
-  if (resendApiKey && recipientSet.size > 0) {
-    const recipients = [...recipientSet];
-    emailAttempted = recipients.length;
-    const subject = `Chemical Tracking Submission • ${propertyData.property_name}`;
-    const html = `
-      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.45">
-        <h2 style="margin:0 0 10px">Chemical Tracking Submission</h2>
-        <p style="margin:0 0 6px"><strong>Record ID:</strong> ${recordId}</p>
-        <p style="margin:0 0 6px"><strong>Property:</strong> ${propertyData.property_name}</p>
-        <p style="margin:0 0 6px"><strong>Applicator:</strong> ${applicatorName || "-"}</p>
-        <p style="margin:0 0 14px"><strong>Date:</strong> ${serviceDate || "-"}</p>
-        <p style="margin:0 0 14px"><strong>Weather:</strong> ${weatherConditions || "-"} · ${weatherTemperatureF ?? "-"} F · ${weatherWindSpeedMph ?? "-"} mph ${weatherWindDirection || ""}</p>
-        <p style="margin:0 0 14px"><strong>Equipment Used:</strong> ${equipmentUsed.length ? equipmentUsed.join(", ") : "None listed"}</p>
-        <p style="margin:0">Attached: PDF summary</p>
-      </div>
-    `;
-
-    const results = await Promise.allSettled(
-      recipients.map((email) =>
-        sendResendEmail({
-          resendApiKey,
-          fromEmail,
-          to: email,
-          subject,
-          html,
-          pdfFilename,
-          pdfBase64,
-        })
-      )
+  try {
+    const { error: chemicalsError } = await admin.from("fert_service_chemicals").insert(
+      chemicals.map((row) => ({
+        service_record_id: recordId,
+        product_id: row.productId,
+        chemical_name: row.chemicalName,
+        epa_registration_number: row.epaRegistrationNumber,
+        batch_lot_number: row.batchLotNumber,
+        concentration: row.concentration,
+        target_pest: row.targetPest,
+        total_applied: row.totalApplied,
+        units: row.units,
+        application_area_sqft: row.applicationAreaSqft,
+        application_rate: row.applicationRate,
+        reentry_interval_ppe_notes: row.reentryIntervalPpeNotes,
+      }))
     );
-    for (const result of results) {
-      if (result.status === "fulfilled") emailSent += 1;
-      else emailFailed += 1;
+    if (chemicalsError) {
+      throw new Error(chemicalsError.message);
     }
-  }
 
-  return NextResponse.json({
-    ok: true,
-    serviceRecordId: recordId,
-    pdfFilename,
-    pdfBase64,
-    email: {
-      configured: Boolean(resendApiKey),
-      attempted: emailAttempted,
-      sent: emailSent,
-      failed: emailFailed,
-    },
-  });
+    const pdfBytes = await buildServicePdf({
+      recordId,
+      property: propertyData as PropertyRow,
+      client: clientData,
+      applicatorName: applicatorName || session.profile?.full_name || session.profile?.email || session.user.id,
+      applicatorLicense: applicatorLicenseNumber,
+      serviceDate,
+      startTime,
+      endTime,
+      weatherTemperatureF,
+      weatherWindSpeedMph,
+      weatherWindDirection,
+      weatherConditions,
+      weatherObservedAt,
+      weatherSource,
+      equipmentUsed,
+      chemicals,
+      signatureText,
+    });
+
+    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+    const pdfFilename = `fert-service-${recordId}.pdf`;
+
+    const resendApiKey = process.env.RESEND_API_KEY?.trim() || "";
+    const fromEmail =
+      process.env.FERTILIZING_FROM_EMAIL?.trim() ||
+      process.env.TREND_DIGEST_FROM_EMAIL?.trim() ||
+      process.env.ALERTS_FROM_EMAIL?.trim() ||
+      "onboarding@resend.dev";
+
+    const recipientSet = new Set<string>();
+    const applicatorEmail = asString(session.profile?.email) || asString(session.user.email);
+    const clientEmail = asString(clientData?.email);
+    if (applicatorEmail) recipientSet.add(applicatorEmail);
+    if (clientEmail) recipientSet.add(clientEmail);
+
+    let emailAttempted = 0;
+    let emailSent = 0;
+    let emailFailed = 0;
+
+    if (resendApiKey && recipientSet.size > 0) {
+      const recipients = [...recipientSet];
+      emailAttempted = recipients.length;
+      const subject = `Chemical Tracking Submission • ${propertyData.property_name}`;
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.45">
+          <h2 style="margin:0 0 10px">Chemical Tracking Submission</h2>
+          <p style="margin:0 0 6px"><strong>Record ID:</strong> ${recordId}</p>
+          <p style="margin:0 0 6px"><strong>Property:</strong> ${propertyData.property_name}</p>
+          <p style="margin:0 0 6px"><strong>Applicator:</strong> ${applicatorName || "-"}</p>
+          <p style="margin:0 0 14px"><strong>Date:</strong> ${serviceDate || "-"}</p>
+          <p style="margin:0 0 14px"><strong>Weather:</strong> ${weatherConditions || "-"} · ${weatherTemperatureF ?? "-"} F · ${weatherWindSpeedMph ?? "-"} mph ${weatherWindDirection || ""}</p>
+          <p style="margin:0 0 14px"><strong>Equipment Used:</strong> ${equipmentUsed.length ? equipmentUsed.join(", ") : "None listed"}</p>
+          <p style="margin:0">Attached: PDF summary</p>
+        </div>
+      `;
+
+      const results = await Promise.allSettled(
+        recipients.map((email) =>
+          sendResendEmail({
+            resendApiKey,
+            fromEmail,
+            to: email,
+            subject,
+            html,
+            pdfFilename,
+            pdfBase64,
+          })
+        )
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") emailSent += 1;
+        else emailFailed += 1;
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      serviceRecordId: recordId,
+      pdfFilename,
+      pdfBase64,
+      email: {
+        configured: Boolean(resendApiKey),
+        attempted: emailAttempted,
+        sent: emailSent,
+        failed: emailFailed,
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Failed to complete service record submission.";
+    const { error: rollbackError } = await admin.from("fert_service_records").delete().eq("id", recordId);
+
+    if (rollbackError) {
+      return NextResponse.json(
+        {
+          error: `${errorMessage} Rollback failed: ${rollbackError.message}`,
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
+  }
 }

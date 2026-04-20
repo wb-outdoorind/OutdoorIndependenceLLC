@@ -51,6 +51,8 @@ type PurchaseRequestRow = {
   ap_status: string;
   ap_reviewed_at: string | null;
   ap_reviewed_by: string | null;
+  ap_processed_at: string | null;
+  ap_processed_by: string | null;
   ap_signature: string | null;
   ap_note: string | null;
   funds_available_date: string | null;
@@ -193,6 +195,14 @@ type QueueBucket = {
   label: string;
 };
 
+type QueueStatusFilterValue =
+  | "all"
+  | "needs_review"
+  | "approved"
+  | "in_progress"
+  | "completed";
+type QueueDateFilterValue = "all" | "7d" | "30d";
+
 const REQUEST_QUEUE_BUCKETS: QueueBucket[] = [
   { value: "waiting_operations_manager_approval", label: "Waiting for Operations Manager Approval" },
   { value: "waiting_ap_department_approval", label: "Waiting for AP Department Approval" },
@@ -205,15 +215,27 @@ const DETAIL_QUEUE_BUCKETS: QueueBucket[] = [
   { value: "completed", label: "Completed (Linked Maintenance Closed)" },
 ];
 
-const REQUEST_FILTER_OPTIONS = [
-  { value: "all", label: "All Request Buckets" },
-  ...REQUEST_QUEUE_BUCKETS,
-] as const;
+const QUEUE_STATUS_FILTER_OPTIONS: Array<{
+  value: QueueStatusFilterValue;
+  label: string;
+}> = [
+  { value: "all", label: "All" },
+  { value: "needs_review", label: "Needs Review" },
+  { value: "approved", label: "Approved" },
+  { value: "in_progress", label: "In Progress" },
+  { value: "completed", label: "Completed" },
+];
 
-const DETAIL_FILTER_OPTIONS = [
-  { value: "all", label: "All Detail Buckets" },
-  ...DETAIL_QUEUE_BUCKETS,
-] as const;
+const QUEUE_DATE_FILTER_OPTIONS: Array<{
+  value: QueueDateFilterValue;
+  label: string;
+}> = [
+  { value: "all", label: "All Time" },
+  { value: "7d", label: "Last 7 Days" },
+  { value: "30d", label: "Last 30 Days" },
+];
+
+type PurchasesSurfaceMode = "queue" | "new" | "detail";
 
 function asCurrency(value: number | string | null | undefined) {
   const n = Number(value);
@@ -241,6 +263,37 @@ function summarizeVendors(vendors: string[]) {
   return `${vendors[0]} +${vendors.length - 1} more`;
 }
 
+function queueBucketFromOverallStatus(
+  value: PurchaseRequestRow["overall_status"]
+): QueueStatusFilterValue {
+  if (
+    value === "waiting_operations_manager_approval" ||
+    value === "waiting_ap_department_approval" ||
+    value === "denied"
+  ) {
+    return "needs_review";
+  }
+  if (value === "approved_purchases") return "approved";
+  if (value === "past_purchases") return "in_progress";
+  if (value === "completed") return "completed";
+  return "all";
+}
+
+function teammateDisplayName(row: TeammateOption) {
+  const nickname = row.nickname?.trim();
+  if (nickname) return nickname;
+  const first = row.first_name?.trim() ?? "";
+  const last = row.last_name?.trim() ?? "";
+  if (first || last) return `${first} ${last}`.trim();
+  const full = row.full_name?.trim();
+  if (full) return full;
+  const name = row.name?.trim();
+  if (name) return name;
+  const email = row.email?.trim();
+  if (email) return email;
+  return row.id;
+}
+
 function maintenanceLogOptionLabel(row: MaintenanceLogOption) {
   const type = row.type === "vehicle" ? "Vehicle" : "Equipment";
   const title = row.title?.trim() ? row.title.trim() : "Maintenance Log";
@@ -248,6 +301,10 @@ function maintenanceLogOptionLabel(row: MaintenanceLogOption) {
   const status = row.status?.trim() ? row.status.trim() : "Unknown status";
   const date = fmtDate(row.created_at);
   return `${type} · ${title} · ${asset} · ${status} · ${date}`;
+}
+
+function purchaseDetailHref(id: string) {
+  return `/purchases/${encodeURIComponent(id)}`;
 }
 
 function statusBadgeStyle(status: string): React.CSSProperties {
@@ -322,14 +379,35 @@ function primaryButtonStyle(): React.CSSProperties {
   };
 }
 
+function dangerButtonStyle(): React.CSSProperties {
+  return {
+    ...buttonStyle(),
+    background: "rgba(210, 65, 65, 0.26)",
+    borderColor: "rgba(255, 110, 110, 0.65)",
+    color: "#ffdede",
+  };
+}
+
+function stageTitleStyle(): React.CSSProperties {
+  return {
+    fontWeight: 900,
+    fontSize: 12,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    opacity: 0.9,
+  };
+}
+
 export default function PurchasesClient({
   role,
-  fullName,
-  email,
+  mode = "queue",
+  requestId = "",
 }: {
   role: string;
-  fullName: string | null;
-  email: string | null;
+  fullName?: string | null;
+  email?: string | null;
+  mode?: PurchasesSurfaceMode;
+  requestId?: string;
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -338,6 +416,9 @@ export default function PurchasesClient({
   const canCreate = canCreatePurchaseRequest(role);
   const canManagerApprove = canManagerApprovePurchase(role);
   const canApApprove = canApApprovePurchase(role);
+  const isQueuePage = mode === "queue";
+  const isNewPage = mode === "new";
+  const isDetailPage = mode === "detail";
 
   const [loading, setLoading] = useState(true);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -350,10 +431,12 @@ export default function PurchasesClient({
   const [avatarUrlById, setAvatarUrlById] = useState<Record<string, string>>({});
   const [maintenanceLogOptions, setMaintenanceLogOptions] = useState<MaintenanceLogOption[]>([]);
   const [maintenanceLogSearch, setMaintenanceLogSearch] = useState("");
-  const [requestQueueFilter, setRequestQueueFilter] = useState<(typeof REQUEST_FILTER_OPTIONS)[number]["value"]>("all");
-  const [detailQueueFilter, setDetailQueueFilter] = useState<(typeof DETAIL_FILTER_OPTIONS)[number]["value"]>("all");
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueStatusFilter, setQueueStatusFilter] = useState<QueueStatusFilterValue>("all");
+  const [queueDateFilter, setQueueDateFilter] = useState<QueueDateFilterValue>("all");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const prefillAppliedKeyRef = useRef("__unset__");
 
   const [requestedForId, setRequestedForId] = useState("");
@@ -416,6 +499,12 @@ export default function PurchasesClient({
   const receiptFileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 2600);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
+
+  useEffect(() => {
     const qMaintenanceRequestType = sp?.get("maintenanceRequestType");
     const qMaintenanceRequestId = sp?.get("maintenanceRequestId");
     const qMaintenanceLogType = sp?.get("maintenanceLogType");
@@ -438,14 +527,18 @@ export default function PurchasesClient({
     setLoading(true);
     setLoadingError(null);
     const params = new URLSearchParams();
+    const detailId = requestId.trim();
+    if (isDetailPage && detailId) params.set("id", detailId);
     if (maintenanceRequestType) params.set("maintenanceRequestType", maintenanceRequestType);
     if (maintenanceRequestId.trim()) params.set("maintenanceRequestId", maintenanceRequestId.trim());
     if (maintenanceLogType) params.set("maintenanceLogType", maintenanceLogType);
     if (maintenanceLogId.trim()) params.set("maintenanceLogId", maintenanceLogId.trim());
     if (assetType) params.set("assetType", assetType);
     if (assetId.trim()) params.set("assetId", assetId.trim());
-    params.set("prefill", "1");
-    params.set("includeLinks", "1");
+    if (isNewPage) {
+      params.set("prefill", "1");
+      params.set("includeLinks", "1");
+    }
     const contextKey = [
       maintenanceRequestType || "",
       maintenanceRequestId.trim(),
@@ -490,9 +583,11 @@ export default function PurchasesClient({
       prefillAppliedKeyRef.current = contextKey;
     }
 
-    const selected = preferSelectedId || selectedRequestId;
+    const selected = preferSelectedId || (isDetailPage ? detailId : selectedRequestId);
     if (selected && nextRequests.some((row) => row.id === selected)) {
       setSelectedRequestId(selected);
+    } else if (isDetailPage) {
+      setSelectedRequestId("");
     } else {
       setSelectedRequestId(nextRequests[0]?.id ?? "");
     }
@@ -500,9 +595,9 @@ export default function PurchasesClient({
   }
 
   useEffect(() => {
-    void loadData();
+    void loadData(isDetailPage ? requestId.trim() : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetId, assetType, maintenanceLogId, maintenanceLogType, maintenanceRequestId, maintenanceRequestType]);
+  }, [assetId, assetType, isDetailPage, isNewPage, maintenanceLogId, maintenanceLogType, maintenanceRequestId, maintenanceRequestType, requestId]);
 
   const requestQueueRows = useMemo(
     () => requests.filter((row) => REQUEST_QUEUE_BUCKETS.some((bucket) => bucket.value === row.overall_status)),
@@ -514,15 +609,74 @@ export default function PurchasesClient({
     [requests]
   );
 
-  const filteredRequestQueueRows = useMemo(() => {
-    if (requestQueueFilter === "all") return requestQueueRows;
-    return requestQueueRows.filter((row) => row.overall_status === requestQueueFilter);
-  }, [requestQueueFilter, requestQueueRows]);
+  const approvedQueueRows = useMemo(
+    () => detailQueueRows.filter((row) => row.overall_status === "approved_purchases"),
+    [detailQueueRows]
+  );
+  const inProgressQueueRows = useMemo(
+    () => detailQueueRows.filter((row) => row.overall_status === "past_purchases"),
+    [detailQueueRows]
+  );
+  const completedQueueRows = useMemo(
+    () => detailQueueRows.filter((row) => row.overall_status === "completed"),
+    [detailQueueRows]
+  );
 
-  const filteredDetailQueueRows = useMemo(() => {
-    if (detailQueueFilter === "all") return detailQueueRows;
-    return detailQueueRows.filter((row) => row.overall_status === detailQueueFilter);
-  }, [detailQueueFilter, detailQueueRows]);
+  const queueSearchNeedle = queueSearch.trim().toLowerCase();
+  const isQueueSearchMode =
+    isQueuePage &&
+    (queueSearchNeedle.length > 0 ||
+      queueStatusFilter !== "all" ||
+      queueDateFilter !== "all");
+
+  const queueFilteredRows = useMemo(() => {
+    if (!isQueuePage) return [] as PurchaseRequestRow[];
+    const now = Date.now();
+    const dateWindowMs =
+      queueDateFilter === "7d"
+        ? 7 * 24 * 60 * 60 * 1000
+        : queueDateFilter === "30d"
+          ? 30 * 24 * 60 * 60 * 1000
+          : null;
+
+    return requests.filter((row) => {
+      if (queueStatusFilter !== "all") {
+        const bucket = queueBucketFromOverallStatus(row.overall_status);
+        if (bucket !== queueStatusFilter) return false;
+      }
+
+      if (dateWindowMs != null) {
+        const createdTs = new Date(row.created_at).getTime();
+        if (!Number.isFinite(createdTs) || now - createdTs > dateWindowMs) return false;
+      }
+
+      if (!queueSearchNeedle) return true;
+
+      const vendorNames = (vendorsByRequestId[row.id] ?? [])
+        .map((vendor) => vendor.vendor_name)
+        .filter(Boolean)
+        .join(" ");
+      const haystack = [
+        row.id,
+        row.reason,
+        row.vendor_name,
+        vendorNames,
+        row.requested_for_name,
+        row.requested_for_id,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(queueSearchNeedle);
+    });
+  }, [
+    isQueuePage,
+    queueDateFilter,
+    queueSearchNeedle,
+    queueStatusFilter,
+    requests,
+    vendorsByRequestId,
+  ]);
 
   const selectedRequest = useMemo(
     () => requests.find((row) => row.id === selectedRequestId) ?? null,
@@ -648,6 +802,15 @@ export default function PurchasesClient({
     [teammates]
   );
 
+  const teammateNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const teammate of teammates) {
+      if (!teammate.id) continue;
+      map.set(teammate.id, teammateDisplayName(teammate));
+    }
+    return map;
+  }, [teammates]);
+
   const teammateBadgeOptions = useMemo(
     () =>
       activeTeammates.map(
@@ -713,6 +876,33 @@ export default function PurchasesClient({
       ) ?? null
     );
   }, [maintenanceLogId, maintenanceLogOptions, maintenanceLogType]);
+  const hasMaintenanceContext = Boolean(
+    maintenanceRequestId.trim() || maintenanceLogId.trim() || assetId.trim()
+  );
+  const managerStageReady =
+    selectedRequest?.overall_status === "waiting_operations_manager_approval";
+  const apStageReady =
+    selectedRequest?.overall_status === "waiting_ap_department_approval";
+  const completionStageReady =
+    selectedRequest?.overall_status === "approved_purchases" ||
+    selectedRequest?.overall_status === "past_purchases";
+  const managerApprovedByLabel =
+    selectedRequest?.manager_approved_by
+      ? teammateNameById.get(selectedRequest.manager_approved_by) ??
+        selectedRequest.manager_approved_by
+      : "-";
+  const apProcessedByLabel = selectedRequest
+    ? selectedRequest.ap_processed_by
+      ? teammateNameById.get(selectedRequest.ap_processed_by) ??
+        selectedRequest.ap_processed_by
+      : selectedRequest.ap_reviewed_by
+        ? teammateNameById.get(selectedRequest.ap_reviewed_by) ??
+          selectedRequest.ap_reviewed_by
+        : "-"
+    : "-";
+  const apProcessedAtValue = selectedRequest
+    ? selectedRequest.ap_processed_at ?? selectedRequest.ap_reviewed_at
+    : null;
 
   function updateItem(localId: string, patch: Partial<ItemDraft>) {
     setItems((prev) => prev.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
@@ -794,6 +984,10 @@ export default function PurchasesClient({
       },
     ]);
     setQuoteFiles([]);
+  }
+
+  function showSuccessToast(message: string) {
+    setToastMessage(message);
   }
 
   async function uploadAttachments(
@@ -903,6 +1097,10 @@ export default function PurchasesClient({
         router.replace(returnTo);
         return;
       }
+      if (isNewPage) {
+        router.replace(purchaseDetailHref(json.request.id));
+        return;
+      }
       await loadData(json.request.id);
       setInlineMessage("Purchase request created.");
     } catch (err) {
@@ -911,27 +1109,41 @@ export default function PurchasesClient({
         router.replace(returnTo);
         return;
       }
+      if (isNewPage) {
+        router.replace(purchaseDetailHref(json.request.id));
+        return;
+      }
       await loadData(json.request.id);
     } finally {
       setSaving(false);
     }
   }
 
-  async function submitManagerApproval() {
+  async function submitManagerApproval(forceDecision?: "approved" | "denied") {
     if (!selectedRequest) return;
+    if (!canManagerApprove) {
+      setInlineMessage("Only manager roles can submit manager approval.");
+      return;
+    }
+    if (!managerStageReady) {
+      setInlineMessage("Manager approval is not available at the current stage.");
+      return;
+    }
     setSaving(true);
     setInlineMessage(null);
     const managerDecisionsPayload = selectedItems.map((item) => ({
       itemId: item.id,
-      decision: managerDecisions[item.id]?.decision ?? "pending",
+      decision: forceDecision ?? managerDecisions[item.id]?.decision ?? "pending",
       note: managerDecisions[item.id]?.note ?? "",
     }));
-    const res = await fetch("/api/purchases", {
-      method: "PATCH",
+    const managerActionPath =
+      forceDecision === "denied"
+        ? `/api/purchases/${encodeURIComponent(selectedRequest.id)}/manager-deny`
+        : `/api/purchases/${encodeURIComponent(selectedRequest.id)}/manager-approve`;
+    const res = await fetch(managerActionPath, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id: selectedRequest.id,
-        stage: "manager",
         managerSignature: managerSignature.trim(),
         managerNote: managerNote.trim(),
         managerDecisions: managerDecisionsPayload,
@@ -944,29 +1156,45 @@ export default function PurchasesClient({
       return;
     }
     await loadData(selectedRequest.id);
-    setInlineMessage("Manager approval saved.");
+    setInlineMessage(null);
+    showSuccessToast(
+      forceDecision === "approved"
+        ? "Manager review approved."
+        : forceDecision === "denied"
+          ? "Manager review denied."
+          : "Manager review saved."
+    );
     setSaving(false);
   }
 
-  async function submitApApproval() {
+  async function submitApApproval(forceDecision?: "approved" | "denied") {
     if (!selectedRequest) return;
+    if (!canApApprove) {
+      setInlineMessage("Only AP roles can submit AP processing.");
+      return;
+    }
+    if (!apStageReady) {
+      setInlineMessage("AP processing is not available at the current stage.");
+      return;
+    }
     setSaving(true);
     setInlineMessage(null);
     const apDecisionsPayload = selectedItems.map((item) => ({
       itemId: item.id,
-      decision: apDecisions[item.id]?.decision ?? "pending",
+      decision: forceDecision ?? apDecisions[item.id]?.decision ?? "pending",
       note: apDecisions[item.id]?.note ?? "",
       approvedPaymentMethod: apDecisions[item.id]?.approvedPaymentMethod || apPaymentMethod || "",
       approvedPaymentMethodOther: apDecisions[item.id]?.approvedPaymentMethodOther || apPaymentMethodOther || "",
       approvedPoNumber: apDecisions[item.id]?.approvedPoNumber || apPoNumber || "",
       fundsAvailableDate: apDecisions[item.id]?.fundsAvailableDate || apFundsAvailableDate || "",
     }));
-    const res = await fetch("/api/purchases", {
-      method: "PATCH",
+    const res = await fetch(
+      `/api/purchases/${encodeURIComponent(selectedRequest.id)}/ap-process`,
+      {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id: selectedRequest.id,
-        stage: "ap",
+        decision: forceDecision ?? "approved",
         apSignature: apSignature.trim(),
         apNote: apNote.trim(),
         fundsAvailableDate: apFundsAvailableDate || undefined,
@@ -975,7 +1203,8 @@ export default function PurchasesClient({
         poNumber: apPoNumber || undefined,
         apDecisions: apDecisionsPayload,
       }),
-    });
+      }
+    );
     const json = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
       setInlineMessage(json.error || "Failed to submit AP approval.");
@@ -983,12 +1212,23 @@ export default function PurchasesClient({
       return;
     }
     await loadData(selectedRequest.id);
-    setInlineMessage("Accounts payable approval saved.");
+    setInlineMessage(null);
+    showSuccessToast(
+      forceDecision === "approved"
+        ? "Accounts payable approved."
+        : forceDecision === "denied"
+          ? "Accounts payable denied."
+          : "Accounts payable review saved."
+    );
     setSaving(false);
   }
 
   async function submitMaintenanceDetail() {
     if (!selectedRequest) return;
+    if (!completionStageReady) {
+      setInlineMessage("Purchase completion is available only after AP approval.");
+      return;
+    }
     if (!detailPurchaseDate) {
       setInlineMessage("Date of purchase is required.");
       return;
@@ -1025,12 +1265,12 @@ export default function PurchasesClient({
 
     setSaving(true);
     setInlineMessage(null);
-    const res = await fetch("/api/purchases", {
-      method: "PATCH",
+    const res = await fetch(
+      `/api/purchases/${encodeURIComponent(selectedRequest.id)}/complete`,
+      {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id: selectedRequest.id,
-        stage: "detail",
         detailPurchaseDate,
         detailTotalAmount: parsedTotal,
         detailPurchaseMethod,
@@ -1043,7 +1283,8 @@ export default function PurchasesClient({
         detailManagerSignature: detailReimbursable ? detailManagerSignature.trim() : "",
         detailManagerApprovedDate: detailReimbursable ? detailManagerApprovedDate : "",
       }),
-    });
+      }
+    );
     const json = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
       setInlineMessage(json.error || "Failed to submit purchase detail.");
@@ -1051,7 +1292,8 @@ export default function PurchasesClient({
       return;
     }
     await loadData(selectedRequest.id);
-    setInlineMessage("Purchase detail submitted. Request moved to Past Purchases.");
+    setInlineMessage(null);
+    showSuccessToast("Purchase completion submitted.");
     setSaving(false);
   }
 
@@ -1091,121 +1333,168 @@ export default function PurchasesClient({
     }
   }
 
-  function renderQueueGroup({
+  function renderQueueSection({
     title,
-    filterValue,
-    onFilterChange,
-    filterOptions,
-    buckets,
     rows,
     emptyText,
+    accentColor,
   }: {
     title: string;
-    filterValue: string;
-    onFilterChange: (value: string) => void;
-    filterOptions: ReadonlyArray<{ value: string; label: string }>;
-    buckets: QueueBucket[];
     rows: PurchaseRequestRow[];
     emptyText: string;
+    accentColor: string;
   }) {
-    const visibleBuckets =
-      filterValue === "all" ? buckets : buckets.filter((bucket) => bucket.value === filterValue);
-
     return (
       <div
         style={{
-          border: "1px solid rgba(255,255,255,0.12)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderLeft: `3px solid ${accentColor}`,
           borderRadius: 12,
-          padding: 10,
+          padding: 8,
           background: "rgba(255,255,255,0.02)",
           display: "grid",
-          gap: 8,
+          gap: 6,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 900,
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.24)",
+              padding: "2px 8px",
+              background: "rgba(255,255,255,0.08)",
+            }}
+          >
+            {rows.length}
+          </div>
           <div style={{ fontWeight: 800 }}>{title}</div>
-          <select value={filterValue} onChange={(e) => onFilterChange(e.target.value)} style={{ ...inputStyle(), width: 240 }}>
-            {filterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
         </div>
 
-        <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gap: 6 }}>
           {rows.length === 0 ? (
             <div style={{ opacity: 0.72, fontSize: 13 }}>{emptyText}</div>
           ) : (
-            visibleBuckets.map((bucket) => {
-              const bucketRows = rows.filter((row) => row.overall_status === bucket.value);
+            rows.map((row) => {
+              const itemCount = (itemsByRequestId[row.id] ?? []).length;
+              const vendorNames = (vendorsByRequestId[row.id] ?? [])
+                .map((vendor) => vendor.vendor_name)
+                .filter(Boolean);
+              const vendorLabel = summarizeVendors(
+                vendorNames.length ? vendorNames : [row.vendor_name]
+              );
               return (
                 <div
-                  key={bucket.value}
+                  key={row.id}
                   style={{
-                    border: "1px solid rgba(255,255,255,0.12)",
+                    textAlign: "left",
                     borderRadius: 12,
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.03)",
+                    color: "inherit",
                     padding: 10,
                     display: "grid",
-                    gap: 8,
-                    background: "rgba(255,255,255,0.02)",
+                    gap: 4,
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                    <div style={{ fontWeight: 800 }}>{bucket.label}</div>
-                    <div style={{ opacity: 0.75, fontSize: 12 }}>
-                      {bucketRows.length} request{bucketRows.length === 1 ? "" : "s"}
-                    </div>
+                    <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
+                    <span style={statusBadgeStyle(row.overall_status)}>
+                      {purchaseOverallStatusLabel(row.overall_status)}
+                    </span>
                   </div>
+                  <div style={{ fontSize: 13, opacity: 0.86 }}>
+                    {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.75 }}>
+                    {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
+                    <Link href={purchaseDetailHref(row.id)} style={buttonStyle()}>
+                      Open
+                    </Link>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
 
-                  {bucketRows.length === 0 ? (
-                    <div style={{ opacity: 0.66, fontSize: 13 }}>No requests in this bucket.</div>
-                  ) : (
-                    bucketRows.map((row) => {
-                      const itemCount = (itemsByRequestId[row.id] ?? []).length;
-                      const vendorNames = (vendorsByRequestId[row.id] ?? [])
-                        .map((vendor) => vendor.vendor_name)
-                        .filter(Boolean);
-                      const vendorLabel = summarizeVendors(
-                        vendorNames.length ? vendorNames : [row.vendor_name]
-                      );
-                      const selected = row.id === selectedRequestId;
-                      return (
-                        <button
-                          key={row.id}
-                          type="button"
-                          onClick={() => setSelectedRequestId(row.id)}
-                          style={{
-                            textAlign: "left",
-                            borderRadius: 12,
-                            border: selected
-                              ? "1px solid rgba(120,180,255,0.7)"
-                              : "1px solid rgba(255,255,255,0.14)",
-                            background: selected ? "rgba(120,180,255,0.12)" : "rgba(255,255,255,0.03)",
-                            color: "inherit",
-                            padding: 12,
-                            cursor: "pointer",
-                            display: "grid",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                            <div style={{ fontWeight: 800 }}>{vendorLabel}</div>
-                            <span style={statusBadgeStyle(row.overall_status)}>
-                              {purchaseOverallStatusLabel(row.overall_status)}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: 13, opacity: 0.86 }}>
-                            {row.requested_for_name || row.requested_for_id || "Unassigned teammate"} · {row.department}
-                          </div>
-                          <div style={{ fontSize: 13, opacity: 0.75 }}>
-                            {itemCount} item{itemCount === 1 ? "" : "s"} · {asCurrency(row.estimated_total)}
-                          </div>
-                          <div style={{ fontSize: 12, opacity: 0.65 }}>Requested {fmtDate(row.created_at)}</div>
-                        </button>
-                      );
-                    })
-                  )}
+  function renderSearchResults(rows: PurchaseRequestRow[]) {
+    return (
+      <div style={{ ...cardStyle(), padding: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontWeight: 900 }}>Matching Requests</div>
+          <div style={{ opacity: 0.72, fontSize: 13 }}>
+            {rows.length} result{rows.length === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+          {rows.length === 0 ? (
+            <div style={{ opacity: 0.72, fontSize: 13 }}>
+              No purchase requests match the current search or filters.
+            </div>
+          ) : (
+            rows.map((row) => {
+              const vendorNames = (vendorsByRequestId[row.id] ?? [])
+                .map((vendor) => vendor.vendor_name)
+                .filter(Boolean);
+              const vendorLabel = summarizeVendors(
+                vendorNames.length ? vendorNames : [row.vendor_name]
+              );
+              return (
+                <div
+                  key={row.id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    borderRadius: 12,
+                    background: "rgba(255,255,255,0.03)",
+                    padding: 10,
+                    display: "grid",
+                    gap: 4,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{row.reason || "Purchase Request"}</div>
+                    <span style={statusBadgeStyle(row.overall_status)}>
+                      {purchaseOverallStatusLabel(row.overall_status)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.86 }}>
+                    Vendor: {vendorLabel}
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.8 }}>
+                    Teammate: {row.requested_for_name || row.requested_for_id || "Unassigned"}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.68 }}>
+                    Request ID: {row.id} · Created: {fmtDate(row.created_at)}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+                    <Link href={purchaseDetailHref(row.id)} style={buttonStyle()}>
+                      Open
+                    </Link>
+                  </div>
                 </div>
               );
             })
@@ -1219,19 +1508,52 @@ export default function PurchasesClient({
     <main style={{ maxWidth: 1400, margin: "0 auto", paddingBottom: 32 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ marginBottom: 6 }}>Purchases</h1>
+          <h1 style={{ marginBottom: 6 }}>
+            {isQueuePage ? "Purchases" : isNewPage ? "New Purchase Request" : "Purchase Request Detail"}
+          </h1>
           <div style={{ opacity: 0.78 }}>
-            Workflow: Operations Manager approval to AP approval to Approved Purchases to Past Purchases.
+            {isQueuePage
+              ? "Queue-first triage for purchase workflow stages. Open a request to review or complete work."
+              : isNewPage
+                ? "Fast intake for blank or maintenance-linked purchase requests."
+                : "Request-level workflow surface for review, approval, and final purchase detail."}
           </div>
         </div>
-        <Link href="/" style={buttonStyle()}>
-          Back Home
-        </Link>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {isQueuePage ? (
+            <Link href="/purchases/new" style={primaryButtonStyle()}>
+              + New Request
+            </Link>
+          ) : (
+            <Link href="/purchases" style={buttonStyle()}>
+              Back to Purchases
+            </Link>
+          )}
+        </div>
       </div>
 
-      <div style={{ marginTop: 12, ...cardStyle() }}>
-        Signed in as <strong>{(fullName || email || "Unknown").trim()}</strong> ({role.replaceAll("_", " ")})
-      </div>
+      {toastMessage ? (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            top: 14,
+            right: 14,
+            zIndex: 1200,
+            borderRadius: 12,
+            border: "1px solid rgba(70,220,120,0.52)",
+            background: "rgba(22,120,58,0.92)",
+            color: "#f3fff8",
+            fontWeight: 800,
+            padding: "10px 12px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            maxWidth: 360,
+          }}
+        >
+          {toastMessage}
+        </div>
+      ) : null}
 
       {inlineMessage ? (
         <div style={{ marginTop: 12, ...cardStyle(), opacity: 0.95 }}>{inlineMessage}</div>
@@ -1243,77 +1565,67 @@ export default function PurchasesClient({
         <div style={{ marginTop: 12, ...cardStyle(), color: "#ffb0b0" }}>{loadingError}</div>
       ) : (
         <>
-          <section style={{ marginTop: 14, display: "grid", gap: 14 }}>
-            <form onSubmit={onCreateRequest} style={{ ...cardStyle(), order: 2 }}>
+          {isNewPage || isQueuePage ? (
+            <section style={{ marginTop: 12, display: "grid", gap: isQueuePage ? 10 : 14 }}>
+              {isNewPage ? (
+                <div style={{ ...cardStyle(), padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 900 }}>Request Context</div>
+                    <span
+                      style={{
+                        ...statusBadgeStyle(hasMaintenanceContext ? "waiting_operations_manager_approval" : "active"),
+                        fontSize: 11,
+                        letterSpacing: "0.01em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {hasMaintenanceContext ? "Linked to Maintenance" : "Blank Request"}
+                    </span>
+                  </div>
+                  {hasMaintenanceContext ? (
+                    <div style={{ display: "grid", gap: 6, opacity: 0.85 }}>
+                      <div>
+                        <strong>Linked Asset:</strong>{" "}
+                        {assetType && assetId ? `${assetType} · ${assetId}` : "None"}
+                      </div>
+                      <div>
+                        <strong>Linked Maintenance Request:</strong>{" "}
+                        {maintenanceRequestType && maintenanceRequestId
+                          ? `${maintenanceRequestType} · ${maintenanceRequestId}`
+                          : "None"}
+                      </div>
+                      <div>
+                        <strong>Linked Maintenance Log:</strong>{" "}
+                        {maintenanceLogType && maintenanceLogId
+                          ? `${maintenanceLogType} · ${maintenanceLogId}`
+                          : "None"}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ opacity: 0.78 }}>
+                      Blank Purchase Request: no linked maintenance context is required.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {isNewPage ? (
+                <form onSubmit={onCreateRequest} style={{ ...cardStyle(), order: 2 }}>
               <div style={{ fontWeight: 900, marginBottom: 10 }}>Create Purchase Request</div>
               <div style={{ opacity: 0.75, marginBottom: 10 }}>Date of Request: {new Date().toLocaleDateString()}</div>
-              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Teammate Name *</span>
-                  <EmployeeMenuSelect
-                    value={requestedForId}
-                    onChange={setRequestedForId}
-                    options={teammateBadgeOptions}
-                    placeholder="Select teammate..."
-                    disabled={!canCreate || saving}
-                    avatarUrlById={avatarUrlById}
-                    style={inputStyle()}
-                  />
-                </label>
+              <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
+                <span>Reason for Purchase *</span>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  style={{ ...inputStyle(), resize: "vertical" }}
+                  placeholder="Specific replacement parts, emergency repair, equipment upgrades..."
+                  disabled={!canCreate || saving}
+                />
+              </label>
 
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Department *</span>
-                  <select value={department} onChange={(e) => setDepartment(e.target.value as (typeof PURCHASE_DEPARTMENTS)[number])} style={inputStyle()} disabled={!canCreate || saving}>
-                    {PURCHASE_DEPARTMENTS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Total Estimated Purchase Amount</span>
-                  <input value={estimatedTotal} onChange={(e) => setEstimatedTotal(e.target.value)} inputMode="decimal" style={inputStyle()} disabled={!canCreate || saving} />
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Timeline for Purchase</span>
-                  <select value={timeline} onChange={(e) => setTimeline((e.target.value as PurchaseTimeline) || "")} style={inputStyle()} disabled={!canCreate || saving}>
-                    <option value="">Auto (linked urgency/default)</option>
-                    {PURCHASE_TIMELINE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label style={{ display: "grid", gap: 6 }}>
-                  <span>Purchase Method *</span>
-                  <select value={purchaseMethod} onChange={(e) => setPurchaseMethod(e.target.value as PurchaseMethod)} style={inputStyle()} disabled={!canCreate || saving}>
-                    {PURCHASE_METHOD_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {purchaseMethod === "Other" ? (
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <span>Other Purchase Method *</span>
-                    <input
-                      value={purchaseMethodOther}
-                      onChange={(e) => setPurchaseMethodOther(e.target.value)}
-                      style={inputStyle()}
-                      disabled={!canCreate || saving}
-                    />
-                  </label>
-                ) : null}
-              </div>
-
-              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12, borderColor: "rgba(120,180,255,0.35)", background: "rgba(120,180,255,0.08)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 800 }}>Vendor(s) / Store(s) *</div>
                   <button type="button" onClick={addVendorRow} style={buttonStyle()} disabled={!canCreate || saving}>
@@ -1357,22 +1669,120 @@ export default function PurchasesClient({
                 </div>
               </div>
 
-              <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                <span>Reason for Purchase *</span>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  rows={3}
-                  style={{ ...inputStyle(), resize: "vertical" }}
-                  placeholder="Specific replacement parts, emergency repair, equipment upgrades..."
-                  disabled={!canCreate || saving}
-                />
-              </label>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Item(s) Requested</div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {items.map((row, idx) => (
+                    <div key={row.localId} style={{ ...cardStyle(), padding: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 800 }}>Item {idx + 1}</div>
+                        <button type="button" onClick={() => removeItemRow(row.localId)} style={buttonStyle()} disabled={!canCreate || saving || items.length <= 1}>
+                          Remove Item
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Item *</span>
+                          <input value={row.name} onChange={(e) => updateItem(row.localId, { name: e.target.value })} style={inputStyle()} disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Quantity</span>
+                          <input value={row.quantity} onChange={(e) => updateItem(row.localId, { quantity: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Est. Unit Cost</span>
+                          <input value={row.estimatedUnitCost} onChange={(e) => updateItem(row.localId, { estimatedUnitCost: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Est. Total</span>
+                          <input value={row.estimatedTotal} onChange={(e) => updateItem(row.localId, { estimatedTotal: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
+                        </label>
+                      </div>
+                      <label style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                        <span>Description (optional)</span>
+                        <textarea value={row.description} onChange={(e) => updateItem(row.localId, { description: e.target.value })} rows={2} style={{ ...inputStyle(), resize: "vertical" }} disabled={!canCreate || saving} />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={addItemRow} style={{ ...buttonStyle(), marginTop: 8 }} disabled={!canCreate || saving}>
+                  Add Item
+                </button>
+              </div>
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-                <input type="checkbox" checked={reimbursable} onChange={(e) => setReimbursable(e.target.checked)} disabled={!canCreate || saving} />
-                <span>Reimbursable expense</span>
-              </label>
+              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Request Settings (secondary)</div>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Teammate Name *</span>
+                    <EmployeeMenuSelect
+                      value={requestedForId}
+                      onChange={setRequestedForId}
+                      options={teammateBadgeOptions}
+                      placeholder="Select teammate..."
+                      disabled={!canCreate || saving}
+                      avatarUrlById={avatarUrlById}
+                      style={inputStyle()}
+                    />
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Department *</span>
+                    <select value={department} onChange={(e) => setDepartment(e.target.value as (typeof PURCHASE_DEPARTMENTS)[number])} style={inputStyle()} disabled={!canCreate || saving}>
+                      {PURCHASE_DEPARTMENTS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Total Estimated Purchase Amount</span>
+                    <input value={estimatedTotal} onChange={(e) => setEstimatedTotal(e.target.value)} inputMode="decimal" style={inputStyle()} disabled={!canCreate || saving} />
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Timeline for Purchase</span>
+                    <select value={timeline} onChange={(e) => setTimeline((e.target.value as PurchaseTimeline) || "")} style={inputStyle()} disabled={!canCreate || saving}>
+                      <option value="">Auto (linked urgency/default)</option>
+                      {PURCHASE_TIMELINE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span>Purchase Method *</span>
+                    <select value={purchaseMethod} onChange={(e) => setPurchaseMethod(e.target.value as PurchaseMethod)} style={inputStyle()} disabled={!canCreate || saving}>
+                      {PURCHASE_METHOD_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {purchaseMethod === "Other" ? (
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span>Other Purchase Method *</span>
+                      <input
+                        value={purchaseMethodOther}
+                        onChange={(e) => setPurchaseMethodOther(e.target.value)}
+                        style={inputStyle()}
+                        disabled={!canCreate || saving}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+                  <input type="checkbox" checked={reimbursable} onChange={(e) => setReimbursable(e.target.checked)} disabled={!canCreate || saving} />
+                  <span>Reimbursable expense</span>
+                </label>
+              </div>
 
               <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
                 <div style={{ fontWeight: 800, marginBottom: 8 }}>Linked Maintenance Context (optional)</div>
@@ -1467,47 +1877,6 @@ export default function PurchasesClient({
                 </div>
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontWeight: 800, marginBottom: 8 }}>Item(s) Requested</div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {items.map((row, idx) => (
-                    <div key={row.localId} style={{ ...cardStyle(), padding: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                        <div style={{ fontWeight: 800 }}>Item {idx + 1}</div>
-                        <button type="button" onClick={() => removeItemRow(row.localId)} style={buttonStyle()} disabled={!canCreate || saving || items.length <= 1}>
-                          Remove Item
-                        </button>
-                      </div>
-                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Item *</span>
-                          <input value={row.name} onChange={(e) => updateItem(row.localId, { name: e.target.value })} style={inputStyle()} disabled={!canCreate || saving} />
-                        </label>
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Quantity</span>
-                          <input value={row.quantity} onChange={(e) => updateItem(row.localId, { quantity: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
-                        </label>
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Est. Unit Cost</span>
-                          <input value={row.estimatedUnitCost} onChange={(e) => updateItem(row.localId, { estimatedUnitCost: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
-                        </label>
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Est. Total</span>
-                          <input value={row.estimatedTotal} onChange={(e) => updateItem(row.localId, { estimatedTotal: e.target.value })} style={inputStyle()} inputMode="decimal" disabled={!canCreate || saving} />
-                        </label>
-                      </div>
-                      <label style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                        <span>Description (optional)</span>
-                        <textarea value={row.description} onChange={(e) => updateItem(row.localId, { description: e.target.value })} rows={2} style={{ ...inputStyle(), resize: "vertical" }} disabled={!canCreate || saving} />
-                      </label>
-                    </div>
-                  ))}
-                </div>
-                <button type="button" onClick={addItemRow} style={{ ...buttonStyle(), marginTop: 8 }} disabled={!canCreate || saving}>
-                  Add Item
-                </button>
-              </div>
-
               <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
                 <div style={{ fontWeight: 800, marginBottom: 8 }}>Add Quote (Camera / Photo / File)</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1568,36 +1937,118 @@ export default function PurchasesClient({
                   {saving ? "Saving..." : "Submit Purchase Request"}
                 </button>
               </div>
-            </form>
+                </form>
+              ) : null}
 
-            <section style={{ ...cardStyle(), order: 1 }}>
-              <div style={{ fontWeight: 900 }}>Purchase Queues</div>
-              <div style={{ marginTop: 10, display: "grid", gap: 10, maxHeight: 820, overflowY: "auto" }}>
-                {renderQueueGroup({
-                  title: "Purchase Request Queue",
-                  filterValue: requestQueueFilter,
-                  onFilterChange: (value) =>
-                    setRequestQueueFilter(value as (typeof REQUEST_FILTER_OPTIONS)[number]["value"]),
-                  filterOptions: REQUEST_FILTER_OPTIONS,
-                  buckets: REQUEST_QUEUE_BUCKETS,
-                  rows: filteredRequestQueueRows,
-                  emptyText: "No purchase requests in request queue buckets for this filter.",
-                })}
-                {renderQueueGroup({
-                  title: "Purchase Detail Queue",
-                  filterValue: detailQueueFilter,
-                  onFilterChange: (value) =>
-                    setDetailQueueFilter(value as (typeof DETAIL_FILTER_OPTIONS)[number]["value"]),
-                  filterOptions: DETAIL_FILTER_OPTIONS,
-                  buckets: DETAIL_QUEUE_BUCKETS,
-                  rows: filteredDetailQueueRows,
-                  emptyText: "No purchase requests in detail queue buckets for this filter.",
-                })}
-              </div>
+              {isQueuePage ? (
+                <section style={{ ...cardStyle(), order: 1, padding: 12 }}>
+                  <div style={{ fontWeight: 900 }}>Queue</div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "grid",
+                      gap: 8,
+                      gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+                      alignItems: "end",
+                    }}
+                  >
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 12, opacity: 0.78 }}>Search Requests</span>
+                      <input
+                        value={queueSearch}
+                        onChange={(e) => setQueueSearch(e.target.value)}
+                        placeholder="Search by ID, reason, vendor, or teammate..."
+                        style={inputStyle()}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 12, opacity: 0.78 }}>Status</span>
+                      <select
+                        value={queueStatusFilter}
+                        onChange={(e) =>
+                          setQueueStatusFilter(e.target.value as QueueStatusFilterValue)
+                        }
+                        style={inputStyle()}
+                      >
+                        {QUEUE_STATUS_FILTER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 12, opacity: 0.78 }}>Date</span>
+                      <select
+                        value={queueDateFilter}
+                        onChange={(e) =>
+                          setQueueDateFilter(e.target.value as QueueDateFilterValue)
+                        }
+                        style={inputStyle()}
+                      >
+                        {QUEUE_DATE_FILTER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {isQueueSearchMode ? (
+                    <div style={{ marginTop: 10, maxHeight: 860, overflowY: "auto" }}>
+                      {renderSearchResults(queueFilteredRows)}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ marginTop: 8, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))" }}>
+                        <div style={{ ...cardStyle(), padding: 8, background: "rgba(245,200,90,0.08)", borderColor: "rgba(245,200,90,0.25)" }}>
+                          <div style={{ fontSize: 11, opacity: 0.72, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pending</div>
+                          <div style={{ fontSize: 18, fontWeight: 900 }}>{requestQueueRows.length}</div>
+                        </div>
+                        <div style={{ ...cardStyle(), padding: 8, background: "rgba(120,180,255,0.08)", borderColor: "rgba(120,180,255,0.25)" }}>
+                          <div style={{ fontSize: 11, opacity: 0.72, textTransform: "uppercase", letterSpacing: "0.04em" }}>In Progress</div>
+                          <div style={{ fontSize: 18, fontWeight: 900 }}>{inProgressQueueRows.length}</div>
+                        </div>
+                        <div style={{ ...cardStyle(), padding: 8, background: "rgba(70,220,120,0.08)", borderColor: "rgba(70,220,120,0.25)" }}>
+                          <div style={{ fontSize: 11, opacity: 0.72, textTransform: "uppercase", letterSpacing: "0.04em" }}>Completed</div>
+                          <div style={{ fontSize: 18, fontWeight: 900 }}>{completedQueueRows.length}</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 8, display: "grid", gap: 8, maxHeight: 820, overflowY: "auto" }}>
+                        {renderQueueSection({
+                          title: "Needs Review",
+                          rows: requestQueueRows,
+                          emptyText: "No purchase requests waiting for review.",
+                          accentColor: "rgba(245,200,90,0.55)",
+                        })}
+                        {renderQueueSection({
+                          title: "Approved",
+                          rows: approvedQueueRows,
+                          emptyText: "No approved purchase requests.",
+                          accentColor: "rgba(70,220,120,0.55)",
+                        })}
+                        {renderQueueSection({
+                          title: "In Progress",
+                          rows: inProgressQueueRows,
+                          emptyText: "No in-progress purchase requests.",
+                          accentColor: "rgba(120,180,255,0.55)",
+                        })}
+                        {renderQueueSection({
+                          title: "Completed",
+                          rows: completedQueueRows,
+                          emptyText: "No completed purchase requests.",
+                          accentColor: "rgba(160,160,160,0.45)",
+                        })}
+                      </div>
+                    </>
+                  )}
+                </section>
+              ) : null}
             </section>
-          </section>
+          ) : null}
 
-          {selectedRequest ? (
+          {isDetailPage && selectedRequest ? (
             <section style={{ marginTop: 14, ...cardStyle() }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <div>
@@ -1606,7 +2057,8 @@ export default function PurchasesClient({
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={statusBadgeStyle(selectedRequest.overall_status)}>{purchaseOverallStatusLabel(selectedRequest.overall_status)}</span>
-                  {(selectedRequest.overall_status === "approved_purchases" ||
+                  {!isDetailPage &&
+                  (selectedRequest.overall_status === "approved_purchases" ||
                     selectedRequest.overall_status === "past_purchases") ? (
                     <button type="button" onClick={submitMaintenanceDetail} style={buttonStyle()} disabled={saving}>
                       {selectedRequest.overall_status === "approved_purchases"
@@ -1623,7 +2075,19 @@ export default function PurchasesClient({
                 </div>
               ) : null}
 
-              <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "grid",
+                  gap: 14,
+                  gridTemplateColumns: "minmax(0,1fr) minmax(260px,320px)",
+                  alignItems: "start",
+                }}
+              >
+                <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ ...cardStyle(), padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>Request Overview</div>
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
                 <div><strong>Teammate:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
                 <div><strong>Date:</strong> {fmtDateOnly(selectedRequest.request_date)}</div>
                 <div><strong>Department:</strong> {selectedRequest.department}</div>
@@ -1640,12 +2104,17 @@ export default function PurchasesClient({
                     ? ` (${selectedRequest.purchase_method_other})`
                     : ""}
                 </div>
+                <div><strong>Manager Approved By:</strong> {managerApprovedByLabel}</div>
+                <div><strong>Manager Approved At:</strong> {fmtDate(selectedRequest.manager_approved_at)}</div>
+                <div><strong>AP Processed By:</strong> {apProcessedByLabel}</div>
+                <div><strong>AP Processed At:</strong> {fmtDate(apProcessedAtValue)}</div>
                 <div><strong>Reason:</strong> {selectedRequest.reason}</div>
+                </div>
               </div>
 
-              <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
-                <div style={{ fontWeight: 900, marginBottom: 8 }}>Outdoor Independence LLC - Purchase Detail Form</div>
-                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))" }}>
+              <div style={{ marginTop: 10, ...cardStyle(), padding: 12 }}>
+                <div style={stageTitleStyle()}>Purchase Details</div>
+                <div style={{ marginTop: 8, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))" }}>
                   <div><strong>Teammate Name:</strong> {selectedRequest.requested_for_name || selectedRequest.requested_for_id || "-"}</div>
                   <div><strong>Department/Team:</strong> {selectedRequest.department || "-"}</div>
                   <div><strong>Vendor/Store Name:</strong> {selectedVendors.length ? selectedVendors.join(", ") : "-"}</div>
@@ -1714,8 +2183,19 @@ export default function PurchasesClient({
                     disabled={saving}
                   />
                 </label>
+              </div>
 
-                <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  ...cardStyle(),
+                  padding: 12,
+                  borderColor: "rgba(255,255,255,0.2)",
+                  background: "rgba(255,255,255,0.045)",
+                }}
+              >
+                <div style={stageTitleStyle()}>Finalization</div>
+                <div style={{ marginTop: 8, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
                   <div>
                     <div style={{ fontWeight: 800, marginBottom: 6 }}>Is this purchase for a reimbursable expense? *</div>
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginRight: 12 }}>
@@ -1961,180 +2441,145 @@ export default function PurchasesClient({
                   )}
                 </div>
               </div>
+                </div>
 
-              {canManagerApprove && selectedRequest.overall_status === "waiting_operations_manager_approval" ? (
-                <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
-                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Manager Approval</div>
-                  <div style={{ opacity: 0.75, marginBottom: 8 }}>
-                    Approve/deny one or all requested items. Signature required to finalize.
-                  </div>
-                  {selectedItems.map((item) => (
-                    <div key={item.id} style={{ ...cardStyle(), padding: 10, marginTop: 8 }}>
-                      <div style={{ fontWeight: 800 }}>{item.item_name}</div>
-                      <div style={{ marginTop: 8, display: "grid", gap: 8, gridTemplateColumns: "160px 1fr" }}>
-                        <select
-                          value={managerDecisions[item.id]?.decision ?? "pending"}
-                          onChange={(e) =>
-                            setManagerDecisions((prev) => ({
-                              ...prev,
-                              [item.id]: {
-                                decision: e.target.value as PurchaseDecision,
-                                note: prev[item.id]?.note ?? "",
-                              },
-                            }))
-                          }
-                          style={inputStyle()}
-                          disabled={saving}
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="approved">Approved</option>
-                          <option value="denied">Denied</option>
-                        </select>
-                        <input
-                          value={managerDecisions[item.id]?.note ?? ""}
-                          onChange={(e) =>
-                            setManagerDecisions((prev) => ({
-                              ...prev,
-                              [item.id]: {
-                                decision: prev[item.id]?.decision ?? "pending",
-                                note: e.target.value,
-                              },
-                            }))
-                          }
-                          placeholder="Item approval note (optional)"
-                          style={inputStyle()}
-                          disabled={saving}
-                        />
-                      </div>
+                <aside
+                  style={{
+                    ...cardStyle(),
+                    padding: 12,
+                    position: "sticky",
+                    top: 84,
+                    display: "grid",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ fontWeight: 900 }}>Workflow</div>
+                  <div
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid rgba(120,180,255,0.32)",
+                      background: "rgba(120,180,255,0.12)",
+                      padding: "10px 12px",
+                      display: "grid",
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.82 }}>
+                      Current Stage
                     </div>
-                  ))}
-
-                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>Manager E-Signature *</span>
-                      <input value={managerSignature} onChange={(e) => setManagerSignature(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>Manager Notes</span>
-                      <input value={managerNote} onChange={(e) => setManagerNote(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
+                    <div style={{ fontWeight: 900, fontSize: 17 }}>
+                      {purchaseOverallStatusLabel(selectedRequest.overall_status)}
+                    </div>
                   </div>
 
-                  <div style={{ marginTop: 10 }}>
-                    <button type="button" onClick={submitManagerApproval} style={primaryButtonStyle()} disabled={saving}>
-                      Submit Manager Approval
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+                  {canManagerApprove ? (
+                    <div style={{ ...cardStyle(), padding: 10, display: "grid", gap: 8 }}>
+                      <div style={stageTitleStyle()}>Manager Review</div>
+                      {selectedRequest.overall_status === "waiting_operations_manager_approval" ? (
+                        <>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>Manager E-Signature *</span>
+                            <input value={managerSignature} onChange={(e) => setManagerSignature(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>Manager Notes</span>
+                            <input value={managerNote} onChange={(e) => setManagerNote(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+                            <button type="button" onClick={() => void submitManagerApproval("approved")} style={primaryButtonStyle()} disabled={saving || !managerStageReady}>
+                              Approve Request
+                            </button>
+                            <button type="button" onClick={() => void submitManagerApproval("denied")} style={dangerButtonStyle()} disabled={saving || !managerStageReady}>
+                              Deny Request
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ opacity: 0.72, fontSize: 12 }}>No manager action required.</div>
+                      )}
+                    </div>
+                  ) : null}
 
-              {canApApprove && selectedRequest.overall_status === "waiting_ap_department_approval" ? (
-                <div style={{ marginTop: 12, ...cardStyle(), padding: 12 }}>
-                  <div style={{ fontWeight: 900, marginBottom: 8 }}>Accounts Payable Approval</div>
-                  <div style={{ opacity: 0.75, marginBottom: 8 }}>
-                    Approve/deny item-level purchases, then assign funding date, payment method, and PO.
-                  </div>
-                  {selectedItems.map((item) => {
-                    const row = apDecisions[item.id];
-                    return (
-                      <div key={item.id} style={{ ...cardStyle(), padding: 10, marginTop: 8 }}>
-                        <div style={{ fontWeight: 800 }}>{item.item_name}</div>
-                        <div style={{ marginTop: 8, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
-                          <select
-                            value={row?.decision ?? "pending"}
-                            onChange={(e) =>
-                              setApDecisions((prev) => ({
-                                ...prev,
-                                [item.id]: {
-                                  decision: e.target.value as PurchaseDecision,
-                                  note: prev[item.id]?.note ?? "",
-                                  approvedPaymentMethod: prev[item.id]?.approvedPaymentMethod ?? "",
-                                  approvedPaymentMethodOther: prev[item.id]?.approvedPaymentMethodOther ?? "",
-                                  approvedPoNumber: prev[item.id]?.approvedPoNumber ?? "",
-                                  fundsAvailableDate: prev[item.id]?.fundsAvailableDate ?? "",
-                                },
-                              }))
-                            }
-                            style={inputStyle()}
-                            disabled={saving}
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="approved">Approved</option>
-                            <option value="denied">Denied</option>
-                          </select>
-                          <input
-                            value={row?.note ?? ""}
-                            onChange={(e) =>
-                              setApDecisions((prev) => ({
-                                ...prev,
-                                [item.id]: {
-                                  decision: prev[item.id]?.decision ?? "pending",
-                                  note: e.target.value,
-                                  approvedPaymentMethod: prev[item.id]?.approvedPaymentMethod ?? "",
-                                  approvedPaymentMethodOther: prev[item.id]?.approvedPaymentMethodOther ?? "",
-                                  approvedPoNumber: prev[item.id]?.approvedPoNumber ?? "",
-                                  fundsAvailableDate: prev[item.id]?.fundsAvailableDate ?? "",
-                                },
-                              }))
-                            }
-                            placeholder="AP note (optional)"
-                            style={inputStyle()}
-                            disabled={saving}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {canApApprove ? (
+                    <div style={{ ...cardStyle(), padding: 10, display: "grid", gap: 8 }}>
+                      <div style={stageTitleStyle()}>Accounts Payable</div>
+                      {selectedRequest.overall_status === "waiting_ap_department_approval" ? (
+                        <>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>Funds Available Date</span>
+                            <input type="date" value={apFundsAvailableDate} onChange={(e) => setApFundsAvailableDate(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>AP Payment Method</span>
+                            <select value={apPaymentMethod} onChange={(e) => setApPaymentMethod(e.target.value)} style={inputStyle()} disabled={saving}>
+                              <option value="">Select...</option>
+                              {PURCHASE_METHOD_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {apPaymentMethod === "Other" ? (
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Other Payment Method</span>
+                              <input value={apPaymentMethodOther} onChange={(e) => setApPaymentMethodOther(e.target.value)} style={inputStyle()} disabled={saving} />
+                            </label>
+                          ) : null}
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>PO #</span>
+                            <input value={apPoNumber} onChange={(e) => setApPoNumber(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>AP E-Signature *</span>
+                            <input value={apSignature} onChange={(e) => setApSignature(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>AP Notes</span>
+                            <input value={apNote} onChange={(e) => setApNote(e.target.value)} style={inputStyle()} disabled={saving} />
+                          </label>
+                          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+                            <button type="button" onClick={() => void submitApApproval("approved")} style={primaryButtonStyle()} disabled={saving || !apStageReady}>
+                              Approve Request
+                            </button>
+                            <button type="button" onClick={() => void submitApApproval("denied")} style={dangerButtonStyle()} disabled={saving || !apStageReady}>
+                              Deny Request
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ opacity: 0.72, fontSize: 12 }}>No accounts payable action required.</div>
+                      )}
+                    </div>
+                  ) : null}
 
-                  <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>Funds Available Date</span>
-                      <input type="date" value={apFundsAvailableDate} onChange={(e) => setApFundsAvailableDate(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>AP Payment Method</span>
-                      <select value={apPaymentMethod} onChange={(e) => setApPaymentMethod(e.target.value)} style={inputStyle()} disabled={saving}>
-                        <option value="">Select...</option>
-                        {PURCHASE_METHOD_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {apPaymentMethod === "Other" ? (
-                      <label style={{ display: "grid", gap: 6 }}>
-                        <span>Other Payment Method</span>
-                        <input value={apPaymentMethodOther} onChange={(e) => setApPaymentMethodOther(e.target.value)} style={inputStyle()} disabled={saving} />
-                      </label>
-                    ) : null}
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>PO #</span>
-                      <input value={apPoNumber} onChange={(e) => setApPoNumber(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>AP E-Signature *</span>
-                      <input value={apSignature} onChange={(e) => setApSignature(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span>AP Notes</span>
-                      <input value={apNote} onChange={(e) => setApNote(e.target.value)} style={inputStyle()} disabled={saving} />
-                    </label>
+                  <div style={{ ...cardStyle(), padding: 10, display: "grid", gap: 8 }}>
+                    <div style={stageTitleStyle()}>Purchase Completion</div>
+                    {(selectedRequest.overall_status === "approved_purchases" ||
+                      selectedRequest.overall_status === "past_purchases") ? (
+                      <button type="button" onClick={submitMaintenanceDetail} style={primaryButtonStyle()} disabled={saving || !completionStageReady}>
+                        {selectedRequest.overall_status === "approved_purchases"
+                          ? "Submit Purchase Detail"
+                          : "Update Purchase Detail"}
+                      </button>
+                    ) : (
+                      <div style={{ opacity: 0.72, fontSize: 12 }}>Available after approvals are complete.</div>
+                    )}
                   </div>
 
-                  <div style={{ marginTop: 10 }}>
-                    <button type="button" onClick={submitApApproval} style={primaryButtonStyle()} disabled={saving}>
-                      Submit AP Approval
-                    </button>
+                  <div style={{ opacity: 0.72, fontSize: 12 }}>
+                    Review request data in the left column and complete stage actions here.
                   </div>
-                </div>
-              ) : null}
+                </aside>
+              </div>
             </section>
-          ) : (
+          ) : isDetailPage ? (
             <section style={{ marginTop: 14, ...cardStyle() }}>
-              <div style={{ opacity: 0.75 }}>No purchase request selected.</div>
+              <div style={{ opacity: 0.75 }}>
+                Purchase request not found or unavailable for this role.
+              </div>
             </section>
-          )}
+          ) : null}
         </>
       )}
     </main>

@@ -23,5 +23,5 @@ export default async function PurchasesPage() {
       ? session.profile.email
       : session.user.email ?? null;
 
-  return <PurchasesClient role={role} fullName={fullName} email={email} />;
+  return <PurchasesClient role={role} fullName={fullName} email={email} mode="queue" />;
 }

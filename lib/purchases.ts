@@ -55,8 +55,10 @@ export type PurchaseOverallStatus = (typeof PURCHASE_OVERALL_STATUS_OPTIONS)[num
 export const PURCHASE_ATTACHMENT_TYPES = ["quote", "receipt"] as const;
 export type PurchaseAttachmentType = (typeof PURCHASE_ATTACHMENT_TYPES)[number];
 
-export const PURCHASE_MANAGER_ROLES = ["owner", "operations_manager", "sales_manager", "office_admin"] as const;
-export const PURCHASE_AP_ROLES = ["owner", "operations_manager", "sales_manager", "office_admin"] as const;
+export const MANAGER_ROLES = ["owner", "operations_manager", "sales_manager"] as const;
+export const AP_ROLES = ["owner", "office_admin"] as const;
+export const PURCHASE_MANAGER_ROLES = MANAGER_ROLES;
+export const PURCHASE_AP_ROLES = AP_ROLES;
 export const PURCHASE_ACCESS_ROLES = [
   "owner",
   "operations_manager",
@@ -80,11 +82,11 @@ export function canCreatePurchaseRequest(role: string | null | undefined) {
 }
 
 export function canManagerApprovePurchase(role: string | null | undefined) {
-  return (PURCHASE_MANAGER_ROLES as readonly string[]).includes(normalizeRole(role));
+  return (MANAGER_ROLES as readonly string[]).includes(normalizeRole(role));
 }
 
 export function canApApprovePurchase(role: string | null | undefined) {
-  return (PURCHASE_AP_ROLES as readonly string[]).includes(normalizeRole(role));
+  return (AP_ROLES as readonly string[]).includes(normalizeRole(role));
 }
 
 export function isPurchaseDepartment(value: unknown): value is PurchaseDepartment {
@@ -171,6 +173,10 @@ export function overallStatusFromReviews(
 
 export function isValidPurchaseOverallStatus(value: unknown): value is PurchaseOverallStatus {
   return typeof value === "string" && PURCHASE_OVERALL_STATUS_OPTIONS.includes(value as PurchaseOverallStatus);
+}
+
+export function isPurchaseCompletedForMaintenance(value: unknown) {
+  return typeof value === "string" && value.trim() === "completed";
 }
 
 export function isMechanicOrHigherRole(role: string | null | undefined): role is AccessRole {

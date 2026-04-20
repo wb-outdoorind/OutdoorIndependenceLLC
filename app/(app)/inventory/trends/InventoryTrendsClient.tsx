@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowser } from "@/lib/supabase/client";
 import { asStickyTableHeader } from "@/lib/tableStyles";
@@ -765,9 +766,9 @@ export default function InventoryTrendsClient() {
                           <td style={tdStyle}>{row.reference_type}</td>
                           <td style={tdStyle}>
                             {row.reference_type === "maintenance_log" ? (
-                              <a href="/maintenance" style={{ color: "inherit" }}>
+                              <Link href="/maintenance" style={{ color: "inherit" }}>
                                 {row.reference_id}
-                              </a>
+                              </Link>
                             ) : (
                               row.reference_id
                             )}

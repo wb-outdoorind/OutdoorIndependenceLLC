@@ -10,5 +10,5 @@ export default async function OpsPage() {
     redirect("/not-authorized?reason=ops_requires_manager_or_mechanic&next=/");
   }
 
-  redirect("/maintenance?section=operations");
+  redirect("/maintenance/operations");
 }

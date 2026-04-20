@@ -32,11 +32,11 @@ export default async function NewEstimatePage() {
 
   return (
     <EstimateShell
-      title="New Estimate"
-      description="Start with the client, lock in the property, and build the estimate from the same shared CRM backbone."
+      title="Estimate Entry"
+      description="Choose the client and property, define the work, and capture a simple estimate draft."
       backHref="/estimates"
       backLabel="Back to Estimates"
-      breadcrumb="Estimate Workspace > New Estimate"
+      breadcrumb="Estimate Workspace > Estimate Entry"
     >
       <EstimateEntryWorkspace
         clients={clientLoad.clients}

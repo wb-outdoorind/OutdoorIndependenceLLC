@@ -320,7 +320,7 @@ export default function NewPmLauncherClient({ role }: { role: string }) {
           <h1 style={{ marginBottom: 6 }}>Create Blank PM</h1>
           <div style={{ opacity: 0.78 }}>Choose PM type and asset, then start the inspection form.</div>
         </div>
-        <Link href="/maintenance?section=operations" style={buttonStyle()}>
+        <Link href="/maintenance/operations" style={buttonStyle()}>
           Back to Maintenance
         </Link>
       </div>
