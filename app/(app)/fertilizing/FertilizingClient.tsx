@@ -49,6 +49,9 @@ type FertServiceRecord = {
   applicator_license_number: string | null;
   service_date: string | null;
   equipment_used: string[] | null;
+  calibration_verified: boolean | null;
+  precipitation: string | null;
+  additional_notes: string | null;
   weather_temperature_f: number | string | null;
   weather_wind_speed_mph: number | string | null;
   weather_wind_direction: string | null;
@@ -81,6 +84,9 @@ type Props = {
 const ACRE_TO_SQFT = 43_560;
 const ACTIVE_SERVICE_STORAGE_KEY = "oi_fertilizing_active_service_v1";
 const SERVICE_FORM_DRAFT_STORAGE_KEY = "oi_fertilizing_service_form_draft_v1";
+const PRECIPITATION_OPTIONS = ["N/A", "Light", "Moderate", "Heavy"] as const;
+
+type CalibrationVerifiedOption = "" | "yes" | "no";
 
 type ServiceFormDraft = {
   servicePropertyId: string;
@@ -96,6 +102,9 @@ type ServiceFormDraft = {
   weatherObservedAt: string;
   weatherSource: string;
   equipmentUsed: string[];
+  calibrationVerified: CalibrationVerifiedOption;
+  precipitation: string;
+  additionalNotes: string;
   signatureMode: "typed" | "drawn";
   typedSignature: string;
   drawnSignatureData: string;
@@ -238,6 +247,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
   const [weatherSource, setWeatherSource] = useState("");
   const [equipmentUsed, setEquipmentUsed] = useState<string[]>([]);
   const [equipmentUsedDraft, setEquipmentUsedDraft] = useState("");
+  const [calibrationVerified, setCalibrationVerified] = useState<CalibrationVerifiedOption>("");
+  const [precipitation, setPrecipitation] = useState<string>("N/A");
+  const [additionalNotes, setAdditionalNotes] = useState("");
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [signatureMode, setSignatureMode] = useState<"typed" | "drawn">("typed");
   const [typedSignature, setTypedSignature] = useState("");
@@ -263,6 +275,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     setWeatherSource("");
     setEquipmentUsed([]);
     setEquipmentUsedDraft("");
+    setCalibrationVerified("");
+    setPrecipitation("N/A");
+    setAdditionalNotes("");
     setSignatureMode("typed");
     setTypedSignature("");
     setDrawnSignatureData("");
@@ -294,7 +309,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
         supabase
           .from("fert_service_records")
           .select(
-            "id,property_id,applicator_name,applicator_license_number,service_date,equipment_used,weather_temperature_f,weather_wind_speed_mph,weather_wind_direction,weather_conditions,weather_observed_at,weather_source,created_at"
+            "id,property_id,applicator_name,applicator_license_number,service_date,equipment_used,calibration_verified,precipitation,additional_notes,weather_temperature_f,weather_wind_speed_mph,weather_wind_direction,weather_conditions,weather_observed_at,weather_source,created_at"
           )
           .order("created_at", { ascending: false })
           .limit(30),
@@ -358,6 +373,18 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           setWeatherObservedAt(typeof parsed.weatherObservedAt === "string" ? parsed.weatherObservedAt : "");
           setWeatherSource(typeof parsed.weatherSource === "string" ? parsed.weatherSource : "");
           setEquipmentUsed(asStringList(parsed.equipmentUsed));
+          setCalibrationVerified(
+            parsed.calibrationVerified === "yes" || parsed.calibrationVerified === "no"
+              ? parsed.calibrationVerified
+              : ""
+          );
+          setPrecipitation(
+            typeof parsed.precipitation === "string" &&
+              PRECIPITATION_OPTIONS.includes(parsed.precipitation as (typeof PRECIPITATION_OPTIONS)[number])
+              ? parsed.precipitation
+              : "N/A"
+          );
+          setAdditionalNotes(typeof parsed.additionalNotes === "string" ? parsed.additionalNotes : "");
           setSignatureMode(parsed.signatureMode === "drawn" ? "drawn" : "typed");
           setTypedSignature(typeof parsed.typedSignature === "string" ? parsed.typedSignature : "");
           setDrawnSignatureData(typeof parsed.drawnSignatureData === "string" ? parsed.drawnSignatureData : "");
@@ -390,6 +417,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       weatherObservedAt,
       weatherSource,
       equipmentUsed,
+      calibrationVerified,
+      precipitation,
+      additionalNotes,
       signatureMode,
       typedSignature,
       drawnSignatureData,
@@ -410,6 +440,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
     weatherObservedAt,
     weatherSource,
     equipmentUsed,
+    calibrationVerified,
+    precipitation,
+    additionalNotes,
     signatureMode,
     typedSignature,
     drawnSignatureData,
@@ -790,6 +823,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
           weatherObservedAt,
           weatherSource,
           equipmentUsed,
+          calibrationVerified,
+          precipitation,
+          additionalNotes,
           signatureMode,
           typedLegalSignature: typedSignature,
           drawnSignatureData,
@@ -801,6 +837,7 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
         serviceRecordId?: string;
         pdfFilename?: string;
         pdfBase64?: string;
+        warning?: string;
         email?: { configured?: boolean; attempted?: number; sent?: number; failed?: number };
       };
       if (!response.ok) throw new Error(json.error || "Failed to submit service record.");
@@ -824,7 +861,8 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       const emailLine = emailConfigured
         ? ` Email sent ${Number(json.email?.sent ?? 0)} of ${Number(json.email?.attempted ?? 0)}.`
         : " Email not configured (missing Resend key).";
-      setSuccess(`Chemical tracking record submitted.${emailLine}`);
+      const warningLine = json.warning ? ` ${json.warning}` : "";
+      setSuccess(`Chemical tracking record submitted.${emailLine}${warningLine}`);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit service record.");
@@ -848,6 +886,9 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
       weatherObservedAt,
       weatherSource,
       equipmentUsed,
+      calibrationVerified,
+      precipitation,
+      additionalNotes,
       signatureMode,
       typedSignature,
       drawnSignatureData,
@@ -1502,6 +1543,36 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
             )}
           </label>
           <label style={labelStyle}>
+            Calibration Verified
+            <select
+              value={calibrationVerified}
+              onChange={(e) => setCalibrationVerified(e.target.value as CalibrationVerifiedOption)}
+              style={inputStyle}
+            >
+              <option value="">Select</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+          <label style={labelStyle}>
+            Precipitation
+            <select value={precipitation} onChange={(e) => setPrecipitation(e.target.value)} style={inputStyle}>
+              {PRECIPITATION_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={labelStyle}>
+            Additional Notes
+            <textarea
+              value={additionalNotes}
+              onChange={(e) => setAdditionalNotes(e.target.value)}
+              style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}
+            />
+          </label>
+          <label style={labelStyle}>
             Signature Mode
             <select value={signatureMode} onChange={(e) => setSignatureMode(e.target.value as "typed" | "drawn")} style={inputStyle}>
               <option value="typed">Typed legal signature</option>
@@ -1728,6 +1799,11 @@ export default function FertilizingClient({ fullName: signedInName }: Props) {
                 <div style={{ opacity: 0.82, fontSize: 12 }}>
                   Weather: {row.weather_conditions || "-"} · {row.weather_temperature_f ?? "-"} F ·{" "}
                   {row.weather_wind_speed_mph ?? "-"} mph {row.weather_wind_direction || ""}
+                </div>
+                <div style={{ opacity: 0.82, fontSize: 12 }}>
+                  Calibration:{" "}
+                  {row.calibration_verified === null ? "-" : row.calibration_verified ? "Yes" : "No"} · Precipitation:{" "}
+                  {row.precipitation || "-"}
                 </div>
                 </div>
               );
